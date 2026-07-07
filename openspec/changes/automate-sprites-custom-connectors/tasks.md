@@ -1,67 +1,75 @@
-## 1. Discovery And Trace Capture
+## 0. Blocking Architecture Check
 
-- [x] 1.1 Capture the successful test diff and connector-detail URL transition using only dummy credentials. (Live spike 2026-07-06: `bg-violet-50` + `hero-check-circle-mini` + "HTTP 200 — Connection OK"; create redirects to the gateway connection id; detail page uses a separate detail id.)
-- [x] 1.2 Document the required dashboard selectors, `phx-*` attributes, field names, validated form frame shape, success states, and resulting connector-detail URL shape. (See design.md "Verified dashboard automation".)
-- [x] 1.3 Verify whether access policy by Sprite id and Sprite tag is configurable during creation or only after creation. (Post-creation only, via `save_access_policy`: `name_prefix`, `policy_label` labels, `allow_all`. Create has no scoping input and defaults to `allow_all = true`.)
-- [x] 1.4 Verify which supported Sprites REST endpoints can list, fetch, update access policy, and delete Custom API connections. (Docs confirm `PATCH`/`PUT /v1/oauth/connections/{id}` with `access_policy`; REST create only for preset providers. Delete verb and the `{id}` scheme still to confirm live — see 1.7.)
-- [ ] 1.7 Live-check with the Sprites token which id `PATCH`/`GET`/delete `/v1/oauth/connections/{id}` accepts — gateway connection id vs dashboard detail id — and confirm the delete verb/path.
-- [x] 1.5 Verify whether the gateway path forwards query strings and streams request/response bodies well enough for git-sized payloads. (Egress-proxy live test: header injection, query strings, and POST bodies forward correctly; large/streaming git payloads still to be load-tested.)
-- [ ] 1.6 Verify whether Sprite labels can be set at Sprite creation via the Sprites API and are live before the first callback (needed for the label-scoping fallback when the Sprite id is unknown at mint time).
+- [ ] 0.1 Confirm whether the Sprites gateway forwards a verifiable Sprite identity to the upstream (our Worker). This decides multiplexed-single-connector vs per-session connectors and gates the rest of the design.
 
-## 2. Data Model
+## 1. Discovery (mostly done)
 
-- [ ] 2.1 Add D1 migrations for connector metadata (including BOTH the gateway connection id and the dashboard detail id), environment links, provisioning attempts, and expiring pending secret material.
-- [ ] 2.2 Add repository methods for creating pending connectors, recording provisioning attempts, completing connector provisioning, recording the verified access-policy summary, and marking terminal failures.
-- [ ] 2.3 Add a cleanup path that deletes pending secret material after success, terminal failure, or expiry.
-- [ ] 2.4 Add Zod schemas and internal types for connector definitions, auth methods, access-policy scopes (name-prefix, labels, allow-all), and provisioning states.
+- [x] 1.1 Capture the dashboard test success state and connector-detail transition (spike 2026-07-06: `bg-violet-50` + `hero-check-circle-mini` + "HTTP 200 — Connection OK"; two id spaces).
+- [x] 1.2 Document dashboard selectors, `phx-*` events, field names, success states.
+- [x] 1.3 Confirm access scoping is post-creation only; default is deny-all.
+- [x] 1.4 Confirm REST endpoints: `PATCH`/`PUT /v1/oauth/connections/{id}` sets `access_policy`; REST create only covers preset providers.
+- [x] 1.5 Confirm the transparent egress proxy works (header injection, query + POST body forwarding; iptables REDIRECT captures curl/Node/Python).
+- [ ] 1.6 Confirm Sprite labels can be set at Sprite creation via the Sprites API and are live before first egress.
+- [ ] 1.7 Live-check which id the REST connection endpoints take (gateway connection id vs detail id) and the delete verb/path.
+- [ ] 1.8 Measure whether the gateway path streams large/chunked bodies well enough for git pack data (historical read-latency blocker).
+- [ ] 1.9 Enumerate Sprite runtimes that ignore the system trust store (static-linked, pinned certs) and decide handling.
 
-## 3. Provisioner Boundary
+## 2. Data Model (D1)
 
-- [ ] 3.1 Define the job payload and callback contract between the API server and dashboard provisioner.
-- [ ] 3.2 Implement a headless Playwright provisioner from the proven spike flow (launch with a provisioner-only Sprites dashboard session).
-- [ ] 3.3 Add dashboard shape preflight checks for the Custom API form (form id, `phx-*` events, field names, success-state markup) before any secret is entered.
-- [ ] 3.4 Implement form fill, connection test, wait-for-success (`bg-violet-50` + `hero-check-circle-mini` + "Connection OK" + Create enabled), create submission, and extraction of BOTH ids.
-- [ ] 3.5 Implement atomic create (browser) → scope via REST `PATCH /v1/oauth/connections/{id}` `access_policy` → GET verify (`allow_all == false`, only intended scope). Fail closed and delete the connector if scoping or verification fails.
-- [ ] 3.6 Redact tokens, cookies, CSRF values, LiveView session payloads, and dashboard storage state from all logs and traces.
+- [ ] 2.1 `secrets`/connectors table: `id`, `name`, encrypted value, allowed hosts (multi-host), provider/auth shape.
+- [ ] 2.2 Environment ↔ secret link (FK / join) so only linked environments can inject a secret.
+- [ ] 2.3 Connector metadata: gateway connection id AND dashboard detail id, org, base URL, auth method, access-policy summary, provisioning status/attempts.
+- [ ] 2.4 Encryption at rest + minimal-plaintext-lifetime handling; Zod schemas for secrets, auth methods, access-policy scopes, provisioning states.
 
-## 4. API Integration
+## 3. Sprite-Side Transparent Proxy
 
-- [ ] 4.1 Add authenticated API routes for creating/listing/updating/deleting Cloude connector metadata.
-- [ ] 4.2 Enqueue dashboard provisioning jobs after creating pending connector rows.
-- [ ] 4.3 Return pending/ready/failed connector status to clients without returning plaintext secrets.
-- [ ] 4.4 Add idempotency handling (marker in name/description) so retries do not create duplicate user-facing connectors when a previous dashboard create succeeded.
+- [ ] 3.1 Bundle/stage an nft/iptables toolchain into the Sprite image (it lacks one and cannot `apt-get`); fail closed if absent.
+- [ ] 3.2 Generate a per-Sprite CA and install into the system store + per-runtime stores (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, ...).
+- [ ] 3.3 Generalize `sprite-egress-proxy.mjs` from a single target to a destination routing table (host → gateway URL | pass-through | block) with a fail-closed default; strip client auth.
+- [ ] 3.4 Install iptables/nft OUTPUT REDIRECT of tcp/443 to the proxy, excluding the gateway host and localhost so the proxy's own upstream calls aren't intercepted.
+- [ ] 3.5 Lifecycle: start on provision, rotate/expire CA and rules with the session, tear down on session end.
 
-## 5. `mintConnector` Primitive (New)
+## 4. Worker Internal Egress Route
 
-- [ ] 5.1 Implement `mintConnector({baseApiUrl, token, authMethod, headerPrefix, testUrl, scope}) -> {gatewayConnectionId, detailId, policySummary}` on the provisioner: run the full test→create→scope→verify flow, delete-on-failure, and throw on any failure. One connector per call, on demand.
-- [ ] 5.2 Expose the Worker→provisioner RPC/job call so the Worker can invoke `mintConnector` as if it were a REST route (the provisioner IS the missing create API).
-- [ ] 5.3 Add REST delete for teardown; reconcile orphans from crashed sessions.
+- [ ] 4.1 Route behind the gateway-injected shared-secret check; reject anything without it; rotate the shared secret.
+- [ ] 4.2 Resolve calling Sprite → session/environment from the gateway-forwarded sprite id.
+- [ ] 4.3 Parse the requested destination from `/egress/…`, match a custodied secret for the session/environment, decrypt, inject the real header/rewrite, forward.
+- [ ] 4.4 SSRF protection: host allowlist, block private/link-local/metadata ranges, no internal redirects, no internal error reflection.
 
-## 6. Sprite→Worker Per-Session Proxy (New)
+## 5. Connector Provisioning (`mintConnector`)
 
-- [ ] 6.1 Add a Worker session-callback health endpoint that returns 200 iff `Authorization: Bearer <secret>` validates for the session; use it as the connector `test_url`.
-- [ ] 6.2 Mint per-session secret and store its hash in D1 before provisioning; call `mintConnector` scoped to the session Sprite; hand the Sprite ONLY the gateway connection-id URL, never the secret or the raw Worker URL.
-- [ ] 6.3 Call `mintConnector` inline on session create; add the `connector-pending` session state only if measured session-start latency requires it (block Sprite callbacks until verified-scoped ready).
-- [ ] 6.4 Delete the per-session connector on session end.
+- [ ] 5.1 Implement `mintConnector({...}) -> {gatewayConnectionId, detailId, policySummary}`: browser create → REST `PATCH` scope (label + `allowed_endpoints`) → REST GET verify (`allow_all == false`) → delete-on-failure.
+- [ ] 5.2 Run it from the api-server Worker via Cloudflare Browser Rendering (`@cloudflare/playwright`), injecting the Sprites dashboard `storageState`; Fly.io Machine fallback.
+- [ ] 5.3 Preflight dashboard shape/drift check (form id, `phx-*` events, field names, success markup) before entering any secret; provisioner-only auth with reauth-required status.
+- [ ] 5.4 Create the internal egress connector (rare, off the session hot path); redact tokens/cookies/CSRF/storageState from logs.
+- [ ] 5.5 REST delete + reconciliation, including re-asserting `allow_all == false` on tracked connectors.
 
-## 7. Access Policy And Session Attachment
+## 6. Webhook Cutover
 
-- [ ] 7.1 Scope each minted connector to its session Sprite id (preferred) or a single unguessable per-session label, via REST `PATCH /v1/oauth/connections/{id}` `access_policy`; optionally tighten with `allowed_endpoints`.
-- [ ] 7.2 Ensure session provisioning applies required Sprite labels/ids before a connector is used.
-- [ ] 7.3 Store connector ids in repo environment/session snapshots only after provisioning reaches verified-scoped ready state.
-- [ ] 7.4 Prevent sessions from starting with required connectors that are pending, failed, paused, drifted, or still at `allow_all`.
+- [ ] 6.1 Route webhook callbacks through the egress path; Worker validates shared secret + sprite→session instead of a per-Sprite token.
+- [ ] 6.2 Retire the extractable webhook token behind a flag once proven.
 
-## 8. Reconciliation And Drift Handling
+## 7. Git
 
-- [ ] 8.1 Reconcile D1 connector rows against Sprites connection state using supported REST APIs, including re-asserting `allow_all == false` on every tracked connector.
-- [ ] 8.2 Mark missing or inaccessible Sprites connectors unavailable and block new dependent sessions.
-- [ ] 8.3 Add dashboard drift detection that pauses provisioning when selectors/events/success states change.
-- [ ] 8.4 Add operational status for dashboard reauthentication required.
+- [ ] 7.1 Route git HTTPS (info/refs, git-upload-pack fetch, git-receive-pack push) through the egress path; inject credential at the Worker.
+- [ ] 7.2 Keep branch validation at the Worker git-proxy layer.
+- [ ] 7.3 Solve read latency without revoke-after-clone (keep injected credential for the session now that it's non-extractable, and/or optimize proxy streaming); enable pull + push.
+- [ ] 7.4 GitHub access (gh CLI / MCP / skill) over the same path.
 
-## 9. Tests And Validation
+## 8. User-Defined Secrets
 
-- [ ] 9.1 Add repository tests for connector metadata (both id spaces), pending secret cleanup, and provisioning status transitions.
-- [ ] 9.2 Add provisioner unit tests around selector detection, success-state detection, scope-verify, and redaction helpers.
-- [ ] 9.3 Add integration tests with a mocked dashboard driver for create success, test failure, auth expiry, drift failure, and allow-all-not-scoped fail-closed.
-- [ ] 9.4 Add tests for the Sprite→Worker mint (health-endpoint gating, inline + pending paths, teardown).
-- [ ] 9.5 Run `pnpm build`, `pnpm lint`, `pnpm typecheck`, and relevant package tests.
+- [ ] 8.1 Definition UI/API for users to declare secrets (name, value, allowed hosts, environments).
+- [ ] 8.2 Store encrypted in D1; inject at the Worker egress handler by destination host; never expose to the Sprite.
+
+## 9. Synchronous Provisioning
+
+- [ ] 9.1 Make proxy/CA/iptables/routing install + per-session secret setup a synchronous, fail-closed provisioning step; no async connector-pending.
+- [ ] 9.2 Attach required Sprite labels before egress; block session start if any step fails.
+
+## 10. Tests And Validation
+
+- [ ] 10.1 Repo/D1 tests: secrets custody, environment linking, connector metadata (both ids), status transitions.
+- [ ] 10.2 Provisioner tests: shape/success detection, scope-verify, redaction, fail-closed on allow-all/verify failure.
+- [ ] 10.3 Egress-proxy tests: routing table, auth stripping, CA trust, fail-closed default, SSRF guards.
+- [ ] 10.4 Webhook + git cutover tests (impersonation blocked, pull + push, branch validation, read latency).
+- [ ] 10.5 Run `pnpm build`, `pnpm lint`, `pnpm typecheck`, and relevant package tests.

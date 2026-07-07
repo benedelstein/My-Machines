@@ -1,36 +1,146 @@
 ## ADDED Requirements
 
+### Requirement: Secrets never enter the Sprite runtime
+
+The system SHALL keep webhook, git, and user-supplied credentials out of the Sprite
+runtime and inject them only at a gateway/Worker after the caller is proven to be
+the authorized Sprite.
+
+#### Scenario: Secret is required for an outbound call
+
+- **WHEN** a Sprite makes an outbound request that needs a credential (webhook,
+  git, or a user API)
+- **THEN** the credential is injected downstream of the Sprite and is never present
+  in the Sprite's env, files, process args, or trust-store-readable material
+
+#### Scenario: Sprite is compromised
+
+- **WHEN** a process inside the Sprite reads all available Sprite state
+- **THEN** it obtains no reusable credential for webhook, git, or user APIs
+
+### Requirement: Transparent Sprite-side egress proxy
+
+The system SHALL run a Sprite-local transparent proxy that captures outbound HTTPS,
+strips any client-supplied authorization, and rewrites requests to a connector
+gateway according to a destination routing table, failing closed for unrouted
+destinations.
+
+#### Scenario: Outbound HTTPS with no proxy configuration
+
+- **WHEN** a Sprite process makes an HTTPS request without proxy environment
+  variables
+- **THEN** the request is redirected to the local proxy, MITM-terminated with the
+  Sprite-trusted local CA, and rewritten to the configured gateway URL
+
+#### Scenario: Destination has no route
+
+- **WHEN** a Sprite requests a destination not present in the routing table
+- **THEN** the proxy blocks it (or passes it through unmodified per policy) and
+  never forwards it with an injected secret
+
+### Requirement: Worker egress secret custody and injection
+
+The system SHALL provide a Worker egress route that validates the gateway-injected
+shared secret, resolves the calling Sprite to its session/environment, matches the
+requested destination to a custodied secret linked to that environment, and injects
+the real credential.
+
+#### Scenario: Authorized egress call
+
+- **WHEN** the egress route receives a request carrying the valid gateway-injected
+  shared secret for a resolvable Sprite/session, targeting a destination with a
+  linked custodied secret
+- **THEN** the Worker decrypts that secret, injects it, and forwards to the upstream
+
+#### Scenario: Missing or invalid shared secret
+
+- **WHEN** a request reaches the egress route without the valid gateway-injected
+  shared secret
+- **THEN** the Worker rejects it and injects no credential
+
+### Requirement: Egress SSRF protection
+
+The system SHALL restrict Worker egress forwarding to permitted destinations and
+MUST block private, link-local, and cloud-metadata address ranges and internal
+redirects.
+
+#### Scenario: Sprite requests an internal or metadata address
+
+- **WHEN** an egress request targets a private/link-local/metadata address or would
+  redirect to an internal host
+- **THEN** the Worker blocks the request and does not forward it
+
+### Requirement: Webhook impersonation prevention
+
+The system SHALL accept a session webhook callback only when it arrives via the
+gateway with a valid shared secret and a Sprite identity that maps to that session.
+
+#### Scenario: Forged webhook from outside the gateway
+
+- **WHEN** a webhook callback for a session arrives without passing through the
+  sprite-scoped gateway with the valid shared secret
+- **THEN** the Worker rejects it
+
+### Requirement: Git access without extractable credentials
+
+The system SHALL route git fetch and push through the egress path with the git
+credential injected at the Worker, retain branch validation, and enable pull and
+push without leaving an extractable token in the Sprite.
+
+#### Scenario: Agent pulls and pushes
+
+- **WHEN** the agent performs git fetch and push
+- **THEN** the operations succeed through the egress path with the credential
+  injected downstream, branch validation still applied, and no reusable git token
+  present in the Sprite
+
 ### Requirement: Dashboard-backed Custom API connector creation
 
-The system SHALL provide an internal provisioning workflow that creates Sprites
-Custom API connectors through the Sprites dashboard flow when public REST create
-support is unavailable.
+The system SHALL create Sprites Custom API connectors through the dashboard flow
+(no public REST create exists) and scope them via REST, failing closed if creation
+or scoping cannot complete.
 
-#### Scenario: Create connector through dashboard flow
+#### Scenario: Create and scope the internal connector
 
-- **WHEN** an authorized Cloude user submits a valid Custom API connector
-  definition with a plaintext token
-- **THEN** the system creates a pending connector record and provisions a
-  Sprites Custom API connector through the dashboard-backed workflow
+- **WHEN** the system provisions the internal egress connector
+- **THEN** it creates the connector via the dashboard flow and scopes it via
+  `PATCH /v1/oauth/connections/{id}` so only labeled session Sprites may use it
 
-#### Scenario: Dashboard create unavailable
+#### Scenario: Create or scope fails
 
-- **WHEN** the dashboard flow cannot be reached or its expected shape is missing
-- **THEN** the system marks the connector provisioning attempt as failed or
-  paused without exposing the secret to a Sprite runtime
+- **WHEN** the dashboard flow or the REST scope/verify step fails
+- **THEN** the system deletes any partial connector and records a sanitized failure
+  without exposing a secret to a Sprite runtime
+
+### Requirement: Connector access scoped to session Sprites
+
+The system SHALL scope each provisioned connector by Sprite id or Sprite label and
+MUST verify the policy is not `allow_all` before marking it ready.
+
+#### Scenario: Scope verified before use
+
+- **WHEN** a connector finishes provisioning
+- **THEN** the system confirms the access policy limits use to the intended Sprite
+  id or label and that `allow_all` is disabled
+
+### Requirement: Connector and secret metadata persistence
+
+The system SHALL persist connector metadata (gateway connection id and dashboard
+detail id, org, base URL, auth method, access-policy summary, status) and user
+secret metadata (name, allowed hosts, linked environments) in D1, storing secret
+values only encrypted.
+
+#### Scenario: Successful provisioning persists metadata
+
+- **WHEN** provisioning completes
+- **THEN** the system stores both connector ids and non-secret metadata, and stores
+  any secret value encrypted at rest
 
 ### Requirement: Provisioner-only dashboard authentication
 
 The system SHALL keep Sprites dashboard authentication material scoped to the
 connector provisioner and MUST NOT expose dashboard cookies, storage state, CSRF
-tokens, or session payloads to clients, Sprite runtimes, logs, or D1 metadata
-tables.
-
-#### Scenario: Provisioner authenticates dashboard session
-
-- **WHEN** the provisioner creates a connector
-- **THEN** it uses provisioner-only dashboard authentication material to access
-  the Sprites dashboard
+tokens, or session payloads to clients, Sprite runtimes, logs, or D1.
 
 #### Scenario: Dashboard auth expires
 
@@ -38,109 +148,14 @@ tables.
 - **THEN** connector provisioning stops with a reauthentication-required status
   instead of falling back to raw secret injection
 
-### Requirement: Connector metadata persistence
+### Requirement: Synchronous fail-closed provisioning
 
-The system SHALL persist Sprites connector metadata in D1 after provisioning,
-including the Sprites connection id, provider type, base API URL, auth method
-metadata, linked environment ids, access-policy summary, provisioning status,
-and sanitized provisioning errors.
+The system SHALL install the egress proxy, CA, redirect rules, routing table, and
+per-session secrets synchronously as part of session provisioning, and MUST fail
+session creation closed if any step does not complete.
 
-#### Scenario: Successful provisioning persists metadata
+#### Scenario: A provisioning step fails
 
-- **WHEN** the dashboard-backed workflow creates a Sprites connector
-- **THEN** the system stores the resulting Sprites connection id and metadata in
-  D1 without storing the plaintext token
-
-#### Scenario: Failed provisioning records safe error
-
-- **WHEN** connector provisioning fails after a pending row exists
-- **THEN** the system records a sanitized error and status without storing or
-  logging the plaintext token
-
-### Requirement: Plaintext secret lifetime
-
-The system SHALL retain plaintext user API secrets only for the minimum time
-needed to create the Sprites connector and MUST delete any encrypted pending
-secret material after success or terminal failure.
-
-#### Scenario: Secret is submitted for provisioning
-
-- **WHEN** a user submits a plaintext API token for a Custom API connector
-- **THEN** the system makes it available only to the provisioning workflow and
-  not to the Sprite runtime
-
-#### Scenario: Connector creation completes
-
-- **WHEN** connector provisioning succeeds or reaches a terminal failure
-- **THEN** the system deletes the pending secret material and retains only
-  non-secret connector metadata
-
-### Requirement: Sprite-scoped connector access policy
-
-The system SHALL configure each provisioned Sprites connector with an access
-policy that limits use to the intended Sprite id or Sprite tag.
-
-#### Scenario: Session-scoped connector
-
-- **WHEN** a connector is intended for a single session Sprite
-- **THEN** the provisioner configures the connector policy so only that Sprite
-  can call the connector
-
-#### Scenario: Tag-scoped connector
-
-- **WHEN** a connector is intended for a dynamic group of session Sprites
-- **THEN** the provisioner configures the connector policy by a controlled tag
-  and session provisioning ensures intended Sprites carry that tag before use
-
-### Requirement: Dashboard shape drift detection
-
-The system SHALL verify the expected Sprites dashboard form shape before
-attempting connector creation and MUST fail closed when required fields, events,
-or success states are missing.
-
-#### Scenario: Expected fields are present
-
-- **WHEN** the dashboard form includes the expected Custom API fields and
-  LiveView events
-- **THEN** the provisioner may proceed with test and create actions
-
-#### Scenario: Expected fields are missing
-
-- **WHEN** the dashboard form no longer exposes required fields or events
-- **THEN** the provisioner records dashboard drift and does not submit the
-  connector secret
-
-### Requirement: Connection test before create
-
-The system SHALL perform the dashboard Custom API connection test before
-submitting connector creation and MUST create the connector only after the
-dashboard reports a successful test.
-
-#### Scenario: Test succeeds
-
-- **WHEN** the connection test succeeds for the supplied base URL, token, auth
-  method, and test URL
-- **THEN** the provisioner submits the dashboard create action
-
-#### Scenario: Test fails
-
-- **WHEN** the connection test fails
-- **THEN** the provisioner records the sanitized failure and does not create the
-  connector
-
-### Requirement: Reconciliation with Sprites connector state
-
-The system SHALL reconcile D1 connector metadata with Sprites connector state
-using supported Sprites REST APIs where available.
-
-#### Scenario: Created connector is fetched
-
-- **WHEN** dashboard-backed creation returns or reveals a Sprites connection id
-- **THEN** the system fetches the connection through supported APIs when
-  available and stores the observed state
-
-#### Scenario: Connector missing during reconciliation
-
-- **WHEN** reconciliation cannot find a D1-tracked Sprites connector
-- **THEN** the system marks the connector unavailable and prevents new sessions
-  from depending on it
+- **WHEN** any secrets-proxy provisioning step fails during session creation
+- **THEN** the session does not start and no Sprite runs with secrets in the clear
+  or an unsecured egress path
