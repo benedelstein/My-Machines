@@ -1,434 +1,314 @@
 ## Context
 
-This is the design for the **Sprite secrets proxy**: a way for session Sprites to
-reach outside services (the Cloude Worker webhook, the git proxy, GitHub, and
-user-supplied third-party APIs) without any usable secret ever living inside the
-Sprite runtime. Sprites Custom API connectors are one building block; they are not
-the whole design.
+This is the design for the **Sprite secrets proxy**. The goal: no usable webhook or
+git credential ever lives inside a Sprite, and the Sprite's egress is transparently
+routed through Sprites connectors so that credentials are injected outside the
+Sprite and a compromised Sprite cannot impersonate the session.
+
+v1 builds two things together:
+
+1. **Per-session Custom API connectors** for the webhook and git credentials.
+2. **A transparent Sprite-side egress proxy** (local MITM + iptables/nft) that
+   reroutes the Sprite's outbound HTTPS to those connectors — the general
+   "arbitrary connector URL" proxy mechanism, with all its runtime complications.
+
+Explicitly **out of scope for v1**: the user-facing part — letting users define
+their own secrets (OpenAI, Slack, ...) and storing/managing them. The transparent
+proxy is built generically so those slot in later as additional routing entries,
+but we do not build the definition UI, storage, or Worker secret custody now.
 
 ### Current solution and why it is not enough
 
-Today a Sprite is handed bearer tokens directly — a webhook callback token and a
-git proxy token — as runtime material. Both are **extractable**: the agent (or
-anything that compromises the Sprite) can read them and then:
+Today a Sprite is handed a webhook callback token and a git proxy token as runtime
+material. Both are **extractable**: anything compromising the Sprite can read them
+and forge webhook callbacks impersonating the Sprite, or drive git from anywhere.
+The git read path is also degraded (revoke-after-clone, because chunked pulls
+through the proxy were too slow). The fix is to remove the secrets from the Sprite
+and inject them at the connector gateway after Fly authorizes the specific Sprite.
 
-- POST forged webhook callbacks to the Worker while impersonating the Sprite, or
-- drive git operations with the proxy token from anywhere.
+## Decision: one connector per session (no multiplexing)
 
-The git read path is also degraded today: the initial clone uses a short-lived
-GitHub read token that is then revoked, and the proxy was too slow for chunked
-pulls, so the agent effectively cannot pull itself up to date or push cleanly.
+A single connector reused across sessions **does not work** — settled, not open.
+The Sprites gateway does **not** forward a trustworthy Sprite identity to the
+upstream (tested), so with one shared connector the Worker could not tell which
+session called. Therefore each session mints its own connector(s), and identity is
+carried by a **per-session shared secret**:
 
-The goal: move every secret out of the Sprite and behind a proxy that (a) proves
-the caller is the specific authorized Sprite and (b) injects the real credential
-only after that check, so a leaked-from-the-Sprite value is worthless.
+- At provisioning, generate a per-session secret the Worker stores in D1 keyed to
+  the session.
+- The connector's injected credential **is** that secret; its `base_api_url` is our
+  Worker endpoint; its access policy is scoped to that session's Sprite.
+- When the Sprite calls the connector, Fly injects the secret; the Worker looks it
+  up, which both **identifies the session** and **proves the call came through the
+  sprite-scoped gateway**. The per-session secret replaces the missing sprite-id
+  header.
 
-### What "secret never enters the Sprite" buys, precisely
+One per-session connector can serve both webhook and git by path (the gateway
+forwards `base_api_url + <path after the connection id>`). Use one where possible;
+split into two if webhook and git need different upstreams.
 
-A connector / egress gateway authorizes by Sprite identity and access policy
-before forwarding, and injects the credential on the far side. So:
+## Decision: a transparent egress proxy is the routing mechanism
 
-- Extracting from the Sprite yields nothing — there is nothing to extract.
-- Only the scoped Sprite can produce an authorized call, so webhook/git
-  impersonation stops.
-- Later, user-supplied secrets (OpenAI, Slack, etc.) get the same treatment: the
-  user's key is injected at the proxy and never handed to the Sprite.
+Rather than reconfigure every tool in the Sprite to call connector URLs, the Sprite
+runs a **local transparent proxy** and iptables/nft **redirects** its outbound 443
+into it. The proxy MITM-terminates TLS with a Sprite-trusted local CA, reads the
+plaintext request, looks the destination up in a **routing table**, strips the
+client's auth header, and **rewrites the request to the matching per-session
+connector gateway URL**. Fly injects the real secret; the Worker verifies it.
 
-## Two feasibility spikes, both proven
+Why transparent instead of direct URL config:
 
-### Spike A — Sprite-side transparent egress proxy (proven)
+- Captures **all** egress; the agent cannot bypass the connector by calling a URL
+  directly or by using a tool we didn't reconfigure.
+- It is the general mechanism for **arbitrary connector URLs** (what the user wants
+  now), so webhook and git are just the first two routing entries; future user
+  secrets are more entries, no new mechanism.
+- The agent sees normal URLs and no secret; the proxy and gateway do the rest.
 
-Confirmed a Sprite can transparently route its own HTTPS egress through a gateway
-that injects credentials, with no secret and no explicit proxy config in the
-Sprite. Reference implementation:
-`services/api-server/scripts/sprite-egress-proxy.mjs` +
-`test-sprite-egress-proxy.ts`.
+This is proven: `services/api-server/scripts/sprite-egress-proxy.mjs` +
+`test-sprite-egress-proxy.ts` demonstrated transparent interception, MITM, auth
+stripping, gateway rewrite, and header injection end to end. Production generalizes
+it from a single hardcoded target to a routing table and adds the provisioning and
+toolchain plumbing below.
 
-- Local Node proxy runs two intake paths: an explicit `CONNECT` proxy and a
-  transparent TLS server; both MITM with a per-Sprite local CA (per-host leaf
-  certs via SNI), read the plaintext HTTP request, and **rewrite it to the
-  gateway URL** (`gatewayBase + originalPath + query`).
-- It **strips the client `authorization` header** and lets the gateway inject the
-  real one — the Sprite sends no credential.
-- Trust: the local CA is installed into the system store
-  (`update-ca-certificates`) and per-runtime stores (`NODE_EXTRA_CA_CERTS`,
-  `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE`). Before trust install, curl correctly
-  rejected the MITM (good — fail-closed).
-- Transparent capture proven for curl, Node `fetch`, and Python `requests`,
-  including calls with **no** proxy env vars (via iptables REDIRECT).
-- Gateway header injection, query-string forwarding, and POST-body forwarding all
-  work end to end.
+## The transparent proxy in detail (and every complication)
 
-Runtime constraints found (Fly Sprite):
+### 1. Egress redirection (iptables/nft)
 
-- The Sprite has `CAP_NET_ADMIN`, so iptables/nft REDIRECT of outbound 443 is
-  permitted.
-- But `nft`/`iptables` are **not installed** by default and `apt-get` fails (the
-  Sprite is not uid 0). Workaround proven: stage the `nftables` `.deb`s into
-  `/tmp` and run the extracted `nft` with `LD_LIBRARY_PATH`. Production must
-  **bundle or stage an nft/iptables toolchain artifact** (e.g. from R2) during
-  Sprite provisioning.
-- The proxy itself must reach `api.sprites.dev` (or our Worker) **without** being
-  intercepted — the REDIRECT/NO_PROXY rules must exclude the gateway host.
+- Redirect outbound `tcp dport 443` from the Sprite's processes to the local proxy
+  port with an OUTPUT NAT REDIRECT rule. The Sprite has **`CAP_NET_ADMIN`**, so
+  REDIRECT is permitted (verified).
+- **Complication — the toolchain is missing.** `nft`/`iptables` are **not installed**
+  by default and `apt-get` fails because the Sprite is **not uid 0**. Proven
+  workaround: download/extract the `nftables` `.deb`s into `/tmp` and run the
+  extracted `nft` with `LD_LIBRARY_PATH`. Production must **bundle the nft/iptables
+  toolchain in the Sprite image**, or stage it from R2 during provisioning, and
+  **fail closed** if it is absent (no redirect ⇒ do not start the Sprite).
+- **Complication — don't intercept the gateway.** The proxy's own upstream calls to
+  the Sprites gateway (`api.sprites.dev`) must **not** be redirected, or it loops.
+  Exclude the gateway host/IPs from the REDIRECT rule (and set `NO_PROXY` for the
+  explicit-proxy path). Resolve and pin the gateway IPs at provisioning.
 
-### Spike B — dashboard connector automation (proven, 2026-07-06)
+### 2. TLS interception + local CA trust
 
-Drove the real Sprites dashboard with the browser tools (dummy `httpbin.org`
-creds) and confirmed the whole create flow, because Sprites has **no REST create**
-for Custom API connectors (confirmed by Fly support: `POST
-/v1/oauth/connections/api_key` only takes `provider` + `api_key`, not the custom
-base-URL / auth-method fields).
+- The proxy runs a transparent TLS server (and an explicit `CONNECT` proxy for
+  tools that honor proxy env). It mints **per-host leaf certificates via SNI**,
+  signed by a **per-Sprite local CA**.
+- Install the CA into the **system trust store** (`update-ca-certificates`) **and**
+  the per-runtime stores that don't use it: `NODE_EXTRA_CA_CERTS` (Node),
+  `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE` (Python/OpenSSL), and equivalents.
+- **Complication — runtimes that ignore the system store.** Statically linked
+  binaries, Go's built-in roots, and cert-pinned clients will reject the MITM.
+  Enumerate the runtimes the agent actually uses; set env overrides where they
+  exist; document the unsupported cases. Before trust install the MITM is correctly
+  **rejected** (verified) — good, it fails closed rather than leaking plaintext.
+- Rotate/expire the CA with the session; never persist it beyond teardown.
 
-- Form at `/account/:org/connectors/new?type=custom_api`: id `custom-api-form`,
-  `phx-change="validate_custom_api_form"`, `phx-submit="create_custom_api"`,
-  auth-method values `header`/`url_path`/`query_param`/`custom_header`; fields
-  `base_api_url`, `name` (auto from host), `description`, `access_token`,
-  `auth_header_prefix` (default "Bearer"), `refresh_token`, `icon`, `test_url`.
-- **Test gates create**: "Test Connection" (`test_custom_api`) must return the
-  `HTTP 200 — Connection OK` state (`div.bg-violet-50` + `hero-check-circle-mini`)
-  before the `Create Connection` submit enables.
-- Create redirects to the **gateway connection id** (used at
-  `/v1/gateway/custom_api/<id>`); the dashboard **detail page** uses a *separate*
-  detail id. Store both.
-- **Access defaults to deny-all** (no sprites) — corroborated by the panel copy,
-  the REST docs ("empty or missing policies deny sprite use until updated"), and
-  direct dashboard testing. A new connector is inert until scoped; scoping is a
-  grant, not a lockdown. (An earlier spike reading of `allow_all=true` was a
-  mis-attributed pre-existing connector.)
-- **Policy is settable over REST**: `PATCH`/`PUT /v1/oauth/connections/{id}` with
-  an `access_policy` object (`allow_all`, `sprite_labels`, `name_prefix`, and the
-  UI-absent `allowed_endpoints` / `blocked_endpoints`), auth `Bearer
-  $SPRITES_TOKEN`. So create is browser-only; scope/verify/delete are REST.
+### 3. Rewrite + inject
 
-## Architecture
+- Read the plaintext HTTP request, **strip the client `authorization` header**
+  (and hop-by-hop headers), and rewrite to
+  `<gatewayBase>/<sessionConnId>/<original-path>?<query>`. The gateway injects
+  `Authorization: Bearer <per-session-secret>` and forwards to the connector's
+  `base_api_url`.
+- **Routing table:** destination host → { connector gateway URL | pass-through
+  unmodified | block }. For v1 the entries are the webhook host and the git host,
+  each mapping to this session's connector(s). **Fail-closed default:** an unrouted
+  destination is **blocked**, never forwarded with a secret.
+- Forward query strings and stream request/response bodies (proven for GET/POST;
+  git pack streaming still to be load-tested — see Open Questions).
 
-Two planes.
+### 4. Lifecycle
 
-**Data plane (inside each Sprite), all non-secret:**
+- Start the proxy at provisioning as a long-lived process; install CA, rules, and
+  routing table before the agent runs; tear all of it down (proxy, rules, CA,
+  secret) on session end.
 
-```text
-agent process
-  -> (plain HTTPS to webhook / git / api.openai.com / ...)
-  -> iptables/nft REDIRECT 443 -> local transparent proxy (127.0.0.1)
-  -> proxy MITMs with local CA, strips auth, looks up destination in a
-     routing table, rewrites to the internal connector gateway URL:
-        <gateway>/<connectionId>/egress/<scheme>/<host>/<path>?<query>
-  -> Sprites gateway authorizes by Sprite identity + access policy,
-     injects the internal shared secret, forwards to our Worker
-```
+## Connector provisioning (`mintConnector`)
 
-**Control plane (Cloude Worker), holds all secrets:**
-
-```text
-Worker internal egress route
-  -> validate the injected shared secret (proves "legit Sprite via gateway")
-  -> identify the Sprite/session (gateway-forwarded sprite id; see open question)
-  -> parse the requested destination from the /egress/ path
-  -> match it against custodied secrets for this session/environment in D1
-  -> decrypt the matching secret, inject the real header, apply SSRF guards
-  -> forward to the real upstream (webhook handler, git proxy, OpenAI, ...)
-  -> stream the response back through the gateway to the proxy to the agent
-```
-
-Webhook example (impersonation fix):
+Sprites has **no REST create** for Custom API connectors (Fly confirmed: `POST
+/v1/oauth/connections/api_key` only takes `provider` + `api_key`), so creation is
+driven through the dashboard. One primitive, called during provisioning:
 
 ```text
-agent POSTs https://api.cloude.dev/webhook/<session>  (no secret)
-  -> local proxy -> internal connector gateway (scoped to THIS sprite)
-  -> gateway injects internal shared secret -> Worker egress route
-  -> Worker verifies secret + sprite→session, then treats it as an authorized
-     webhook for that session. A stolen-from-sprite value cannot reproduce this
-     because there is no value in the sprite and the gateway is sprite-scoped.
+mintConnector({ baseApiUrl, token, authMethod='header', headerPrefix='Bearer',
+                testUrl, scope }) -> { gatewayConnectionId, detailId }
 ```
 
-## Decision: multiplex one internal connector; custody secrets in the Worker
-
-The tempting model — one Sprites Custom API connector per upstream (webhook, git,
-each user key), minted per session via browser automation — is **rejected as the
-primary path**: it puts a multi-second browser flow on the session hot path
-(~20s is too slow), one per session, and creates connector sprawl.
-
-**Primary model: a single generic internal egress connector, multiplexed.**
-
-- One Custom API connector whose `base_api_url` is our Worker's internal egress
-  route and whose `access_token` is an internal shared secret. It is created rarely
-  (setup / rotation), not per session, and scoped by a **Sprite label** that all
-  session Sprites carry.
-- The Sprite-side proxy routes *all* secret-bearing egress to this one connector,
-  encoding the real destination in the path (`/egress/<host>/<path>`).
-- The **Worker** custodies every secret (internal webhook/git tokens and
-  user-supplied keys), decrypts the one that matches the requested destination for
-  that session, injects it, and forwards. The connector's only job is to prove
-  "this call came from an authorized Sprite via the gateway."
-
-Why this is the right call:
-
-- **No browser automation on the session hot path.** Per-session provisioning is
-  just: generate this session's secrets, store them in D1, install the proxy + CA
-  + iptables + routing table on the Sprite. All fast, all local. This directly
-  answers the "20s per session is too slow" objection — the slow browser step is
-  amortized across all sessions, not paid per session.
-- **Multiplex.** One connector serves webhook, git, and every user secret, keyed
-  by destination. No per-path or per-secret connectors.
-- **User secrets never touch the Sprite.** They sit encrypted in D1 and are
-  injected in the Worker.
-
-The trade-off to accept explicitly: secrets are **Worker-custodied**, not
-Sprites-custodied. A Worker compromise could expose them, whereas a per-connector
-Sprites secret would keep custody with Fly. This is judged acceptable because the
-connector guarantees only the scoped Sprite can invoke the egress route and the
-shared secret proves it — the same property a per-connector secret would give —
-while avoiding per-session/per-secret browser minting. High-sensitivity secrets
-that must stay out of our custody can still use a dedicated Sprites Custom API
-connector (Model 1) as an exception.
-
-**Critical open dependency (blocks the multiplexed model):** with one shared
-connector, the Worker must know *which* Sprite/session is calling — the injected
-shared secret is identical for all. This requires the Sprites gateway to forward a
-**verifiable Sprite identity** header to the upstream (our Worker). If the gateway
-does not forward a trustworthy sprite id, the multiplexed model collapses back to
-either per-session connectors (Model 1, slow) or per-session shared secrets baked
-into per-session connectors. Verifying the gateway's forwarded-identity behavior
-is the first thing to confirm — it decides the whole architecture. (The thread
-noted a "sprite id header" as a backup; it is actually load-bearing here.)
-
-## Sprite-side transparent proxy
-
-Provision the following into every session Sprite (all non-secret):
-
-1. **Toolchain staging.** Stage an `nft`/`iptables` toolchain artifact (bundled in
-   the Sprite image if possible, else fetched from R2) since the Sprite lacks it
-   and cannot `apt-get`. Proven workaround: extracted `nft` + `LD_LIBRARY_PATH`.
-2. **Local CA.** Generate a per-Sprite CA, install into the system store and the
-   per-runtime stores (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`,
-   `SSL_CERT_FILE`, etc.). Rotate/expire with the session.
-3. **Local proxy.** Start the transparent MITM proxy (the spike's
-   `sprite-egress-proxy.mjs`, generalized from a single target to a **routing
-   table**: destination host → connector gateway URL, or "pass through
-   unmodified", or "block"). It strips client auth and rewrites to the gateway.
-4. **REDIRECT rules.** iptables/nft OUTPUT NAT REDIRECT of outbound tcp/443 to the
-   proxy, **excluding** the gateway host (and localhost) so the proxy's own
-   upstream calls are not intercepted.
-5. **Fail-closed default.** Destinations with no routing entry should be blocked
-   (or explicitly pass-through per policy), never silently sent with a secret.
-
-Open items: runtimes that ignore the system trust store (statically linked, Go's
-own roots, pinned certs) won't honor the local CA — enumerate and handle
-(env overrides where possible, documented unsupported cases otherwise).
-
-## Worker-side internal egress route handler
-
-A new internal Worker route behind the shared-secret check. Responsibilities:
-
-- **Authn:** validate the gateway-injected internal shared secret; reject anything
-  without it. Rotate the shared secret on a schedule.
-- **Identify:** resolve the calling Sprite → session/environment from the
-  gateway-forwarded sprite id (see the critical open dependency).
-- **Route + custody:** parse the requested destination from `/egress/…`, look up a
-  matching custodied secret for that session/environment in D1, decrypt it, inject
-  the real auth header (or rewrite host/path per the secret's shape).
-- **SSRF protection:** the egress handler forwards to a destination named by the
-  Sprite, so it is an SSRF surface. Guard with a host **allowlist** (only
-  destinations that have a custodied secret or are explicitly permitted), block
-  private/link-local/metadata ranges, disallow redirects to internal hosts, and
-  never reflect internal error detail.
-- **Internal targets:** for webhook and git, the "secret" is our own token and the
-  "upstream" is our own webhook handler / git proxy — the handler injects and
-  forwards internally.
-
-## Webhook
-
-Replace the extractable per-Sprite webhook token with the egress path: the Sprite
-POSTs the normal webhook URL (no secret), the proxy routes it through the internal
-connector, and the Worker validates the shared secret + sprite→session mapping
-before accepting the callback. Result: a value stolen from the Sprite cannot forge
-a webhook, because there is no value and the gateway is sprite-scoped.
-
-## Git (read and write)
-
-Requirements from the thread: the agent must **pull up to date and push**;
-branch validation stays; the git proxy token is insecure because it is
-extractable; read-path latency (chunked pulls through the proxy) was the blocker
-that led to the current revoke-after-clone degradation.
-
-Design directions to work through (currently the least-settled area):
-
-- Route git HTTPS (`info/refs`, `git-upload-pack` for fetch, `git-receive-pack`
-  for push) through the egress path so the credential is injected at the Worker,
-  not held in the Sprite.
-- Keep branch validation at the Worker git-proxy layer.
-- Solve the read-latency problem rather than reintroducing the revoke-after-clone
-  hack: options include letting the injected credential ride the connector for the
-  whole session (no revoke) now that it is not extractable, and/or optimizing the
-  proxy's streaming of pack data. Needs measurement.
-
-## GitHub access (gh CLI / MCP / skill)
-
-The agent needs GitHub operations beyond raw git. Options to evaluate: a
-`gh`-CLI-through-the-egress-proxy path, a GitHub MCP server fronted by the
-connector, or a dedicated skill. Left as a stub pending the git decision — whatever
-carries git credentials should carry GitHub API credentials the same way.
-
-## User-defined secrets and D1 model
-
-Users declare secrets (e.g. "my app calls OpenAI / Slack") that must be injectable
-at the proxy without entering the Sprite. Proposed D1 shape (from the thread):
-
-- `secrets` (a.k.a. connectors) table: `id`, `name`, **encrypted value**, and the
-  set of **allowed hosts** it may be injected for (a secret may map to several
-  hosts, e.g. `api.openai.com` + `api.chatgpt.com`).
-- Link to **environments** (which environment/session class may use the secret)
-  via a foreign key / join table.
-- The Worker egress handler decrypts a secret only when the requested destination
-  host is in that secret's allowed-hosts and the calling session's environment is
-  linked. Plaintext exists only transiently in the Worker during injection.
-
-This is the same custody path as the internal webhook/git secrets — user secrets
-are just additional rows keyed by host.
-
-## Connector provisioning (dashboard automation)
-
-Still required — for creating the internal egress connector(s) and any exception
-Model-1 per-secret connectors — because Sprites has no REST create for Custom API
-connectors. Exposed as one primitive:
-
-```text
-mintConnector({ baseApiUrl, token, authMethod, headerPrefix, testUrl, scope })
-  -> { gatewayConnectionId, detailId, policySummary }
-```
-
-- **Create (browser):** preflight shape check → fill → `test_custom_api` → wait
-  for "Connection OK" → `create_custom_api` → read both ids.
-- **Scope + verify (REST):** `PATCH /v1/oauth/connections/{id}` with an
-  `access_policy` (scope to the session Sprite label; for the internal connector,
-  also `allowed_endpoints` to just the egress route), then GET to verify.
-- **Fail closed:** on any failure, REST-delete the partial connector and throw.
-
-Because the internal connector is created rarely, this browser step is **not** on
-the session hot path.
+- **Create (browser).** Proven by the 2026-07-06 spike. Form
+  `/account/:org/connectors/new?type=custom_api` (`custom-api-form`,
+  `phx-submit="create_custom_api"`; fields `base_api_url`, `access_token`,
+  `auth_method`, `auth_header_prefix`, `test_url`). **Test gates create**:
+  `test_custom_api` must reach `HTTP 200 — Connection OK`
+  (`div.bg-violet-50` + `hero-check-circle-mini`) before Create enables. The
+  redirect carries the **gateway connection id**; the detail page uses a separate
+  **detail id** — store both.
+- **Scope + verify (REST).** Create defaults to **deny-all** (verified), so a new
+  connector is inert until scoped. `PATCH /v1/oauth/connections/{id}` with an
+  `access_policy` (Sprite id/label; optionally `allowed_endpoints`), then GET to
+  confirm `allow_all == false`. Auth `Bearer $SPRITES_TOKEN`.
+- **Fail closed.** On any failure, REST-delete the partial connector and throw.
+- **Test URL.** Our Worker health route that returns 200 only when the injected
+  per-session secret validates, so the required test doubles as a gateway-reaches-
+  Worker proof.
 
 ### Where the browser automation runs
 
-A Cloudflare Worker cannot run a browser in its own isolate, but Cloudflare
-**Browser Rendering** exposes Puppeteer/Playwright forks via a Worker binding, so
-the api-server Worker can drive the create flow directly — no separate service.
+A Worker can't run a browser in its isolate, but Cloudflare **Browser Rendering**
+exposes Puppeteer/Playwright forks via a Worker binding, so the api-server Worker
+drives create directly.
 
-- **Option A — Browser Rendering (recommended).** `@cloudflare/playwright` from the
-  Worker; inject the Sprites dashboard `storageState` per run; ephemeral browser.
-  Verified paid limits: 120 concurrent browsers, 1 create/sec, 60s idle
-  (extendable to 10 min via `keep_alive`) — ample for rare internal-connector
-  mints. Pros: no new service, ephemeral logged-in session. Cons: CF Chromium
-  fork, caps.
-- **Option B — Fly.io Machine + upstream Playwright (fallback).** Matches the
-  Sprites-on-Fly infra; the Worker calls it over RPC. Use if CF caps/fidelity bite
-  or a warm authenticated context is wanted. Cons: a service to run and a box
-  logged into the dashboard.
+- **Option A — Browser Rendering (recommended):** `@cloudflare/playwright`; inject
+  the dashboard `storageState` per run; ephemeral browser. Verified paid limits:
+  120 concurrent browsers, 1 create/sec, 60s idle (10 min via `keep_alive`).
+- **Option B — Fly.io Machine + upstream Playwright (fallback):** matches the
+  Sprites-on-Fly infra; called over RPC. Use if CF caps/fidelity bite.
 
-Decision: Browser Rendering first, Fly Machine as documented fallback.
+Decision: Browser Rendering first, Fly Machine fallback.
 
-## Synchronous provisioning
+## Synchronous, fail-closed provisioning — and its latency
 
-Connector/proxy setup is part of session provisioning and must be **synchronous**:
-the connector URL is used as the webhook and git URL, so the Sprite cannot start
-useful work until the proxy, CA, iptables, and routing are in place. There is no
-async `connector-pending` state. Because the multiplexed model keeps the browser
-step off the session path, the synchronous per-session work is fast (local setup +
-D1 writes). If any provisioning step fails, session creation **fails closed** — a
-Sprite never starts with secrets in the clear or with an unsecured egress path.
+The connector is the Sprite's egress path, so provisioning is **synchronous**: mint
++ scope the connector(s), then install the proxy, CA, redirect rules, and routing
+table, all as blocking steps of session creation. Any failure **fails the session
+closed** — no Sprite starts with a token in the clear, an un-redirected egress, or
+an unusable callback path. No async `connector-pending` state.
+
+Latency cost: per-session, browser-driven mint on the critical path (the "~20s is
+too slow" concern). Per-session is unavoidable given the missing sprite-id header.
+Mitigate (measure first): minimize the browser flow, use warm Browser Rendering
+sessions and a fast Worker health `test_url`, and **overlap the mint with VM boot**
+(already seconds) so it hides under existing startup rather than adding to it. No
+speculative pre-mint pool.
+
+## Webhook (v1)
+
+Add a routing-table entry: the webhook host → this session's connector. The agent
+POSTs the normal webhook URL with no secret; the proxy reroutes to the connector;
+Fly injects the per-session secret; the Worker accepts the callback only when the
+injected secret maps to the session. Retire the extractable webhook token behind a
+flag once proven.
+
+## Git (v1)
+
+Requirements: the agent must **pull up to date and push**; branch validation stays;
+the extractable git proxy token goes away; read-path latency (chunked pulls) was the
+blocker behind revoke-after-clone.
+
+- Route git HTTPS (`info/refs`, `git-upload-pack` fetch, `git-receive-pack` push)
+  through the proxy → connector; inject the git credential at the Worker.
+- Keep branch validation at the Worker git-proxy layer.
+- Solve read latency without revoke-after-clone: the credential can now ride the
+  connector for the whole session (non-extractable), and/or optimize proxy pack
+  streaming. Measure (open).
+
+## Data model (D1) — v1
+
+- `session_connectors`: `session_id`, gateway connection id, dashboard detail id,
+  provisioning status, access-policy summary, timestamps.
+- Per-session shared secret keyed to the session; encrypted at rest; deleted on
+  teardown.
+- (No user-defined-secret tables in v1.)
 
 ## Request flowcharts
 
-Outbound user-API call:
+Webhook:
 
 ```text
-agent: GET https://api.openai.com/v1/... (Bearer left blank / dummy)
- -> iptables REDIRECT -> local proxy (MITM, strip auth)
- -> rewrite -> <gateway>/<intConnId>/egress/https/api.openai.com/v1/...
- -> Sprites gateway (sprite-scoped) injects internal shared secret
- -> Worker egress: verify secret + sprite->session; match api.openai.com to a
-    custodied user secret for this env; decrypt; inject real OpenAI key; SSRF check
- -> forward to api.openai.com; stream response back down the same path
+agent POSTs https://<webhook-host>/... (no secret)
+  -> iptables REDIRECT 443 -> local proxy (MITM w/ local CA, strip auth)
+  -> rewrite -> <gateway>/<sessionConnId>/webhook/...
+  -> Fly gateway (sprite-scoped) injects Bearer <per-session-secret>
+  -> Worker: secret -> session; accept callback as that session
 ```
 
 Git fetch:
 
 ```text
-agent: git fetch (HTTPS)
- -> proxy -> <gateway>/<intConnId>/egress/https/github.com/<repo>.git/git-upload-pack
- -> gateway injects shared secret -> Worker egress -> git proxy layer
- -> branch validation + inject git credential -> GitHub; stream pack back
+agent: git fetch (HTTPS to <git-host>)
+  -> proxy -> <gateway>/<sessionConnId>/git/<repo>/git-upload-pack
+  -> gateway injects secret -> Worker git proxy: verify -> session;
+     branch validation; inject real git credential -> GitHub; stream pack back
 ```
+
+Unrouted destination:
+
+```text
+agent -> some other https host -> proxy: no routing entry -> BLOCK (fail closed)
+```
+
+## Out of scope for v1 (mechanism ready, not built)
+
+- **User-defined secrets.** Definition UI/API, encrypted D1 storage with allowed
+  hosts + environment links, and Worker-side custody/injection for arbitrary user
+  APIs. When added, they are additional routing-table entries → per-session
+  connectors (or a Worker egress route), needing SSRF protection (host allowlist,
+  block private/metadata ranges, no internal redirects). Not built now.
 
 ## Risks / Trade-offs
 
-- **Gateway does not forward a verifiable sprite id** -> the multiplexed model
-  fails; fall back to per-session connectors or per-session shared secrets. Confirm
-  first (see Open Questions) — it gates the architecture.
-- **Worker-custodied secrets** -> a Worker compromise exposes user + internal
-  secrets. Mitigation: encryption at rest, minimal plaintext lifetime, rotation,
-  and a Sprites-custodied per-connector option for high-sensitivity secrets.
-- **SSRF via the egress route** -> allowlist destinations, block internal ranges,
-  no internal redirects. Do not ship the arbitrary-URL egress without these.
-- **Trust-store gaps** -> statically linked / pinned runtimes bypass the local CA.
-  Enumerate and document; provide env overrides where possible.
-- **nft/iptables staging fails** -> no transparent redirect, so egress isn't
-  captured. Bundle the toolchain in the Sprite image; fail closed if absent.
-- **Git read latency** -> the original blocker; measure the connector path before
-  committing, and do not silently reintroduce revoke-after-clone.
-- **Dashboard drift / allow-all default / dashboard-session expiry** -> preflight
-  shape checks, verify `allow_all==false` after scope, provisioner-only auth with
-  a clear reauth-required status. (Applies to the rare mint step.)
-- **`allow_all` at create** is deny-all by default (verified), so the window risk
-  is minimal; the scope step is a grant, still mandatory for function.
+- **Per-session mint latency** on the critical path. Minimize + overlap with VM
+  boot; measure. Not removable without a shared connector (ruled out).
+- **nft/iptables staging fails** ⇒ no redirect ⇒ egress uncaptured. Bundle the
+  toolchain in the Sprite image; fail closed if absent.
+- **Trust-store gaps** — static/pinned/Go-root runtimes bypass the local CA.
+  Enumerate and handle; document unsupported cases; the MITM fails closed
+  pre-trust.
+- **Gateway self-interception** — the proxy's calls to the gateway must be excluded
+  from REDIRECT/NO_PROXY or it loops. Pin gateway IPs at provisioning.
+- **Dashboard automation fragility / deny-all default / dashboard-session expiry** —
+  preflight shape checks, verify `allow_all == false` after scope, provisioner-only
+  auth with reauth-required status, fail closed.
+- **Browser Rendering caps** (120 concurrent, 1 create/sec) bound peak session
+  creation; size against concurrency; Fly fallback.
+- **Git read latency** — the original blocker; measure the connector path; don't
+  silently reintroduce revoke-after-clone.
+- **Per-session secret storage** — encrypt at rest, scope to session, delete on
+  teardown.
 
 ## Migration Plan
 
-1. Confirm gateway-forwarded sprite identity (decides multiplexed vs per-session).
-2. D1: `secrets`/connectors table (encrypted value, allowed hosts), environment
-   links, connector metadata (both id spaces), provisioning attempts.
-3. Sprite image: bundle/stage the nft/iptables toolchain; generalize the local
-   proxy to a routing table with fail-closed default; CA install across runtimes.
-4. Worker internal egress route: shared-secret authn, sprite->session resolution,
-   D1 secret matching + injection, SSRF guards.
-5. `mintConnector` (Browser Rendering) to create the internal egress connector;
-   REST scope/verify/delete.
-6. Cut webhook onto the egress path; retire the extractable webhook token.
-7. Cut git (fetch + push) onto the egress path; keep branch validation; solve read
+1. Sprite image: bundle/stage the nft/iptables toolchain; generalize
+   `sprite-egress-proxy.mjs` to a routing table with fail-closed default; CA install
+   across runtime trust stores; gateway-exclusion rules.
+2. D1: `session_connectors` + per-session secret storage.
+3. `mintConnector` via Browser Rendering: browser create → REST scope → REST verify
+   → delete-on-failure; preflight shape/drift checks; redact secrets.
+4. Worker endpoints: health `test_url`; `/webhook` and `/git` verifying the injected
+   per-session secret → session.
+5. Synchronous fail-closed provisioning: mint+scope, install proxy/CA/rules/routing,
+   hand the Sprite its connector URLs; teardown deletes connector + secret.
+6. Webhook cutover behind a flag; retire the extractable webhook token.
+7. Git cutover (fetch + push) behind a flag; keep branch validation; fix read
    latency without revoke-after-clone.
-8. GitHub access (gh/MCP/skill) over the same path.
-9. User-defined secrets: definition UI/API, D1 storage, environment linking,
-   injection.
-10. Make all of the above a synchronous, fail-closed provisioning step.
+8. (Later) user-defined secrets on the same proxy mechanism.
 
-Rollback: keep the current token-based webhook/git path behind a flag until each
-cutover is proven; disable the rare mint job without affecting running sessions.
+Rollback: keep the current token path behind a flag until each cutover is proven;
+the proxy blocks unrouted egress, so partial rollout stays fail-closed.
 
 ## Open Questions
 
-Blocking / architectural:
-
-- **Does the Sprites gateway forward a verifiable Sprite identity to the upstream
-  (our Worker)?** Decides multiplexed-single-connector vs per-session connectors.
-- Is Worker-custody of user secrets acceptable for all secret classes, or do some
-  require Sprites-custodied per-connector isolation?
-
-Mechanics (several answerable with a quick live check using the Sprites token):
-
-- Which id does `PATCH`/`GET`/delete `/v1/oauth/connections/{id}` take — the
-  gateway connection id or the dashboard detail id? Confirm the delete verb/path.
+- Which id do the REST connection endpoints take — gateway connection id vs detail
+  id — and the delete verb/path? (Quick live check.)
+- Can Sprite labels be set at Sprite creation, or must scoping be by Sprite id after
+  the Sprite exists? (Affects mint ordering.)
 - Does the connector gateway stream large/chunked bodies well enough for git pack
-  data (the historical read-latency blocker)? Measure.
-- Which Sprite runtimes ignore the system trust store, and how do we handle them?
-- Git: keep the injected credential for the whole session (no revoke) now that it
-  is non-extractable, or optimize proxy streaming — which meets read+write needs?
-- GitHub: gh CLI vs MCP vs skill?
-- Idempotency marker for connector create/D1 reconciliation.
+  data? (The historical read-latency blocker — measure.)
+- Which Sprite runtimes ignore the system trust store, and how are they handled?
+- Real per-session mint latency via Browser Rendering, and how much overlaps VM
+  boot?
+- One per-session connector path-routing webhook+git, or two connectors?
+- Git: keep the injected credential for the session vs optimize streaming?
 
 Resolved:
 
+- ~~Gateway forwards a verifiable Sprite identity?~~ **No (tested)** → per-session
+  connectors; per-session secret carries identity.
+- ~~Multiplex one connector across sessions?~~ No.
 - ~~REST update access policy?~~ Yes, `PATCH`/`PUT /v1/oauth/connections/{id}`.
-- ~~REST create for Custom API?~~ No (preset providers only) — create stays on the
-  browser path.
+- ~~REST create for Custom API?~~ No (preset providers only) — browser create.
 - ~~Create default access?~~ Deny-all (verified) — scope is a grant.
 - ~~Can a Worker drive a browser?~~ Yes, via Cloudflare Browser Rendering.
-- ~~Async connector-pending?~~ No — provisioning is synchronous and fail-closed.
+- ~~Async connector-pending?~~ No — synchronous, fail-closed.
+- ~~Transparent proxy + iptables in scope?~~ **Yes, v1.** User-facing secret
+  definition/storage is the only deferred piece.

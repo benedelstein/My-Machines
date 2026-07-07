@@ -1,84 +1,85 @@
 ## ADDED Requirements
 
-### Requirement: Secrets never enter the Sprite runtime
+### Requirement: Webhook and git secrets never enter the Sprite
 
-The system SHALL keep webhook, git, and user-supplied credentials out of the Sprite
-runtime and inject them only at a gateway/Worker after the caller is proven to be
-the authorized Sprite.
+The system SHALL keep the webhook and git credentials out of the Sprite runtime and
+inject them only at the Sprites gateway after Fly authorizes the specific Sprite.
 
 #### Scenario: Secret is required for an outbound call
 
-- **WHEN** a Sprite makes an outbound request that needs a credential (webhook,
-  git, or a user API)
+- **WHEN** a Sprite makes a webhook callback or a git operation
 - **THEN** the credential is injected downstream of the Sprite and is never present
   in the Sprite's env, files, process args, or trust-store-readable material
 
 #### Scenario: Sprite is compromised
 
 - **WHEN** a process inside the Sprite reads all available Sprite state
-- **THEN** it obtains no reusable credential for webhook, git, or user APIs
+- **THEN** it obtains no reusable webhook or git credential
 
 ### Requirement: Transparent Sprite-side egress proxy
 
-The system SHALL run a Sprite-local transparent proxy that captures outbound HTTPS,
-strips any client-supplied authorization, and rewrites requests to a connector
-gateway according to a destination routing table, failing closed for unrouted
-destinations.
+The system SHALL run a Sprite-local transparent proxy that captures outbound HTTPS
+via iptables/nft redirection, MITM-terminates it with a Sprite-trusted local CA,
+strips any client authorization, and rewrites requests to a connector gateway URL
+according to a destination routing table, failing closed for unrouted destinations.
 
 #### Scenario: Outbound HTTPS with no proxy configuration
 
-- **WHEN** a Sprite process makes an HTTPS request without proxy environment
-  variables
+- **WHEN** a Sprite process makes an HTTPS request with no proxy environment set
 - **THEN** the request is redirected to the local proxy, MITM-terminated with the
-  Sprite-trusted local CA, and rewritten to the configured gateway URL
+  Sprite-trusted local CA, its client authorization stripped, and rewritten to the
+  configured connector gateway URL
 
 #### Scenario: Destination has no route
 
-- **WHEN** a Sprite requests a destination not present in the routing table
-- **THEN** the proxy blocks it (or passes it through unmodified per policy) and
-  never forwards it with an injected secret
+- **WHEN** a Sprite requests a destination absent from the routing table
+- **THEN** the proxy blocks it and does not forward it with an injected secret
 
-### Requirement: Worker egress secret custody and injection
+#### Scenario: Gateway calls are not intercepted
 
-The system SHALL provide a Worker egress route that validates the gateway-injected
-shared secret, resolves the calling Sprite to its session/environment, matches the
-requested destination to a custodied secret linked to that environment, and injects
-the real credential.
+- **WHEN** the proxy makes its own upstream call to the Sprites gateway
+- **THEN** that call is excluded from redirection so it is not intercepted
 
-#### Scenario: Authorized egress call
+### Requirement: Redirection toolchain is present or the session fails closed
 
-- **WHEN** the egress route receives a request carrying the valid gateway-injected
-  shared secret for a resolvable Sprite/session, targeting a destination with a
-  linked custodied secret
-- **THEN** the Worker decrypts that secret, injects it, and forwards to the upstream
+The system SHALL ensure the nft/iptables redirection toolchain is available in the
+Sprite (bundled or staged) and MUST fail session creation closed if egress
+redirection cannot be established.
 
-#### Scenario: Missing or invalid shared secret
+#### Scenario: Toolchain missing
 
-- **WHEN** a request reaches the egress route without the valid gateway-injected
-  shared secret
-- **THEN** the Worker rejects it and injects no credential
+- **WHEN** the nft/iptables toolchain cannot be installed or the redirect rules
+  cannot be applied
+- **THEN** the session does not start rather than running with uncaptured egress
 
-### Requirement: Egress SSRF protection
+### Requirement: Per-session connector carries session identity
 
-The system SHALL restrict Worker egress forwarding to permitted destinations and
-MUST block private, link-local, and cloud-metadata address ranges and internal
-redirects.
+The system SHALL provision one Custom API connector per session, scoped to that
+session's Sprite, whose injected credential is a per-session shared secret, and the
+Worker SHALL identify the session by that injected secret.
 
-#### Scenario: Sprite requests an internal or metadata address
+#### Scenario: Injected secret identifies the session
 
-- **WHEN** an egress request targets a private/link-local/metadata address or would
-  redirect to an internal host
-- **THEN** the Worker blocks the request and does not forward it
+- **WHEN** a request arrives at the Worker with the gateway-injected per-session
+  secret
+- **THEN** the Worker resolves it to the owning session and treats the call as that
+  session's, without relying on a gateway-forwarded Sprite identity
+
+#### Scenario: Another Sprite attempts to use the connector
+
+- **WHEN** a Sprite other than the scoped session Sprite tries to use the connector
+- **THEN** the gateway access policy denies it
 
 ### Requirement: Webhook impersonation prevention
 
-The system SHALL accept a session webhook callback only when it arrives via the
-gateway with a valid shared secret and a Sprite identity that maps to that session.
+The system SHALL accept a session webhook callback only when it arrives through the
+sprite-scoped gateway carrying the valid injected per-session secret for that
+session.
 
 #### Scenario: Forged webhook from outside the gateway
 
-- **WHEN** a webhook callback for a session arrives without passing through the
-  sprite-scoped gateway with the valid shared secret
+- **WHEN** a webhook callback for a session arrives without the valid gateway-
+  injected per-session secret
 - **THEN** the Worker rejects it
 
 ### Requirement: Git access without extractable credentials
@@ -94,17 +95,18 @@ push without leaving an extractable token in the Sprite.
   injected downstream, branch validation still applied, and no reusable git token
   present in the Sprite
 
-### Requirement: Dashboard-backed Custom API connector creation
+### Requirement: Dashboard-backed connector creation with REST scoping
 
-The system SHALL create Sprites Custom API connectors through the dashboard flow
-(no public REST create exists) and scope them via REST, failing closed if creation
-or scoping cannot complete.
+The system SHALL create Sprites Custom API connectors through the dashboard flow (no
+public REST create exists), scope them via REST, verify the policy is not
+`allow_all`, and fail closed if creation or scoping cannot complete.
 
-#### Scenario: Create and scope the internal connector
+#### Scenario: Create, scope, and verify
 
-- **WHEN** the system provisions the internal egress connector
-- **THEN** it creates the connector via the dashboard flow and scopes it via
-  `PATCH /v1/oauth/connections/{id}` so only labeled session Sprites may use it
+- **WHEN** the system provisions a session connector
+- **THEN** it creates the connector via the dashboard flow, scopes it via
+  `PATCH /v1/oauth/connections/{id}` to the session Sprite, and confirms
+  `allow_all` is disabled before use
 
 #### Scenario: Create or scope fails
 
@@ -112,29 +114,23 @@ or scoping cannot complete.
 - **THEN** the system deletes any partial connector and records a sanitized failure
   without exposing a secret to a Sprite runtime
 
-### Requirement: Connector access scoped to session Sprites
-
-The system SHALL scope each provisioned connector by Sprite id or Sprite label and
-MUST verify the policy is not `allow_all` before marking it ready.
-
-#### Scenario: Scope verified before use
-
-- **WHEN** a connector finishes provisioning
-- **THEN** the system confirms the access policy limits use to the intended Sprite
-  id or label and that `allow_all` is disabled
-
 ### Requirement: Connector and secret metadata persistence
 
 The system SHALL persist connector metadata (gateway connection id and dashboard
-detail id, org, base URL, auth method, access-policy summary, status) and user
-secret metadata (name, allowed hosts, linked environments) in D1, storing secret
-values only encrypted.
+detail id, org, base URL, auth method, access-policy summary, status) in D1 and
+SHALL store the per-session shared secret only encrypted, deleting it on session
+teardown.
 
 #### Scenario: Successful provisioning persists metadata
 
 - **WHEN** provisioning completes
-- **THEN** the system stores both connector ids and non-secret metadata, and stores
-  any secret value encrypted at rest
+- **THEN** the system stores both connector ids and non-secret metadata and stores
+  the per-session secret encrypted at rest
+
+#### Scenario: Session teardown
+
+- **WHEN** a session ends
+- **THEN** the system deletes the connector via REST and deletes the stored secret
 
 ### Requirement: Provisioner-only dashboard authentication
 
@@ -150,12 +146,12 @@ tokens, or session payloads to clients, Sprite runtimes, logs, or D1.
 
 ### Requirement: Synchronous fail-closed provisioning
 
-The system SHALL install the egress proxy, CA, redirect rules, routing table, and
-per-session secrets synchronously as part of session provisioning, and MUST fail
-session creation closed if any step does not complete.
+The system SHALL mint and scope the connector and install the egress proxy, CA,
+redirect rules, and routing table synchronously as part of session provisioning, and
+MUST fail session creation closed if any step does not complete.
 
 #### Scenario: A provisioning step fails
 
-- **WHEN** any secrets-proxy provisioning step fails during session creation
-- **THEN** the session does not start and no Sprite runs with secrets in the clear
+- **WHEN** any connector or proxy provisioning step fails during session creation
+- **THEN** the session does not start and no Sprite runs with a secret in the clear
   or an unsecured egress path
