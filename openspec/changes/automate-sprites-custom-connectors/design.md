@@ -78,6 +78,9 @@ separate LiveView form:
   checkbox.
 - The label mechanism is exactly the "Sprite tag" scoping this design assumed.
   Labels are `key:value` and are ANDed (a Sprite must carry every listed label).
+- The same policy is settable over REST (`PATCH`/`PUT /v1/oauth/connections/{id}`
+  with an `access_policy` object), which the design uses in preference to this
+  form — see "The Provisioner Is The Missing 'Create Connector' API".
 
 **Critical finding — create defaults to `allow_all = true`.** The connector
 created in the spike came out with `allow_all` checked, so **every Sprite in the
@@ -235,9 +238,10 @@ test, and the test calls the Worker. So the session secret must exist server-sid
    (= the health endpoint), runs test_custom_api, waits for "Connection OK".
 4. Provisioner submits create_custom_api, reads the gateway connection id from
    the redirect and the detail id from the detail page.
-5. Provisioner immediately opens the detail page and runs save_access_policy to
-   scope the connector to the session Sprite (id or label), then re-reads the
-   policy to verify allow_all is off and only the intended scope remains.
+5. Provisioner immediately PATCHes /v1/oauth/connections/{id} with an
+   access_policy scoping the connector to the session Sprite (id or label), then
+   GETs to verify allow_all is off and only the intended scope remains. For a
+   Sprite→Worker connector, also set allowed_endpoints to just the callback path.
 6. On any failure in 3-5, the provisioner deletes the connector (REST delete)
    and marks the attempt failed. Fail closed: the session does not start with an
    unscoped or unverified connector.
@@ -267,12 +271,37 @@ mintConnector({
 }) -> { gatewayConnectionId, detailId, policySummary }
 ```
 
-Under the hood the primitive runs the proven flow: preflight shape check → fill
-→ `test_custom_api` → wait for "Connection OK" → `create_custom_api` → read both
-ids → `save_access_policy` to apply `scope` → re-read to verify `allow_all` is
-off. It either returns a fully created, correctly scoped connector, or it deletes
-whatever partial connector it made and throws. No pool, no pre-provisioning, no
-slot bookkeeping — you call it when you need a connector and you get one back.
+Under the hood the primitive runs a hybrid flow — browser for create, REST for
+scope:
+
+1. Browser: preflight shape check → fill → `test_custom_api` → wait for
+   "Connection OK" → `create_custom_api` → read both ids.
+2. REST: `PATCH /v1/oauth/connections/{id}` with an `access_policy` object to
+   apply `scope`, then GET to verify `allow_all` is off and only the intended
+   scope remains.
+
+It either returns a fully created, correctly scoped connector, or it deletes
+whatever partial connector it made (REST delete) and throws. No pool, no
+pre-provisioning, no slot bookkeeping — you call it when you need a connector and
+you get one back.
+
+**Why REST for the scope step (confirmed against the docs).** Sprites exposes
+`PATCH`/`PUT /v1/oauth/connections/{id}` with an `access_policy` object —
+`allow_all`, `sprite_labels`, `name_prefix`, plus `allowed_endpoints` /
+`blocked_endpoints` (path-level allow/deny, block rules checked first, not
+available in the dashboard form). It authenticates with the ordinary
+`Authorization: Bearer $SPRITES_TOKEN`. This replaces the brittle second
+`save_access_policy` browser form with a normal API call and closes the
+`allow_all` window immediately after create. The dashboard `save_access_policy`
+form remains only as a fallback if REST policy update is unavailable for a given
+connector.
+
+**Create still needs the browser.** The REST create endpoints
+(`POST /v1/oauth/connections/api_key`, `/provision`) take only `provider` +
+`api_key` (+ optional `access_policy`) and are for Sprites' preset providers.
+They accept no `base_api_url`, `auth_method`, or `auth_header_prefix`, so they
+cannot create an arbitrary Custom API connector. Fly's "create is dashboard-only"
+holds for `custom_api`; only the scope/delete/reconcile steps move to REST.
 
 The only structural constraint is *where* it runs: a Cloudflare Worker cannot
 drive a browser, so the primitive is implemented by a separate provisioner
@@ -328,9 +357,11 @@ expiring pending-secret table and delete it after success or terminal failure.
 ### Scope Each Minted Connector To Its Session Sprite
 
 Because `mintConnector` creates one connector per session on demand, scope it to
-that session's Sprite id — the tightest possible policy — via `save_access_policy`
-inside the mint primitive, before it returns. Verified policy inputs: `name_prefix`
-(prefix match), `policy_label` (`key:value` labels, ANDed), and `allow_all`.
+that session's Sprite id — the tightest possible policy — via a REST
+`PATCH /v1/oauth/connections/{id}` `access_policy` inside the mint primitive,
+before it returns. Confirmed policy fields: `name_prefix` (prefix match),
+`sprite_labels` (`key:value`, ANDed), `allow_all`, and the endpoint-level
+`allowed_endpoints` / `blocked_endpoints`.
 
 Prefer Sprite-id scoping when the create-time Sprite id is known. If the Sprite is
 created after the connector (or the id is otherwise not yet available), fall back
@@ -361,9 +392,9 @@ user-supplied test URL under the base URL rather than bypassing the test.
 
 After creation, use official REST endpoints where supported to:
 
-- Fetch the created connection (by detail id / connection id).
-- Update access policy if REST supports it reliably (this would let the mint
-  primitive scope via REST instead of a second browser step — verify).
+- Fetch the created connection (by connection id) to verify policy state.
+- Update access policy via `PATCH`/`PUT /v1/oauth/connections/{id}` — confirmed
+  available; this is the primary scope mechanism, not the dashboard form.
 - Delete failed/abandoned/ended-session connectors.
 - Periodically reconcile D1 state with Sprites connection state and re-assert
   that no tracked connector has drifted to `allow_all`.
@@ -375,10 +406,11 @@ and, if supported, policy update.
 ## Risks / Trade-offs
 
 - **`allow_all` default (new, verified).** A freshly created connector is open to
-  every Sprite in the org until scoped. Mitigation: treat create+scope+verify as
-  one atomic, fail-closed unit; delete the connector if scoping or verification
-  fails; reconciliation re-asserts `allow_all == false` on every tracked
-  connector.
+  every Sprite in the org until scoped. Mitigation: an immediate REST
+  `PATCH /v1/oauth/connections/{id}` right after create closes the window in one
+  fast call; treat create+scope+verify as one atomic, fail-closed unit; delete
+  the connector if scoping or verification fails; reconciliation re-asserts
+  `allow_all == false` on every tracked connector.
 - **`mintConnector` latency (new).** The browser flow takes seconds, not the
   milliseconds of a native REST call. Mitigation: call it inline first; if
   measured session-start latency is too high, move it behind a
@@ -456,13 +488,25 @@ Resolved by the 2026-07-06 spike:
   labels, `allow_all`). The create flow has no scoping input, and defaults to
   `allow_all = true`.
 
+Resolved by the connectors API docs (https://sprites.dev/api/connectors):
+
+- ~~Can official REST update access policy for Custom API connectors by id?~~
+  Yes: `PATCH`/`PUT /v1/oauth/connections/{id}` with an `access_policy` object
+  (`allow_all`, `sprite_labels`, `name_prefix`, `allowed_endpoints`,
+  `blocked_endpoints`), auth `Bearer $SPRITES_TOKEN`. This is now the primary
+  scope step.
+- ~~Does REST create replace the dashboard for Custom API?~~ No. REST create
+  (`/api_key`, `/provision`) only takes `provider` + `api_key`; no base URL or
+  auth-method fields, so `custom_api` create stays on the browser path.
+
 Still open:
 
-- Can official REST update access policy for Custom API connectors by id? (Would
-  let the mint primitive scope via REST instead of a second browser step, cutting
-  its latency.)
-- Can REST delete Custom API connectors by id for session-end cleanup? (Design
-  assumes yes; confirm.)
+- Which id does `PATCH /v1/oauth/connections/{id}` (and delete/fetch) take — the
+  gateway connection id (`n1waAy…`) or the dashboard detail id (`fSgD…`)? Quick
+  live check with the Sprites token; determines what the mint primitive returns
+  and what session records store as the REST handle.
+- Can REST delete Custom API connectors by id for session-end cleanup? (Docs
+  imply a connections resource; confirm the delete verb/path.)
 - Can Sprite labels be set at Sprite creation via the Sprites API, and are they
   live before the first callback? (Needed only for the label-scoping fallback
   when the Sprite id is not known at mint time.)

@@ -3,7 +3,8 @@
 - [x] 1.1 Capture the successful test diff and connector-detail URL transition using only dummy credentials. (Live spike 2026-07-06: `bg-violet-50` + `hero-check-circle-mini` + "HTTP 200 — Connection OK"; create redirects to the gateway connection id; detail page uses a separate detail id.)
 - [x] 1.2 Document the required dashboard selectors, `phx-*` attributes, field names, validated form frame shape, success states, and resulting connector-detail URL shape. (See design.md "Verified dashboard automation".)
 - [x] 1.3 Verify whether access policy by Sprite id and Sprite tag is configurable during creation or only after creation. (Post-creation only, via `save_access_policy`: `name_prefix`, `policy_label` labels, `allow_all`. Create has no scoping input and defaults to `allow_all = true`.)
-- [ ] 1.4 Verify which supported Sprites REST endpoints can list, fetch, update access policy, and delete Custom API connections. (Update-policy and delete-by-id still unconfirmed against live REST.)
+- [x] 1.4 Verify which supported Sprites REST endpoints can list, fetch, update access policy, and delete Custom API connections. (Docs confirm `PATCH`/`PUT /v1/oauth/connections/{id}` with `access_policy`; REST create only for preset providers. Delete verb and the `{id}` scheme still to confirm live — see 1.7.)
+- [ ] 1.7 Live-check with the Sprites token which id `PATCH`/`GET`/delete `/v1/oauth/connections/{id}` accepts — gateway connection id vs dashboard detail id — and confirm the delete verb/path.
 - [x] 1.5 Verify whether the gateway path forwards query strings and streams request/response bodies well enough for git-sized payloads. (Egress-proxy live test: header injection, query strings, and POST bodies forward correctly; large/streaming git payloads still to be load-tested.)
 - [ ] 1.6 Verify whether Sprite labels can be set at Sprite creation via the Sprites API and are live before the first callback (needed for the label-scoping fallback when the Sprite id is unknown at mint time).
 
@@ -20,7 +21,7 @@
 - [ ] 3.2 Implement a headless Playwright provisioner from the proven spike flow (launch with a provisioner-only Sprites dashboard session).
 - [ ] 3.3 Add dashboard shape preflight checks for the Custom API form (form id, `phx-*` events, field names, success-state markup) before any secret is entered.
 - [ ] 3.4 Implement form fill, connection test, wait-for-success (`bg-violet-50` + `hero-check-circle-mini` + "Connection OK" + Create enabled), create submission, and extraction of BOTH ids.
-- [ ] 3.5 Implement atomic create → `save_access_policy` scope → re-read verify (`allow_all == false`, only intended scope). Fail closed and delete the connector if scoping or verification fails.
+- [ ] 3.5 Implement atomic create (browser) → scope via REST `PATCH /v1/oauth/connections/{id}` `access_policy` → GET verify (`allow_all == false`, only intended scope). Fail closed and delete the connector if scoping or verification fails.
 - [ ] 3.6 Redact tokens, cookies, CSRF values, LiveView session payloads, and dashboard storage state from all logs and traces.
 
 ## 4. API Integration
@@ -45,7 +46,7 @@
 
 ## 7. Access Policy And Session Attachment
 
-- [ ] 7.1 Scope each minted connector to its session Sprite id (preferred) or a single unguessable per-session label.
+- [ ] 7.1 Scope each minted connector to its session Sprite id (preferred) or a single unguessable per-session label, via REST `PATCH /v1/oauth/connections/{id}` `access_policy`; optionally tighten with `allowed_endpoints`.
 - [ ] 7.2 Ensure session provisioning applies required Sprite labels/ids before a connector is used.
 - [ ] 7.3 Store connector ids in repo environment/session snapshots only after provisioning reaches verified-scoped ready state.
 - [ ] 7.4 Prevent sessions from starting with required connectors that are pending, failed, paused, drifted, or still at `allow_all`.
