@@ -40,6 +40,26 @@ according to a destination routing table, failing closed for unrouted destinatio
 - **WHEN** the proxy makes its own upstream call to the Sprites gateway
 - **THEN** that call is excluded from redirection so it is not intercepted
 
+### Requirement: Network egress lockdown is the hard boundary
+
+The system SHALL apply a Sprites network egress policy that restricts the Sprite to
+reaching only the connector gateway (and any provisioning-time exceptions), enforced
+outside the VM so in-Sprite root cannot lift it. Security MUST NOT depend on the
+in-Sprite transparent proxy.
+
+#### Scenario: Root agent attempts direct egress
+
+- **WHEN** a process with root in the Sprite removes the local redirect rules and
+  connects directly to a non-gateway upstream
+- **THEN** the network egress policy blocks the connection, and the process obtains
+  no credential (none exist in the Sprite)
+
+#### Scenario: Lockdown applied before the agent runs
+
+- **WHEN** a session is provisioned
+- **THEN** the egress policy is tightened to gateway-only before the session agent
+  starts (after any provisioning-time toolchain install)
+
 ### Requirement: Redirection toolchain is present or the session fails closed
 
 The system SHALL ensure the nft/iptables redirection toolchain is available in the

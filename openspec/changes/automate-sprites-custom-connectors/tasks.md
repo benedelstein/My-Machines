@@ -15,12 +15,13 @@
 
 ## 2. Sprite-Side Transparent Proxy
 
-- [ ] 2.1 Provide the nft/iptables toolchain: bake it into the Sprite image (preferred, avoids a per-boot apt round-trip) or `sudo apt-get install -y nftables iptables` at provisioning (verified to work via passwordless sudo); fail closed if rules can't be established.
+- [ ] 2.0 Apply the Sprites network egress policy (`POST /v1/sprites/{name}/policy/network`) to lock the Sprite to gateway-only (allow `api.sprites.dev`, deny the rest); this is the hard boundary, enforced outside the VM. Verify L3/L4-vs-DNS enforcement depth.
+- [ ] 2.1 Install the nft/iptables toolchain at provisioning via `sudo apt-get install -y nftables iptables` (base image is fixed and cannot be baked); ensure the lockdown allows the apt mirror during install (or install before locking down); fail closed if rules can't be established.
 - [ ] 2.2 Generate a per-Sprite CA and install into the system store + per-runtime stores (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, ...); per-host leaf certs via SNI.
 - [ ] 2.3 Generalize `sprite-egress-proxy.mjs` from a single hardcoded target to a destination routing table (host → connector URL | pass-through | block) with a fail-closed default; strip client auth; forward query + stream bodies.
 - [ ] 2.4 Install iptables/nft OUTPUT REDIRECT of tcp/443 to the proxy, EXCLUDING the gateway host/IPs (and localhost) so the proxy's own upstream calls aren't intercepted; pin gateway IPs at provisioning.
 - [ ] 2.5 Proxy lifecycle: start at provisioning; rotate/expire CA + rules with the session; tear down (proxy, rules, CA) on session end.
-- [ ] 2.6 Resolve the bypass problem: determine whether the session agent can run without sudo (separate privileged init owns the proxy/rules) or whether Fly can enforce egress at the VM boundary — otherwise the proxy is defense-in-depth only against an adversarial root agent.
+- [ ] 2.6 Nail the DNS/interception composition: run a local resolver so proxied hosts resolve (dummy IP) and get redirected, while the egress policy denies actual non-gateway egress. Confirm whether the policy blocks IP-direct egress (data-exfil containment) or if additional controls are needed.
 
 ## 3. Data Model (D1)
 
