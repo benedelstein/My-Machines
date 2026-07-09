@@ -88,25 +88,34 @@ gateway:
   A root agent that flushes the local redirect and dials an upstream directly is
   refused at the network layer and still holds no credential.
 
-Two things this interacts with, to design carefully:
+**Enforcement is L3/L4, not DNS-only — verified 2026-07-08.** On a test Sprite with
+policy `{rules:[{domain:"api.sprites.dev",action:"allow"}]}`, all of these were
+**refused**: `curl https://example.com` (DNS refused), a raw TCP `connect()` to
+`1.1.1.1:443` with **no DNS**, and a raw `connect()` to `93.184.216.34:443`
+(example.com's IP, no DNS) — while `api.sprites.dev` stayed reachable. So a
+root agent **cannot** exfil by dialing a hard-coded IP; the gateway-only lockdown is
+a genuine hard boundary at the connection layer. The earlier "DNS-only ⇒ IP-direct
+bypass" worry is closed.
+
+Two composition details this creates:
 
 - **apt during provisioning.** Installing the nft toolchain needs the apt mirror.
   Either install **before** applying the lockdown, or temporarily allow the mirror
   domain, then tighten to gateway-only before the agent runs.
-- **DNS-vs-transparent-interception.** The proxy intercepts by redirecting `:443`,
-  but the agent still needs to *resolve* a host to open a connection. If the policy
-  hard-denies DNS for `api.openai.com`, the agent can't resolve it, so the redirect
-  never fires and transparent proxying of that host breaks. Likely resolution: run a
-  local resolver so proxied hosts resolve to a dummy IP (the redirect catches the
-  connection regardless), while the platform policy denies *actual* egress to
-  everything but the gateway. This composition needs to be nailed down.
-
-**Open enforcement question:** the docs describe **DNS-based** filtering. Pure DNS
-filtering does not stop a root agent that connects to a hard-coded upstream **IP**
-(bypassing DNS) — which matters for *data exfiltration* (not credential theft,
-which is impossible regardless). Confirm whether the policy also enforces at L3/L4
-(blocks IP-direct egress), or whether additional egress controls are needed to
-contain a determined root agent.
+- **DNS for proxied hosts (the resolver requirement).** The transparent proxy
+  redirects `:443`, but the agent's client still has to *resolve* a host to emit the
+  connection that gets redirected. Under a gateway-only policy the platform also
+  **refuses DNS** for non-allowlisted hosts (verified: the configured resolver
+  returned connection-refused for `example.com`), so the client can't resolve
+  `api.openai.com` and the redirect never fires. Fix: run a **local resolver**
+  (`127.0.0.1`) that answers proxied hosts with a **dummy IP** — the redirect
+  catches the connection regardless of the address, and the platform's L3/L4 block
+  still prevents any real egress if the proxy is bypassed. Do **not** allowlist the
+  proxied hosts in the policy (that would let a root agent reach them directly after
+  flushing the redirect); keep the policy gateway-only and resolve locally. The
+  simpler alternative, for cooperative tools, is to skip transparent interception for
+  a given client and configure its `base_url` to the connector URL directly — no
+  resolver needed, but it only covers tools you can reconfigure.
 
 ## The transparent proxy in detail (and every complication)
 
@@ -326,17 +335,15 @@ agent -> some other https host -> proxy: no routing entry -> BLOCK (fail closed)
   credential is in the Sprite to steal, connectors are Sprite-scoped, and the
   network egress policy (enforced outside the VM) confines egress to the gateway. The
   proxy is UX/routing, not a boundary.
-- **Data exfiltration by a root agent via IP-direct egress.** The network policy is
-  documented as DNS-based; if it does not also block IP-direct connections, a root
-  agent could exfil data (not credentials) to a hard-coded IP. Confirm L3/L4
-  enforcement or add controls. This is the one residual adversarial-agent concern.
 - **Toolchain install at provisioning** — the base image can't be modified, so the
   nft toolchain is `sudo apt-get install`ed per boot; the lockdown must allow the
   apt mirror during that step (or install before locking down). Fail closed if rules
   can't be established.
-- **DNS/interception composition** — hard-denying DNS for a proxied host breaks
-  transparent interception of it; resolve with a local resolver + gateway-only
-  egress policy.
+- **DNS/interception composition** — under a gateway-only policy the platform also
+  refuses DNS for non-allowlisted hosts, so transparent interception needs a local
+  resolver returning dummy IPs for proxied hosts (keep the policy gateway-only; do
+  not allowlist proxied hosts). Verified that IP-direct egress is blocked, so the
+  local-resolver approach is contained.
 - **Trust-store gaps** — static/pinned/Go-root runtimes bypass the local CA.
   Enumerate and handle; document unsupported cases; the MITM fails closed
   pre-trust.
@@ -380,13 +387,6 @@ the proxy blocks unrouted egress, so partial rollout stays fail-closed.
   the Sprite exists? (Affects mint ordering.)
 - Does the connector gateway stream large/chunked bodies well enough for git pack
   data? (The historical read-latency blocker — measure.)
-- **Does the network egress policy enforce at L3/L4 or DNS-only?** If DNS-only, a
-  root agent could exfil data to a hard-coded IP. Decides whether the gateway-only
-  lockdown fully contains a determined adversarial agent. (Credential theft is
-  impossible regardless.)
-- **How do DNS filtering and transparent interception compose?** Likely a local
-  resolver returning a dummy IP for proxied hosts + a gateway-only egress policy —
-  confirm and specify.
 - Which Sprite runtimes ignore the system trust store, and how are they handled?
 - Real per-session mint latency via Browser Rendering, and how much overlaps VM
   boot?
@@ -413,7 +413,13 @@ Resolved:
   connectors are Sprite-scoped, and the network egress policy (enforced outside the
   VM) is the boundary. The proxy is UX/routing, not security.
 - ~~Is there a network egress lockdown?~~ Yes — `POST /v1/sprites/{name}/policy/network`
-  (DNS/network-layer, outside-VM). Lock to gateway-only. (L3/L4-vs-DNS depth is the
-  one open sub-question.)
+  (allow/deny domain rules, outside-VM). Lock to gateway-only.
+- ~~Does the policy enforce at L3/L4 or DNS-only?~~ **L3/L4 (verified 2026-07-08):**
+  IP-direct `connect()` to non-allowlisted hosts is refused even with no DNS. So the
+  gateway-only lockdown is a hard boundary; no IP-direct exfil.
+- ~~How do DNS filtering and transparent interception compose?~~ Under a gateway-only
+  policy the platform refuses DNS for non-allowlisted hosts, so use a local resolver
+  returning dummy IPs for proxied hosts (redirect catches the connection; L3/L4 block
+  contains any bypass). Do not allowlist proxied hosts.
 - ~~Browser automation host?~~ Cloudflare Browser Rendering first; switch to Fly if
   latency is too high.

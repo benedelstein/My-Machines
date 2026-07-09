@@ -6,7 +6,8 @@
 - [x] 1.4 Confirm REST: `PATCH`/`PUT /v1/oauth/connections/{id}` sets `access_policy`; REST create only covers preset providers.
 - [x] 1.5 Confirm the Sprites gateway does NOT forward a verifiable Sprite identity → per-session connectors required.
 - [x] 1.6 Confirm the transparent egress proxy works (MITM, auth stripping, gateway rewrite/injection, iptables REDIRECT captures curl/Node/Python; `CAP_NET_ADMIN` present).
-- [x] 1.12 Re-test toolchain install (2026-07-08): Sprite user has passwordless `sudo`; `sudo apt-get install -y nftables iptables` works on Ubuntu 26.04; NAT REDIRECT diverts live connections; `cap_net_admin`+`cap_sys_admin` present. No R2 staging needed. Also revealed the agent has root → bypass concern (see 6.4).
+- [x] 1.12 Re-test toolchain install (2026-07-08): Sprite user has passwordless `sudo`; `sudo apt-get install -y nftables iptables` works on Ubuntu 26.04; NAT REDIRECT diverts live connections; `cap_net_admin`+`cap_sys_admin` present. No R2 staging needed.
+- [x] 1.13 Test network egress policy enforcement (2026-07-08): `POST /v1/sprites/{name}/policy/network` with allow-only `api.sprites.dev` blocks DNS names AND raw IP-direct `connect()` to non-allowlisted hosts (L3/L4, not DNS-only), while the gateway stays reachable. Confirms gateway-only lockdown is a hard boundary; agent-root is a non-issue.
 - [ ] 1.7 Live-check which id the REST connection endpoints take (gateway connection id vs detail id) and the delete verb/path.
 - [ ] 1.8 Confirm whether Sprite labels can be set at Sprite creation, or scoping must be by Sprite id after the Sprite exists.
 - [ ] 1.9 Measure gateway streaming of large/chunked bodies for git pack data.
@@ -21,7 +22,7 @@
 - [ ] 2.3 Generalize `sprite-egress-proxy.mjs` from a single hardcoded target to a destination routing table (host → connector URL | pass-through | block) with a fail-closed default; strip client auth; forward query + stream bodies.
 - [ ] 2.4 Install iptables/nft OUTPUT REDIRECT of tcp/443 to the proxy, EXCLUDING the gateway host/IPs (and localhost) so the proxy's own upstream calls aren't intercepted; pin gateway IPs at provisioning.
 - [ ] 2.5 Proxy lifecycle: start at provisioning; rotate/expire CA + rules with the session; tear down (proxy, rules, CA) on session end.
-- [ ] 2.6 Nail the DNS/interception composition: run a local resolver so proxied hosts resolve (dummy IP) and get redirected, while the egress policy denies actual non-gateway egress. Confirm whether the policy blocks IP-direct egress (data-exfil containment) or if additional controls are needed.
+- [ ] 2.6 Implement the DNS/interception composition: run a local resolver (`127.0.0.1`) returning dummy IPs for proxied hosts so the client emits a connection the redirect can catch, while keeping the egress policy gateway-only (do NOT allowlist proxied hosts). L3/L4 egress enforcement is verified (2026-07-08: IP-direct connect to non-allowlisted hosts refused), so no extra IP-exfil control is needed.
 
 ## 3. Data Model (D1)
 
