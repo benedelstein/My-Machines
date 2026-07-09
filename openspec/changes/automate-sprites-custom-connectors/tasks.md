@@ -5,7 +5,8 @@
 - [x] 1.3 Confirm access scoping is post-creation only; default is deny-all.
 - [x] 1.4 Confirm REST: `PATCH`/`PUT /v1/oauth/connections/{id}` sets `access_policy`; REST create only covers preset providers.
 - [x] 1.5 Confirm the Sprites gateway does NOT forward a verifiable Sprite identity → per-session connectors required.
-- [x] 1.6 Confirm the transparent egress proxy works (MITM, auth stripping, gateway rewrite/injection, iptables REDIRECT captures curl/Node/Python; `CAP_NET_ADMIN` present; nft/iptables missing + staging workaround).
+- [x] 1.6 Confirm the transparent egress proxy works (MITM, auth stripping, gateway rewrite/injection, iptables REDIRECT captures curl/Node/Python; `CAP_NET_ADMIN` present).
+- [x] 1.12 Re-test toolchain install (2026-07-08): Sprite user has passwordless `sudo`; `sudo apt-get install -y nftables iptables` works on Ubuntu 26.04; NAT REDIRECT diverts live connections; `cap_net_admin`+`cap_sys_admin` present. No R2 staging needed. Also revealed the agent has root → bypass concern (see 6.4).
 - [ ] 1.7 Live-check which id the REST connection endpoints take (gateway connection id vs detail id) and the delete verb/path.
 - [ ] 1.8 Confirm whether Sprite labels can be set at Sprite creation, or scoping must be by Sprite id after the Sprite exists.
 - [ ] 1.9 Measure gateway streaming of large/chunked bodies for git pack data.
@@ -14,11 +15,12 @@
 
 ## 2. Sprite-Side Transparent Proxy
 
-- [ ] 2.1 Bundle/stage an nft/iptables toolchain into the Sprite image (it lacks one and cannot `apt-get`); fail closed if absent. (Fallback proven: extracted `nft` + `LD_LIBRARY_PATH`.)
+- [ ] 2.1 Provide the nft/iptables toolchain: bake it into the Sprite image (preferred, avoids a per-boot apt round-trip) or `sudo apt-get install -y nftables iptables` at provisioning (verified to work via passwordless sudo); fail closed if rules can't be established.
 - [ ] 2.2 Generate a per-Sprite CA and install into the system store + per-runtime stores (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, ...); per-host leaf certs via SNI.
 - [ ] 2.3 Generalize `sprite-egress-proxy.mjs` from a single hardcoded target to a destination routing table (host → connector URL | pass-through | block) with a fail-closed default; strip client auth; forward query + stream bodies.
 - [ ] 2.4 Install iptables/nft OUTPUT REDIRECT of tcp/443 to the proxy, EXCLUDING the gateway host/IPs (and localhost) so the proxy's own upstream calls aren't intercepted; pin gateway IPs at provisioning.
 - [ ] 2.5 Proxy lifecycle: start at provisioning; rotate/expire CA + rules with the session; tear down (proxy, rules, CA) on session end.
+- [ ] 2.6 Resolve the bypass problem: determine whether the session agent can run without sudo (separate privileged init owns the proxy/rules) or whether Fly can enforce egress at the VM boundary — otherwise the proxy is defense-in-depth only against an adversarial root agent.
 
 ## 3. Data Model (D1)
 

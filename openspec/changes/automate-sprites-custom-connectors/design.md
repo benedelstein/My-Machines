@@ -76,14 +76,17 @@ toolchain plumbing below.
 ### 1. Egress redirection (iptables/nft)
 
 - Redirect outbound `tcp dport 443` from the Sprite's processes to the local proxy
-  port with an OUTPUT NAT REDIRECT rule. The Sprite has **`CAP_NET_ADMIN`**, so
-  REDIRECT is permitted (verified).
-- **Complication — the toolchain is missing.** `nft`/`iptables` are **not installed**
-  by default and `apt-get` fails because the Sprite is **not uid 0**. Proven
-  workaround: download/extract the `nftables` `.deb`s into `/tmp` and run the
-  extracted `nft` with `LD_LIBRARY_PATH`. Production must **bundle the nft/iptables
-  toolchain in the Sprite image**, or stage it from R2 during provisioning, and
-  **fail closed** if it is absent (no redirect ⇒ do not start the Sprite).
+  port with an OUTPUT NAT REDIRECT rule.
+- **Toolchain install is trivial — earlier "can't apt-get" finding was wrong**
+  (re-tested 2026-07-08 on a fresh Sprite, Ubuntu 26.04). The Sprite runs as uid
+  1001 but has **passwordless `sudo`**, so `sudo apt-get install -y nftables
+  iptables` succeeds; `sudo nft`/`sudo iptables` then add NAT REDIRECT rules that
+  **actually divert live connections** (verified: a connect to `1.1.1.1:12345` was
+  redirected to a local listener). `CapEff` includes `cap_net_admin` **and**
+  `cap_sys_admin`. So: no R2 `.deb` staging, no `LD_LIBRARY_PATH` hack. Prefer
+  baking the toolchain into the Sprite image (avoids a per-boot apt round-trip and
+  network dependency); otherwise `sudo apt-get install` at provisioning works.
+  Fail closed if the toolchain or rules can't be established.
 - **Complication — don't intercept the gateway.** The proxy's own upstream calls to
   the Sprites gateway (`api.sprites.dev`) must **not** be redirected, or it loops.
   Exclude the gateway host/IPs from the REDIRECT rule (and set `NO_PROXY` for the
@@ -123,6 +126,34 @@ toolchain plumbing below.
 - Start the proxy at provisioning as a long-lived process; install CA, rules, and
   routing table before the agent runs; tear all of it down (proxy, rules, CA,
   secret) on session end.
+
+### 5. The bypass problem — the agent has root (critical)
+
+The 2026-07-08 test surfaced the thing that actually matters for this design: the
+Sprite user has **passwordless `sudo`**. That makes setup trivial, but it also
+means **anything running in the Sprite with that user can undo the interception** —
+`sudo nft flush ruleset` / `sudo iptables -t nat -F OUTPUT` removes the redirect,
+`sudo kill` stops the proxy, and the process can then reach any upstream directly,
+or read the proxy's memory / the local CA key. So an in-Sprite transparent proxy is
+**not a hard security boundary against a root-capable agent**. It reliably prevents
+*accidental* leakage and misconfigured tools; it does **not** contain an adversarial
+agent that wants to exfiltrate.
+
+This reframes what the transparent proxy is for and forces a privilege decision:
+
+- If the agent is trusted-but-buggy, the proxy is fine as defense-in-depth.
+- If the agent may be adversarial (it runs arbitrary user code), the proxy only
+  holds if the **agent does not have root**. Options: run the agent as an
+  unprivileged user with no sudo while a separate privileged init installs and owns
+  the proxy/rules; or enforce egress routing at the **Fly/VM boundary** (outside the
+  Sprite) so in-Sprite root cannot remove it. Both need verification — can we run
+  the session agent without sudo in a Sprite, and/or does Fly expose egress control
+  at the machine boundary?
+
+Note this does **not** weaken the webhook/git v1 win: those secrets are never in the
+Sprite regardless, and the connector is Sprite-scoped at the gateway, so even a root
+agent that bypasses the proxy cannot forge a webhook or extract a git token. The
+bypass problem only bounds the *arbitrary-untrusted-egress* goal.
 
 ## Connector provisioning (`mintConnector`)
 
@@ -164,7 +195,9 @@ drives create directly.
 - **Option B — Fly.io Machine + upstream Playwright (fallback):** matches the
   Sprites-on-Fly infra; called over RPC. Use if CF caps/fidelity bite.
 
-Decision: Browser Rendering first, Fly Machine fallback.
+Decision: **start on Browser Rendering; switch to a Fly Machine if measured
+per-session mint latency is too high.** Instrument the mint end-to-end from day one
+so the switch trigger is a number, not a guess.
 
 ## Synchronous, fail-closed provisioning — and its latency
 
@@ -249,8 +282,15 @@ agent -> some other https host -> proxy: no routing entry -> BLOCK (fail closed)
 
 - **Per-session mint latency** on the critical path. Minimize + overlap with VM
   boot; measure. Not removable without a shared connector (ruled out).
-- **nft/iptables staging fails** ⇒ no redirect ⇒ egress uncaptured. Bundle the
-  toolchain in the Sprite image; fail closed if absent.
+- **Agent has root (`sudo`) ⇒ can bypass the proxy.** The in-Sprite transparent
+  proxy is not a hard boundary against an adversarial root agent (it can flush the
+  rules / kill the proxy / read the CA key). Contain by running the agent without
+  sudo or enforcing egress at the Fly/VM boundary — otherwise the proxy is
+  defense-in-depth only. Does not affect the webhook/git win (secrets are never in
+  the Sprite regardless).
+- **Toolchain install** is trivial via passwordless `sudo apt-get` (verified), so
+  no R2 staging; bake into the image to avoid a per-boot apt dependency; fail closed
+  if rules can't be established.
 - **Trust-store gaps** — static/pinned/Go-root runtimes bypass the local CA.
   Enumerate and handle; document unsupported cases; the MITM fails closed
   pre-trust.
@@ -294,6 +334,10 @@ the proxy blocks unrouted egress, so partial rollout stays fail-closed.
   the Sprite exists? (Affects mint ordering.)
 - Does the connector gateway stream large/chunked bodies well enough for git pack
   data? (The historical read-latency blocker — measure.)
+- **Can the session agent run without sudo/root in a Sprite, and/or does Fly expose
+  egress control at the machine boundary?** Decides whether the transparent proxy is
+  a real boundary against an adversarial agent or only defense-in-depth. (The Sprite
+  user has passwordless sudo by default — verified 2026-07-08.)
 - Which Sprite runtimes ignore the system trust store, and how are they handled?
 - Real per-session mint latency via Browser Rendering, and how much overlaps VM
   boot?
@@ -312,3 +356,9 @@ Resolved:
 - ~~Async connector-pending?~~ No — synchronous, fail-closed.
 - ~~Transparent proxy + iptables in scope?~~ **Yes, v1.** User-facing secret
   definition/storage is the only deferred piece.
+- ~~Can the Sprite install nft/iptables?~~ **Yes (verified 2026-07-08):** passwordless
+  `sudo apt-get install -y nftables iptables` works; NAT REDIRECT diverts live
+  connections. No R2 staging hack. (This also revealed the agent has root — see the
+  bypass open question.)
+- ~~Browser automation host?~~ Cloudflare Browser Rendering first; switch to Fly if
+  latency is too high.
