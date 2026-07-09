@@ -1,13 +1,27 @@
 ## Context
 
-This is the design for the **Sprite secrets proxy**. The goal: no usable webhook or
-git credential ever lives inside a Sprite, and the Sprite's egress is transparently
-routed through Sprites connectors so that credentials are injected outside the
-Sprite and a compromised Sprite cannot impersonate the session.
+This is the design for the **Sprite secrets proxy**. The core goal is
+**caller-identity-bound authorization**: a credential's use must be provable to come
+from *that exact Sprite*, not merely from anyone holding a bearer string. A
+compromised Sprite (untrusted code, root) must not be able to extract a credential
+and replay its authority off-Sprite — from a laptop, another org's Sprite, or after
+the session ends.
+
+Three distinct security properties, all needed:
+
+1. **Caller-identity binding** — Fly verifies the calling Sprite against the
+   connector's access policy before injecting the credential, so an extracted
+   connector URL is useless to anyone who is not that Sprite. This is what bearer
+   tokens lack and the main reason for connectors.
+2. **No credential in the Sprite** — Fly injects the real secret downstream; the
+   Sprite never holds it.
+3. **Network egress lockdown** — the Sprite can only reach the gateway, so it can't
+   exfiltrate to arbitrary hosts (already built; enforced outside the VM at L3/L4).
 
 v1 builds two things together:
 
-1. **Per-session Custom API connectors** for the webhook and git credentials.
+1. **Per-session Custom API connectors** for the webhook and git credentials
+   (identity-bound, replacing replayable bearers).
 2. **A transparent Sprite-side egress proxy** (local MITM + iptables/nft) that
    reroutes the Sprite's outbound HTTPS to those connectors — the general
    "arbitrary connector URL" proxy mechanism, with all its runtime complications.
@@ -35,45 +49,70 @@ Much of the "secrets proxy" is already built and working:
   push both work with direct GitHub denied.
 
 So the existing **Worker-proxy + per-session-bearer + network-lockdown** pattern
-already keeps the real credentials out of the Sprite and works under lockdown. The
-only residual gap it leaves is that the per-session bearer secret is itself
-extractable from the Sprite.
+keeps the *real upstream* credential out of the Sprite and works under lockdown. But
+it authenticates the Sprite→Worker call with a **bearer secret**, and that leaves a
+real hole.
 
-### The actual remaining gap
+### The actual remaining gap: bearer tokens are replayable off-sprite
 
-For a bearer like `gitProxySecret`, extraction has a **tightly bounded** blast
-radius: it authorizes only that one repo, only `cloude/*` branches suffixed with the
-session id, only while the session installation token is valid, only at the Worker
-endpoint. So the incremental value of making it non-extractable is modest.
+A bearer secret authorizes by **possession, not identity**. The Worker checks "does
+this request carry the right string" — not "did this actually come from that exact
+Sprite." The session agent runs untrusted code with root, so it can read the bearer
+and exfiltrate it. Once off the Sprite, the credential's authority can be replayed
+**from anywhere** — a laptop, a Sprite in another org, or after the session has
+ended. This is not a bounded "which operations" blast radius; it is a "who can call
+it, from where" hole:
 
-The connector + transparent-proxy work in this change is therefore justified by two
-things the existing pattern does **not** do, not by a git/webhook emergency:
+- **git**: read the private repo's contents, or push, from a laptop with the
+  extracted secret.
+- **webhook**: POST fake agent responses into the user's chat log from any host —
+  an integrity breach that corrupts what the user sees.
+- **user secrets (later)**: replay the user's OpenAI/Slack key from off-Sprite.
 
-1. **Non-extractable secrets** — moving a per-session bearer into a Sprites connector
-   so Fly injects it and the Sprite never holds it.
-2. **Transparent interception of unmodified code** — so a tool that hardcodes a real
+**This is the primary reason for connectors: caller-identity-bound authorization.**
+Fly verifies the calling Sprite's identity against the connector's access policy
+(Sprite id / label) *before* injecting the credential and forwarding. Only the exact
+authorized Sprite can invoke it; a laptop has no Sprite identity and another org's
+Sprite has the wrong one, so both are rejected at the gateway — a property a bearer
+URL cannot have. The Sprite also never holds the injected secret at all.
+
+For this to actually close the hole, the Worker must **stop accepting the
+sprite-held bearer** and require the gateway-injected credential (which the Sprite
+never possesses). Leaving the raw `WORKER_URL/...` endpoint accepting a
+Sprite-carried token keeps it replayable.
+
+So the connector work is justified by three properties the bearer pattern lacks, in
+priority order:
+
+1. **Caller-identity binding** — the credential is usable only from the authorized
+   Sprite; extraction → off-Sprite replay is blocked at the platform layer. (This is
+   the point, and it applies to git, webhook, and user secrets alike.)
+2. **Non-extractable secret** — the Sprite never holds it; Fly injects it downstream.
+3. **Transparent interception of unmodified code** — a tool that hardcodes a real
    upstream URL (e.g. `api.openai.com`) is routed to a connector without
-   reconfiguring its base URL. This is the "arbitrary connector URL" capability.
-
-Where the existing pattern already suffices (git today), prefer leaving it; apply
-connectors where one of the two properties above is actually needed.
+   reconfiguring its base URL (the "arbitrary connector URL" capability).
 
 ## Decision: one connector per session (no multiplexing)
 
+Two separate jobs are in play — **authorization** (may this caller use the
+credential?) and **identification** (which session is this?). Fly does the first;
+the per-session secret does the second.
+
 A single connector reused across sessions **does not work** — settled, not open.
 The Sprites gateway does **not** forward a trustworthy Sprite identity to the
-upstream (tested), so with one shared connector the Worker could not tell which
-session called. Therefore each session mints its own connector(s), and identity is
-carried by a **per-session shared secret**:
+*upstream* (tested), so with one shared connector the Worker could not tell which
+session called. Therefore each session mints its own connector(s):
 
-- At provisioning, generate a per-session secret the Worker stores in D1 keyed to
-  the session.
-- The connector's injected credential **is** that secret; its `base_api_url` is our
-  Worker endpoint; its access policy is scoped to that session's Sprite.
-- When the Sprite calls the connector, Fly injects the secret; the Worker looks it
-  up, which both **identifies the session** and **proves the call came through the
-  sprite-scoped gateway**. The per-session secret replaces the missing sprite-id
-  header.
+- **Authorization (Fly):** the connector's access policy is scoped to that session's
+  Sprite, so Fly rejects any caller that is not that Sprite — this is the
+  identity binding, and it does not depend on the injected secret.
+- **Identification (Worker):** at provisioning, generate a per-session secret stored
+  in D1 keyed to the session; the connector injects it. Because Fly only forwards a
+  call it already authorized as coming from this Sprite, the injected secret arriving
+  at the Worker reliably maps to this session. The secret is how the Worker knows
+  *which* session — it is not itself the thing that keeps out a laptop (Fly's policy
+  is). This is why a per-session connector is needed even though the gateway won't
+  forward a sprite-id header.
 
 One per-session connector can serve both webhook and git by path (the gateway
 forwards `base_api_url + <path after the connection id>`). Use one where possible;
@@ -295,26 +334,42 @@ sessions and a fast Worker health `test_url`, and **overlap the mint with VM boo
 (already seconds) so it hides under existing startup rather than adding to it. No
 speculative pre-mint pool.
 
-## Webhook (v1)
+## Webhook (v1) — the priority target
 
-Add a routing-table entry: the webhook host → this session's connector. The agent
-POSTs the normal webhook URL with no secret; the proxy reroutes to the connector;
-Fly injects the per-session secret; the Worker accepts the callback only when the
-injected secret maps to the session. Retire the extractable webhook token behind a
-flag once proven.
+The webhook is the clearest case for caller-identity binding. Today the webhook is
+authenticated by a Sprite-held bearer, so anyone who extracts it can **POST fake
+agent responses into the user's chat log from any host** — corrupting what the user
+sees, and doable after the session ends. That is an integrity breach we can't allow,
+and a bearer cannot prevent it.
 
-## Git (v1) — keep the current path as-is
+Route the webhook through this session's connector: the agent POSTs the normal
+webhook URL with no secret; the proxy reroutes to the connector; Fly **verifies the
+call came from this exact Sprite** and injects the per-session secret; the Worker
+accepts the callback only when it carries the gateway-injected secret mapping to the
+session. Critically, the Worker must **stop accepting a Sprite-held bearer** on the
+webhook endpoint so the old replayable path is closed. Retire the extractable webhook
+token behind a flag once proven.
 
-Decision: **do not connector-ize git in v1.** The existing `GitProxyService` +
-`locked` network policy already keeps the real GitHub credential out of the Sprite,
-handles fetch + push, enforces branch validation, and works under lockdown (see
-"What already exists"). The only thing left is making the per-session
-`gitProxySecret` non-extractable, and its blast radius is already tightly bounded, so
-it is not worth a per-session connector mint for v1.
+## Git
 
-Leave git on its current path. Treat "route git through a connector so the secret is
-non-extractable" as optional later hardening. The transparent proxy needs no git
-routing entry in v1.
+Earlier this section said "keep git as-is because the `gitProxySecret` blast radius
+is tiny." That was wrong — it ignored off-Sprite replay. The git bearer is
+replayable from anywhere: someone who extracts it can read the private repo's
+contents or push to it **from a laptop**, or from a Sprite in another org. So git has
+the same caller-identity gap as everything else, and connector-izing it (route
+git through the per-session connector; the Worker git-proxy accepts only the
+gateway-injected credential, not a Sprite-held bearer) closes a real hole, not a
+cosmetic one.
+
+What the current path already gets right and must be preserved: the real GitHub
+installation token stays in the Worker, push branch validation (`cloude/*` + session
+suffix + branch lock), repo allowlisting, and working under `locked` network policy.
+Connector-izing changes only *how the Sprite→Worker call is authenticated* (identity
+binding instead of a replayable bearer), not the GitHub-side handling.
+
+Whether git lands in the first cut or a fast follow is a sequencing call (it shares
+all the connector machinery with the webhook), but it is a genuine connector target
+— not "leave it alone." The webhook is the more urgent of the two (see below).
 
 ## Data model (D1) — v1
 

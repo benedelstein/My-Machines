@@ -1,13 +1,17 @@
 ## Why
 
-Session Sprites today receive extractable secrets — a webhook callback token and a
-git proxy token — as runtime material. Anything that compromises a Sprite can read
-them and impersonate the Sprite: forge webhook callbacks to the Worker, or drive git
-operations from anywhere. The git read path is also degraded (revoke-after-clone
-because chunked pulls through the proxy were too slow). v1 of the **Sprite secrets
-proxy** removes these credentials from the Sprite and transparently routes the
-Sprite's egress through per-session Sprites Custom API connectors, so credentials are
-injected outside the Sprite and a leaked-from-the-Sprite value is worthless.
+Session Sprites today authenticate their callbacks with **bearer secrets** — a
+webhook token and a git proxy token handed to the Sprite. A bearer authorizes by
+possession, not identity: the Worker cannot tell whether a call actually came from
+that Sprite. The session agent runs untrusted code with root, so it can extract the
+bearer and replay its authority **from anywhere** — a laptop, a Sprite in another
+org, or after the session ends. That means someone can read/push the private repo
+off-Sprite, or POST fake agent responses into the user's chat log. The **Sprite
+secrets proxy** closes this by moving these credentials behind per-session Sprites
+Custom API connectors: Fly verifies the calling Sprite's identity against the
+connector's access policy before injecting the credential, so the credential is
+usable only from that exact Sprite and an extracted URL is worthless to anyone else.
+The same identity-bound path is what future user-supplied secrets will use.
 
 Sprites exposes connector creation only through the dashboard, not the public REST
 API, so part of this work is automating that dashboard flow.

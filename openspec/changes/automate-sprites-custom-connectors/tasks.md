@@ -54,10 +54,15 @@
 - [ ] 7.1 Add a routing entry so the webhook host rewrites to this session's connector; Worker verifies the injected secret instead of a per-Sprite token.
 - [ ] 7.2 Retire the extractable webhook token behind a flag once proven.
 
-## 8. Git — keep as-is (no v1 work)
+## 8. Git
 
-- [x] 8.1 Decision: leave git on the existing `GitProxyService` + `locked` network-policy path. It already keeps the real GitHub credential in the Worker, does fetch + push, enforces branch validation, and works under lockdown. The only residual (extractable per-session `gitProxySecret`) has a tightly bounded blast radius.
-- [ ] 8.2 (Optional, later) Route git through a connector to make the per-session secret non-extractable — only after the connector path is proven elsewhere.
+Git's bearer is replayable off-Sprite (read/push the private repo from a laptop), so
+it is a genuine connector target — same identity-binding reason as the webhook.
+Sequencing (first cut vs fast follow) is TBD; it shares all machinery with §7.
+
+- [ ] 8.1 Route git through the per-session connector; the Worker git-proxy accepts ONLY the gateway-injected credential and stops accepting a Sprite-held bearer.
+- [ ] 8.2 Preserve what already works: Worker-custodied installation token, `cloude/*` branch validation + branch lock, repo allowlist, `locked` network policy.
+- [ ] 8.3 Retire the extractable `gitProxySecret` bearer path behind a flag once proven.
 
 ## 9. Tests And Validation
 

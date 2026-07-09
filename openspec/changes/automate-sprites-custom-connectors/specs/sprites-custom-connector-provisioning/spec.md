@@ -72,6 +72,25 @@ redirection cannot be established.
   cannot be applied
 - **THEN** the session does not start rather than running with uncaptured egress
 
+### Requirement: Caller-identity-bound authorization (no off-Sprite replay)
+
+The system SHALL authorize each protected credential by the caller's verified Sprite
+identity (the connector gateway's access policy), not by possession of a bearer
+secret, so that an extracted credential cannot be replayed from anywhere other than
+the authorized Sprite.
+
+#### Scenario: Extracted credential replayed from off-Sprite
+
+- **WHEN** a caller that is not the authorized session Sprite (e.g. a laptop, or a
+  Sprite in another org) presents the connector URL or an extracted secret
+- **THEN** the request is rejected because the gateway access policy verifies Sprite
+  identity before injecting the credential
+
+#### Scenario: Another Sprite attempts to use the connector
+
+- **WHEN** a Sprite other than the scoped session Sprite tries to use the connector
+- **THEN** the gateway access policy denies it
+
 ### Requirement: Per-session connector carries session identity
 
 The system SHALL provision one Custom API connector per session, scoped to that
@@ -85,11 +104,6 @@ Worker SHALL identify the session by that injected secret.
 - **THEN** the Worker resolves it to the owning session and treats the call as that
   session's, without relying on a gateway-forwarded Sprite identity
 
-#### Scenario: Another Sprite attempts to use the connector
-
-- **WHEN** a Sprite other than the scoped session Sprite tries to use the connector
-- **THEN** the gateway access policy denies it
-
 ### Requirement: Webhook impersonation prevention
 
 The system SHALL accept a session webhook callback only when it arrives through the
@@ -102,18 +116,24 @@ session.
   injected per-session secret
 - **THEN** the Worker rejects it
 
-### Requirement: Git access without extractable credentials
+### Requirement: Git access is caller-identity-bound
 
-The system SHALL route git fetch and push through the egress path with the git
-credential injected at the Worker, retain branch validation, and enable pull and
-push without leaving an extractable token in the Sprite.
+The system SHALL route git fetch and push through the per-session connector so the
+Sprite→Worker call is authorized by verified Sprite identity, MUST stop accepting a
+Sprite-held bearer on the git-proxy endpoint, and SHALL retain branch validation,
+repo allowlisting, and Worker-custodied GitHub tokens.
 
 #### Scenario: Agent pulls and pushes
 
 - **WHEN** the agent performs git fetch and push
-- **THEN** the operations succeed through the egress path with the credential
-  injected downstream, branch validation still applied, and no reusable git token
-  present in the Sprite
+- **THEN** the operations succeed through the connector with the GitHub credential
+  injected downstream and branch validation still applied
+
+#### Scenario: Extracted git secret replayed off-Sprite
+
+- **WHEN** an extracted git-proxy secret is presented to the Worker from a caller
+  that did not pass through this session's sprite-scoped gateway
+- **THEN** the Worker rejects it
 
 ### Requirement: Dashboard-backed connector creation with REST scoping
 
