@@ -1,512 +1,334 @@
 ## Context
 
-This is the design for the **Sprite secrets proxy**. The core goal is
-**caller-identity-bound authorization**: a credential's use must be provable to come
-from *that exact Sprite*, not merely from anyone holding a bearer string. A
-compromised Sprite (untrusted code, root) must not be able to extract a credential
-and replay its authority off-Sprite — from a laptop, another org's Sprite, or after
-the session ends.
+This designs the **Sprite secrets proxy** as one coherent system. It is a large,
+multi-pronged change; the architecture below is whole, and the "Staging" section
+sequences the *build* without splitting the *concept*. Nothing here is meant to be
+redesigned later — the abstractions (connector taxonomy, routing table, D1 schema,
+data/control planes) are chosen so every prong composes.
 
-Three distinct security properties, all needed:
+### The three prongs (all in scope)
 
-1. **Caller-identity binding** — Fly verifies the calling Sprite against the
-   connector's access policy before injecting the credential, so an extracted
-   connector URL is useless to anyone who is not that Sprite. This is what bearer
-   tokens lack and the main reason for connectors.
-2. **No credential in the Sprite** — Fly injects the real secret downstream; the
-   Sprite never holds it.
-3. **Network egress lockdown** — the Sprite can only reach the gateway, so it can't
-   exfiltrate to arbitrary hosts (already built; enforced outside the VM at L3/L4).
+1. **Caller-identity binding.** Every protected credential is authorized by the
+   *verified identity of the calling Sprite*, not by possession of a bearer secret.
+   Fly checks the connector's access policy against the calling Sprite before
+   injecting the credential, so an extracted URL/secret cannot be replayed from a
+   laptop, another org's Sprite, or after the session ends.
+2. **Secrets out of the sandbox.** No credential — webhook, git, provider API key,
+   or user-supplied secret — ever exists inside the Sprite. Fly injects it
+   downstream of the Sprite.
+3. **Arbitrary secret values via connectors + a transparent MITM proxy.** Users
+   (and the system) can define arbitrary secrets (OpenAI, Slack, any custom API).
+   A Sprite-local transparent proxy routes the Sprite's *unmodified* egress to the
+   right connector, which injects the real secret. The agent calls normal URLs and
+   never holds a key.
 
-v1 builds two things together:
+### Threat model
 
-1. **Per-session Custom API connectors** for the webhook and git credentials
-   (identity-bound, replacing replayable bearers).
-2. **A transparent Sprite-side egress proxy** (local MITM + iptables/nft) that
-   reroutes the Sprite's outbound HTTPS to those connectors — the general
-   "arbitrary connector URL" proxy mechanism, with all its runtime complications.
+The session agent runs untrusted code **with root** (passwordless `sudo`, verified).
+It can read anything in the Sprite, flush iptables, kill the proxy, read the local
+CA key. The design must therefore make security independent of anything the Sprite
+controls:
 
-Explicitly **out of scope for v1**: the user-facing part — letting users define
-their own secrets (OpenAI, Slack, ...) and storing/managing them. The transparent
-proxy is built generically so those slot in later as additional routing entries,
-but we do not build the definition UI, storage, or Worker secret custody now.
+- **Prevented:** off-Sprite replay of any credential (prong 1, via Fly identity
+  checks); extraction of any real secret (prong 2, secrets never in the Sprite);
+  exfiltration to arbitrary hosts (network egress policy, enforced outside the VM at
+  L3/L4 — verified).
+- **Not prevented (accepted, and true of any design):** a *live* compromised Sprite
+  using the connectors it is legitimately authorized for (e.g. spending the user's
+  own OpenAI budget during the session); and runtimes that bypass the local CA
+  (contained by the network policy, which still blocks their real egress).
 
-### What already exists (important — the plan is not greenfield)
+### What already exists (build on it, don't reinvent)
 
-Much of the "secrets proxy" is already built and working:
+- `network-policy.ts` — `buildFinalNetworkPolicy` with a `locked` mode (Worker +
+  provider + `deny-all`). The Sprites network policy is enforced outside the VM at
+  **L3/L4** (verified: IP-direct `connect()` to non-allowlisted hosts is refused).
+- `GitProxyService` — Sprite calls `WORKER_URL/git-proxy/:sessionId/...` with a
+  per-session `gitProxySecret` written into git config as
+  `Authorization: Bearer <secret>`; the Worker mints the GitHub installation token
+  and injects it only when forwarding to GitHub. Push branch validation
+  (`cloude/*` + session suffix + branch lock) and repo allowlist are enforced.
+- `session-provision.service.ts` — `cloneRepo`, git remote setup, and a
+  `plainEnvVars` path (the very name implies the missing *secret* env path this
+  change provides).
 
-- `network-policy.ts` already builds Sprite egress policies with a `locked` mode
-  (`buildFinalNetworkPolicy`) that allows only the Worker + provider and appends a
-  terminal `deny-all`. This is the same DNS+L3/L4 lockdown discussed elsewhere in
-  this doc — it exists.
-- `GitProxyService` already proxies git: the Sprite calls
-  `WORKER_URL/git-proxy/:sessionId/github.com/owner/repo.git/...` with a per-session
-  `gitProxySecret` bearer; the Worker mints an installation token and injects
-  `Authorization: Basic x-access-token:<token>` only when forwarding to GitHub. The
-  **real GitHub credential never enters the Sprite.** Push branch validation
-  (`cloude/*` + session suffix + branch lock) and repo allowlisting are enforced.
-- In `locked` mode, `cloneRepo` points `origin` at the Worker git proxy so fetch and
-  push both work with direct GitHub denied.
+The gap: everything is authenticated by **bearer secrets in the Sprite** (git today;
+webhook and provider auth on the same footing), which are replayable and extractable.
+No transparent proxy exists, and there is no path for arbitrary user secrets.
 
-So the existing **Worker-proxy + per-session-bearer + network-lockdown** pattern
-keeps the *real upstream* credential out of the Sprite and works under lockdown. But
-it authenticates the Sprite→Worker call with a **bearer secret**, and that leaves a
-real hole.
+## The unified model
 
-### The actual remaining gap: bearer tokens are replayable off-sprite
+Classify every outbound flow, and route each class exactly one way:
 
-A bearer secret authorizes by **possession, not identity**. The Worker checks "does
-this request carry the right string" — not "did this actually come from that exact
-Sprite." The session agent runs untrusted code with root, so it can read the bearer
-and exfiltrate it. Once off the Sprite, the credential's authority can be replayed
-**from anywhere** — a laptop, a Sprite in another org, or after the session has
-ended. This is not a bounded "which operations" blast radius; it is a "who can call
-it, from where" hole:
+| Class | Examples | Path |
+|---|---|---|
+| A. Credential → our Worker | webhook, git | Sprite → transparent proxy → **internal per-session connector** → our Worker (injects per-session secret) |
+| B. Credential → external upstream | provider API key, user secrets (OpenAI, Slack, custom) | Sprite → transparent proxy → **per-secret connector** → upstream (injects the real secret, Sprites-custodied) |
+| C. No credential | npm, pypi, github raw, apt, etc. | network-allowlisted, **direct** egress (no connector) |
+| D. Everything else | arbitrary hosts | **denied** by the network policy |
 
-- **git**: read the private repo's contents, or push, from a laptop with the
-  extracted secret.
-- **webhook**: POST fake agent responses into the user's chat log from any host —
-  an integrity breach that corrupts what the user sees.
-- **user secrets (later)**: replay the user's OpenAI/Slack key from off-Sprite.
+A connector is the single primitive for A and B: **Fly verifies Sprite identity →
+injects the secret → forwards.** That delivers prongs 1 and 2 uniformly. The
+transparent proxy is the routing layer that makes classes A and B work for
+*unmodified* agent code (prong 3), and the network policy makes C/D a hard boundary.
 
-**This is the primary reason for connectors: caller-identity-bound authorization.**
-Fly verifies the calling Sprite's identity against the connector's access policy
-(Sprite id / label) *before* injecting the credential and forwarding. Only the exact
-authorized Sprite can invoke it; a laptop has no Sprite identity and another org's
-Sprite has the wrong one, so both are rejected at the gateway — a property a bearer
-URL cannot have. The Sprite also never holds the injected secret at all.
+## Connector taxonomy
 
-For this to actually close the hole, the Worker must **stop accepting the
-sprite-held bearer** and require the gateway-injected credential (which the Sprite
-never possesses). Leaving the raw `WORKER_URL/...` endpoint accepting a
-Sprite-carried token keeps it replayable.
+Two kinds of connector, differing in lifetime, what they inject, and who custodies
+the secret:
 
-So the connector work is justified by three properties the bearer pattern lacks, in
-priority order:
+### Internal connector (class A) — per session
 
-1. **Caller-identity binding** — the credential is usable only from the authorized
-   Sprite; extraction → off-Sprite replay is blocked at the platform layer. (This is
-   the point, and it applies to git, webhook, and user secrets alike.)
-2. **Non-extractable secret** — the Sprite never holds it; Fly injects it downstream.
-3. **Transparent interception of unmodified code** — a tool that hardcodes a real
-   upstream URL (e.g. `api.openai.com`) is routed to a connector without
-   reconfiguring its base URL (the "arbitrary connector URL" capability).
+- **Lifetime:** one per session, minted at provisioning, deleted at teardown.
+- **Base URL:** our Worker (`WORKER_URL`), path-routed so one connector serves both
+  `/webhook` and `/git/...` (the gateway forwards `base + <path after conn id>`).
+- **Injected secret:** a **per-session secret** the Worker stores in D1 keyed to the
+  session. This is how the *Worker identifies which session* (the gateway does not
+  forward Sprite identity to the upstream — tested). Fly still does the identity
+  *authorization*; the secret only does session *identification*.
+- **Scope:** the session's Sprite (id). Only that Sprite can invoke it.
 
-## Decision: one connector per session (no multiplexing)
+### Credential connectors (class B) — per secret
 
-Two separate jobs are in play — **authorization** (may this caller use the
-credential?) and **identification** (which session is this?). Fly does the first;
-the per-session secret does the second.
+- **Lifetime:** one per secret value, long-lived, minted when the secret is defined
+  (provider key at setup; a user secret when the user adds it), reused across all
+  the owner's sessions. **Not** per session — that would mean a browser mint per
+  secret per session.
+- **Base URL:** the real upstream host (e.g. `api.openai.com`).
+- **Injected secret:** the **real credential**, custodied by **Sprites** (we pass it
+  once at connector creation and never store plaintext).
+- **Scope:** only the Sprites entitled to that secret. See "Scoping class-B
+  connectors" — this is the crux of keeping them identity-bound while long-lived.
 
-A single connector reused across sessions **does not work** — settled, not open.
-The Sprites gateway does **not** forward a trustworthy Sprite identity to the
-*upstream* (tested), so with one shared connector the Worker could not tell which
-session called. Therefore each session mints its own connector(s):
+## Scoping class-B connectors to the right Sprites
 
-- **Authorization (Fly):** the connector's access policy is scoped to that session's
-  Sprite, so Fly rejects any caller that is not that Sprite — this is the
-  identity binding, and it does not depend on the injected secret.
-- **Identification (Worker):** at provisioning, generate a per-session secret stored
-  in D1 keyed to the session; the connector injects it. Because Fly only forwards a
-  call it already authorized as coming from this Sprite, the injected secret arriving
-  at the Worker reliably maps to this session. The secret is how the Worker knows
-  *which* session — it is not itself the thing that keeps out a laptop (Fly's policy
-  is). This is why a per-session connector is needed even though the gateway won't
-  forward a sprite-id header.
+A credential connector is long-lived but must be usable only by Sprites entitled to
+that secret (the owning user's / environment's session Sprites). Two mechanisms;
+**decide by the label-immutability test below.**
 
-One per-session connector can serve both webhook and git by path (the gateway
-forwards `base_api_url + <path after the connection id>`). Use one where possible;
-split into two if webhook and git need different upstreams.
+- **Primary — per-session REST policy update (robust, no browser).** At session
+  start, `PATCH /v1/oauth/connections/{id}` to add this session's **Sprite id** to
+  the connector's access policy; remove it at teardown. Exact per-Sprite scoping,
+  fast (REST, not browser), independent of label behavior. Cost: a PATCH per session
+  per entitled secret, and **concurrency care** — concurrent sessions editing the
+  same connector's allowed-Sprite list race on read-modify-write; need atomic
+  add/remove or per-connector serialization (open question: does the REST policy API
+  support atomic list add/remove, or only whole-policy replace?).
+- **Alternative — label scoping (simpler, if labels are in-VM-immutable).** Give
+  the connector a policy `sprite_labels: [entitlement]` once; set that label on
+  entitled Sprites at creation. No per-session PATCH. **Only safe if an in-VM root
+  process cannot change its own Sprite's Fly labels** — otherwise a compromised
+  Sprite adds another secret's label and steals it. **Must verify** (a live test,
+  like the network-policy test); if in-VM labels are immutable, prefer this.
 
-## Decision: a transparent egress proxy is the routing mechanism
+Either way, entitlement (which secrets a session may use) is decided server-side
+from the session's environment; the Sprite never asserts its own entitlement.
 
-Rather than reconfigure every tool in the Sprite to call connector URLs, the Sprite
-runs a **local transparent proxy** and iptables/nft **redirects** its outbound 443
-into it. The proxy MITM-terminates TLS with a Sprite-trusted local CA, reads the
-plaintext request, looks the destination up in a **routing table**, strips the
-client's auth header, and **rewrites the request to the matching per-session
-connector gateway URL**. Fly injects the real secret; the Worker verifies it.
+## Data plane: the transparent proxy (with every complication)
 
-Why transparent instead of direct URL config:
+Provisioned into each Sprite; all non-secret. Generalizes the proven
+`sprite-egress-proxy.mjs` from a single hardcoded target to a routing table.
 
-- Captures **all** egress; the agent cannot bypass the connector by calling a URL
-  directly or by using a tool we didn't reconfigure.
-- It is the general mechanism for **arbitrary connector URLs** (what the user wants
-  now), so webhook and git are just the first two routing entries; future user
-  secrets are more entries, no new mechanism.
-- The agent sees normal URLs and no secret; the proxy and gateway do the rest.
+1. **Redirect (iptables/nft).** OUTPUT NAT REDIRECT of outbound `tcp dport 443` to
+   the local proxy. Install at provisioning via `sudo apt-get install -y nftables
+   iptables` (verified: passwordless sudo, `cap_net_admin`+`cap_sys_admin`, rules
+   divert live connections). The base image is fixed upstream — cannot be baked; the
+   network policy must allow the apt mirror during install (or install before
+   locking down). Fail closed if rules can't be applied.
+2. **Local CA + trust.** Per-Sprite CA; per-host SNI leaf certs. Install into the
+   system store (`update-ca-certificates`) and per-runtime stores
+   (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, ...). Rotate/expire
+   with the session. **Complication — trust-store gaps:** statically linked / Go-root
+   / cert-pinned runtimes reject the MITM; enumerate and handle, document unsupported
+   cases. The network policy backstops (their real egress is denied). Pre-trust the
+   MITM is correctly rejected (fail-closed).
+3. **Local resolver.** Under a gateway-only policy the platform **refuses DNS** for
+   non-allowlisted hosts (verified), so an unmodified client can't resolve
+   `api.openai.com` to open the connection the redirect would catch. Run a local
+   resolver (`127.0.0.1`) that answers **proxied** hosts with a dummy IP; the
+   redirect catches the connection regardless of address, and the L3/L4 policy still
+   blocks any real egress if the proxy is bypassed. Class-C hosts resolve normally
+   (or are allowlisted) and egress directly.
+4. **Rewrite + route.** The proxy reads the request (SNI = intended host), strips the
+   client `authorization`, and consults the **routing table**: host → { class-A/B
+   connector gateway URL | class-C pass-through | block }. It rewrites class-A/B to
+   `<gateway>/<connId>/<path>?<query>`. Fly injects the real secret and forwards.
+   **Fail-closed default:** unrouted → block, never forward with a secret.
+5. **Gateway exclusion.** The proxy's own calls to the gateway (`api.sprites.dev`)
+   must not be redirected (loop) or DNS-blocked. Pin gateway IPs at provisioning;
+   `NO_PROXY` for the explicit-proxy path.
+6. **Lifecycle.** Start before the agent runs; tear down proxy, rules, CA, resolver,
+   and the internal connector + per-session secret at session end.
 
-This is proven: `services/api-server/scripts/sprite-egress-proxy.mjs` +
-`test-sprite-egress-proxy.ts` demonstrated transparent interception, MITM, auth
-stripping, gateway rewrite, and header injection end to end. Production generalizes
-it from a single hardcoded target to a routing table and adds the provisioning and
-toolchain plumbing below.
+## Control plane: network egress policy (the hard boundary)
 
-## Decision: the Sprites network egress policy is the hard boundary
+`POST /v1/sprites/{name}/policy/network`, enforced outside the VM at L3/L4 (verified;
+in-VM root cannot lift it). Policy = **allow the connector gateway + the class-C
+non-secret allowlist (package managers, distro mirrors, etc.) + `deny-all`.**
 
-Security does not rest on the in-Sprite proxy (which in-Sprite root can tamper
-with). It rests on the **Sprites network egress policy**, enforced outside the VM.
-At provisioning, lock the Sprite so it can reach essentially only the connector
-gateway:
-
-- `POST /v1/sprites/{name}/policy/network` with `rules: [{domain, action}]`
-  (exact domains, `*.wildcard` subdomains, or preset bundles via `include`;
-  `action` is `allow`/`deny`). `GET` reads the current policy.
-- Enforced at the DNS/network layer, **not inside the VM** — changes apply
-  immediately and existing connections to newly-blocked domains are terminated, so
-  in-Sprite root **cannot** lift it.
-- Target policy: allow the connector gateway (`api.sprites.dev`) and deny the rest.
-  A root agent that flushes the local redirect and dials an upstream directly is
-  refused at the network layer and still holds no credential.
-
-**Enforcement is L3/L4, not DNS-only — verified 2026-07-08.** On a test Sprite with
-policy `{rules:[{domain:"api.sprites.dev",action:"allow"}]}`, all of these were
-**refused**: `curl https://example.com` (DNS refused), a raw TCP `connect()` to
-`1.1.1.1:443` with **no DNS**, and a raw `connect()` to `93.184.216.34:443`
-(example.com's IP, no DNS) — while `api.sprites.dev` stayed reachable. So a
-root agent **cannot** exfil by dialing a hard-coded IP; the gateway-only lockdown is
-a genuine hard boundary at the connection layer. The earlier "DNS-only ⇒ IP-direct
-bypass" worry is closed.
-
-Two composition details this creates:
-
-- **apt during provisioning.** Installing the nft toolchain needs the apt mirror.
-  Either install **before** applying the lockdown, or temporarily allow the mirror
-  domain, then tighten to gateway-only before the agent runs.
-- **DNS for proxied hosts (the resolver requirement).** The transparent proxy
-  redirects `:443`, but the agent's client still has to *resolve* a host to emit the
-  connection that gets redirected. Under a gateway-only policy the platform also
-  **refuses DNS** for non-allowlisted hosts (verified: the configured resolver
-  returned connection-refused for `example.com`), so the client can't resolve
-  `api.openai.com` and the redirect never fires. Fix: run a **local resolver**
-  (`127.0.0.1`) that answers proxied hosts with a **dummy IP** — the redirect
-  catches the connection regardless of the address, and the platform's L3/L4 block
-  still prevents any real egress if the proxy is bypassed. Do **not** allowlist the
-  proxied hosts in the policy (that would let a root agent reach them directly after
-  flushing the redirect); keep the policy gateway-only and resolve locally. The
-  simpler alternative, for cooperative tools, is to skip transparent interception for
-  a given client and configure its `base_url` to the connector URL directly — no
-  resolver needed, but it only covers tools you can reconfigure.
-
-## The transparent proxy in detail (and every complication)
-
-### 1. Egress redirection (iptables/nft)
-
-- Redirect outbound `tcp dport 443` from the Sprite's processes to the local proxy
-  port with an OUTPUT NAT REDIRECT rule.
-- **Toolchain install is trivial — earlier "can't apt-get" finding was wrong**
-  (re-tested 2026-07-08 on a fresh Sprite, Ubuntu 26.04). The Sprite runs as uid
-  1001 but has **passwordless `sudo`**, so `sudo apt-get install -y nftables
-  iptables` succeeds; `sudo nft`/`sudo iptables` then add NAT REDIRECT rules that
-  **actually divert live connections** (verified: a connect to `1.1.1.1:12345` was
-  redirected to a local listener). `CapEff` includes `cap_net_admin` **and**
-  `cap_sys_admin`. So: no R2 `.deb` staging, no `LD_LIBRARY_PATH` hack. The Sprite
-  base image is a fixed upstream image we **cannot** modify, so the toolchain is
-  installed **at provisioning** via `sudo apt-get install` (it cannot be baked in).
-  This adds a per-boot apt round-trip to provisioning — an argument for keeping the
-  install fast (minimal package set, apt cache/mirror if available). Fail closed if
-  the toolchain or rules can't be established. NOTE the network egress policy (below)
-  must allow the apt mirror during this step, or move the install before the lockdown
-  is applied.
-- **Complication — don't intercept the gateway.** The proxy's own upstream calls to
-  the Sprites gateway (`api.sprites.dev`) must **not** be redirected, or it loops.
-  Exclude the gateway host/IPs from the REDIRECT rule (and set `NO_PROXY` for the
-  explicit-proxy path). Resolve and pin the gateway IPs at provisioning.
-
-### 2. TLS interception + local CA trust
-
-- The proxy runs a transparent TLS server (and an explicit `CONNECT` proxy for
-  tools that honor proxy env). It mints **per-host leaf certificates via SNI**,
-  signed by a **per-Sprite local CA**.
-- Install the CA into the **system trust store** (`update-ca-certificates`) **and**
-  the per-runtime stores that don't use it: `NODE_EXTRA_CA_CERTS` (Node),
-  `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE` (Python/OpenSSL), and equivalents.
-- **Complication — runtimes that ignore the system store.** Statically linked
-  binaries, Go's built-in roots, and cert-pinned clients will reject the MITM.
-  Enumerate the runtimes the agent actually uses; set env overrides where they
-  exist; document the unsupported cases. Before trust install the MITM is correctly
-  **rejected** (verified) — good, it fails closed rather than leaking plaintext.
-- Rotate/expire the CA with the session; never persist it beyond teardown.
-
-### 3. Rewrite + inject
-
-- Read the plaintext HTTP request, **strip the client `authorization` header**
-  (and hop-by-hop headers), and rewrite to
-  `<gatewayBase>/<sessionConnId>/<original-path>?<query>`. The gateway injects
-  `Authorization: Bearer <per-session-secret>` and forwards to the connector's
-  `base_api_url`.
-- **Routing table:** destination host → { connector gateway URL | pass-through
-  unmodified | block }. For v1 the entries are the webhook host and the git host,
-  each mapping to this session's connector(s). **Fail-closed default:** an unrouted
-  destination is **blocked**, never forwarded with a secret.
-- Forward query strings and stream request/response bodies (proven for GET/POST;
-  git pack streaming still to be load-tested — see Open Questions).
-
-### 4. Lifecycle
-
-- Start the proxy at provisioning as a long-lived process; install CA, rules, and
-  routing table before the agent runs; tear all of it down (proxy, rules, CA,
-  secret) on session end.
-
-### 5. The transparent proxy is a convenience layer, not the boundary
-
-The 2026-07-08 test showed the Sprite user has **passwordless `sudo`**, so a
-root-capable agent can `sudo nft flush ruleset`, kill the proxy, or read the local
-CA key. That is **fine**, because the transparent proxy is not what enforces
-security. Three separate things do, and none of them depend on the in-Sprite proxy:
-
-1. **No credential is ever in the Sprite.** Bypassing the proxy yields nothing to
-   steal — the key lives only in the connector and is injected at the gateway.
-2. **Connectors are Sprite-scoped.** Only this session's Sprite may call its
-   connectors (gateway access policy), so a stolen connector URL is useless
-   elsewhere.
-3. **The network egress policy is the hard boundary** (see below). The Sprite is
-   locked so it can only reach the connector gateway; enforcement is outside the VM,
-   so in-Sprite root cannot lift it. A root agent that flushes the redirect and dials
-   an upstream directly is blocked at the network layer and still has no key.
-
-So "the agent has root and can bypass the proxy" is a **non-issue**: it gains no
-credential and cannot egress anywhere except through the gateway. The transparent
-proxy exists purely so that **unmodified agent code calling real URLs
-(`api.openai.com`, `github.com`) is transparently routed to the right connector**,
-instead of every tool needing its base URL reconfigured. It is UX/routing, not a
-security control.
-
-The one honest caveat is data exfiltration (not credential theft): see the network
-policy's DNS-vs-IP enforcement question below.
+- Class-A/B credential hosts are **not** network-allowlisted — they are forced
+  through the proxy → connector. (If they were allowlisted, a root agent could reach
+  them directly after flushing the redirect.)
+- The existing `network-policy.ts` allowlist is the class-C set; extend/trim it, and
+  add the gateway. Provisioning needs the apt mirror allowed during toolchain
+  install, then tighten.
 
 ## Connector provisioning (`mintConnector`)
 
-Sprites has **no REST create** for Custom API connectors (Fly confirmed: `POST
-/v1/oauth/connections/api_key` only takes `provider` + `api_key`), so creation is
-driven through the dashboard. One primitive, called during provisioning:
+Sprites has **no REST create** for Custom API connectors (Fly confirmed;
+`/api_key` only takes preset `provider`+`api_key`), so creation is browser-driven.
+One primitive:
 
 ```text
 mintConnector({ baseApiUrl, token, authMethod='header', headerPrefix='Bearer',
                 testUrl, scope }) -> { gatewayConnectionId, detailId }
 ```
 
-- **Create (browser).** Proven by the 2026-07-06 spike. Form
-  `/account/:org/connectors/new?type=custom_api` (`custom-api-form`,
-  `phx-submit="create_custom_api"`; fields `base_api_url`, `access_token`,
-  `auth_method`, `auth_header_prefix`, `test_url`). **Test gates create**:
-  `test_custom_api` must reach `HTTP 200 — Connection OK`
-  (`div.bg-violet-50` + `hero-check-circle-mini`) before Create enables. The
-  redirect carries the **gateway connection id**; the detail page uses a separate
-  **detail id** — store both.
-- **Scope + verify (REST).** Create defaults to **deny-all** (verified), so a new
-  connector is inert until scoped. `PATCH /v1/oauth/connections/{id}` with an
-  `access_policy` (Sprite id/label; optionally `allowed_endpoints`), then GET to
-  confirm `allow_all == false`. Auth `Bearer $SPRITES_TOKEN`.
-- **Fail closed.** On any failure, REST-delete the partial connector and throw.
-- **Test URL.** Our Worker health route that returns 200 only when the injected
-  per-session secret validates, so the required test doubles as a gateway-reaches-
-  Worker proof.
+- **Create (browser)** — proven by the 2026-07-06 spike: form `custom-api-form`,
+  test (`test_custom_api`) gates create (`HTTP 200 — Connection OK` state), create
+  redirects to the **gateway connection id**; the dashboard detail page uses a
+  separate **detail id** (store both).
+- **Scope + verify (REST)** — create defaults to **deny-all** (verified), so a new
+  connector is inert until scoped. `PATCH /v1/oauth/connections/{id}` access policy;
+  GET to confirm; optionally `allowed_endpoints` to pin the path.
+- **Fail closed** — on any failure, REST-delete the partial connector and throw.
+- **Host:** Cloudflare **Browser Rendering** from the api-server Worker
+  (`@cloudflare/playwright`, dashboard `storageState` injected per run; verified paid
+  limits 120 concurrent / 1-create-per-sec / 60s idle→10min keep_alive). **Switch to
+  a Fly.io Machine if measured mint latency is too high** — instrument from day one.
 
-### Where the browser automation runs
+Who mints what: the **internal connector** is minted per session (its secret is
+per-session). **Class-B connectors** are minted per secret at definition time
+(provider key at setup; user secret when added), then their access policy is updated
+per session per "Scoping class-B connectors."
 
-A Worker can't run a browser in its isolate, but Cloudflare **Browser Rendering**
-exposes Puppeteer/Playwright forks via a Worker binding, so the api-server Worker
-drives create directly.
+## Session provisioning (synchronous, fail-closed)
 
-- **Option A — Browser Rendering (recommended):** `@cloudflare/playwright`; inject
-  the dashboard `storageState` per run; ephemeral browser. Verified paid limits:
-  120 concurrent browsers, 1 create/sec, 60s idle (10 min via `keep_alive`).
-- **Option B — Fly.io Machine + upstream Playwright (fallback):** matches the
-  Sprites-on-Fly infra; called over RPC. Use if CF caps/fidelity bite.
+The connector URLs *are* the Sprite's egress paths, so provisioning is synchronous;
+any failure fails the session closed (no Sprite ever runs with a secret in the
+clear, an un-redirected egress, or an unusable callback path). Ordered:
 
-Decision: **start on Browser Rendering; switch to a Fly Machine if measured
-per-session mint latency is too high.** Instrument the mint end-to-end from day one
-so the switch trigger is a number, not a guess.
+1. Create the Sprite; apply a **bootstrap** network policy that allows the gateway
+   + apt mirror (for toolchain install) + class-C allowlist.
+2. Generate the per-session secret; **mint the internal connector** (base = Worker,
+   token = per-session secret, scope = this Sprite); store both ids + secret in D1.
+3. Determine the session's entitled class-B secrets from its environment; **scope
+   their connectors to this Sprite** (REST policy update, or set entitlement labels
+   at Sprite create).
+4. Install the data plane: toolchain, local CA + trust, local resolver, transparent
+   proxy + **routing table** (webhook/git → internal connector; each entitled secret
+   host → its class-B connector; class-C → direct; else block), redirect rules,
+   gateway exclusion.
+5. Tighten to the **final** network policy (gateway + class-C + deny-all).
+6. Hand the Sprite only non-secret config (its connector gateway base + routing);
+   start the agent.
+7. Teardown: delete the internal connector + per-session secret; remove this Sprite
+   from class-B connector policies; tear down the data plane.
 
-## Synchronous, fail-closed provisioning — and its latency
+## Cutovers (close the replayable paths)
 
-The connector is the Sprite's egress path, so provisioning is **synchronous**: mint
-+ scope the connector(s), then install the proxy, CA, redirect rules, and routing
-table, all as blocking steps of session creation. Any failure **fails the session
-closed** — no Sprite starts with a token in the clear, an un-redirected egress, or
-an unusable callback path. No async `connector-pending` state.
+For each of webhook and git, the Worker endpoint must **stop accepting a
+Sprite-held bearer** and require the **gateway-injected** credential (which the
+Sprite never possesses). Leaving the raw `WORKER_URL/...` endpoint accepting a
+Sprite-carried token keeps the replay hole open. Do each behind a flag; keep the old
+path until the connector path is proven, then remove it.
 
-Latency cost: per-session, browser-driven mint on the critical path (the "~20s is
-too slow" concern). Per-session is unavoidable given the missing sprite-id header.
-Mitigate (measure first): minimize the browser flow, use warm Browser Rendering
-sessions and a fast Worker health `test_url`, and **overlap the mint with VM boot**
-(already seconds) so it hides under existing startup rather than adding to it. No
-speculative pre-mint pool.
+- **Webhook (priority):** today a bearer lets anyone POST fake agent responses into
+  the user's chat log from any host. Route through the internal connector; accept
+  only the gateway-injected per-session secret mapped to the session.
+- **Git:** preserve Worker-custodied installation token, `cloude/*` branch
+  validation + lock, repo allowlist, `locked` policy; change only how the
+  Sprite→Worker call is authenticated (identity-bound, not bearer).
 
-## Webhook (v1) — the priority target
+## Data model (D1)
 
-The webhook is the clearest case for caller-identity binding. Today the webhook is
-authenticated by a Sprite-held bearer, so anyone who extracts it can **POST fake
-agent responses into the user's chat log from any host** — corrupting what the user
-sees, and doable after the session ends. That is an integrity breach we can't allow,
-and a bearer cannot prevent it.
+- `session_connectors` — internal connectors: `session_id`, gateway connection id,
+  dashboard detail id, per-session secret (encrypted), status, timestamps.
+- `secrets` — class-B secret metadata (NOT plaintext; Sprites custodies the value):
+  `id`, `name`, owner (user/system), upstream host(s), connector gateway id + detail
+  id, scoping mode (label vs sprite-id list), status.
+- `environment_secrets` — which environments/sessions are entitled to which secrets
+  (drives routing-table + scoping at provisioning).
 
-Route the webhook through this session's connector: the agent POSTs the normal
-webhook URL with no secret; the proxy reroutes to the connector; Fly **verifies the
-call came from this exact Sprite** and injects the per-session secret; the Worker
-accepts the callback only when it carries the gateway-injected secret mapping to the
-session. Critically, the Worker must **stop accepting a Sprite-held bearer** on the
-webhook endpoint so the old replayable path is closed. Retire the extractable webhook
-token behind a flag once proven.
-
-## Git
-
-Earlier this section said "keep git as-is because the `gitProxySecret` blast radius
-is tiny." That was wrong — it ignored off-Sprite replay. The git bearer is
-replayable from anywhere: someone who extracts it can read the private repo's
-contents or push to it **from a laptop**, or from a Sprite in another org. So git has
-the same caller-identity gap as everything else, and connector-izing it (route
-git through the per-session connector; the Worker git-proxy accepts only the
-gateway-injected credential, not a Sprite-held bearer) closes a real hole, not a
-cosmetic one.
-
-What the current path already gets right and must be preserved: the real GitHub
-installation token stays in the Worker, push branch validation (`cloude/*` + session
-suffix + branch lock), repo allowlisting, and working under `locked` network policy.
-Connector-izing changes only *how the Sprite→Worker call is authenticated* (identity
-binding instead of a replayable bearer), not the GitHub-side handling.
-
-Whether git lands in the first cut or a fast follow is a sequencing call (it shares
-all the connector machinery with the webhook), but it is a genuine connector target
-— not "leave it alone." The webhook is the more urgent of the two (see below).
-
-## Data model (D1) — v1
-
-- `session_connectors`: `session_id`, gateway connection id, dashboard detail id,
-  provisioning status, access-policy summary, timestamps.
-- Per-session shared secret keyed to the session; encrypted at rest; deleted on
-  teardown.
-- (No user-defined-secret tables in v1.)
-
-## Request flowcharts
-
-Webhook:
+## Data flows
 
 ```text
-agent POSTs https://<webhook-host>/... (no secret)
-  -> iptables REDIRECT 443 -> local proxy (MITM w/ local CA, strip auth)
-  -> rewrite -> <gateway>/<sessionConnId>/webhook/...
-  -> Fly gateway (sprite-scoped) injects Bearer <per-session-secret>
-  -> Worker: secret -> session; accept callback as that session
+Webhook (class A):
+  agent POST https://<webhook-host>/... (no secret)
+   -> resolver(dummy IP) -> iptables REDIRECT -> local proxy (MITM, strip auth)
+   -> <gateway>/<internalConnId>/webhook/... ; Fly verifies THIS sprite; injects
+      per-session secret -> Worker: secret->session; accept callback
+
+Git (class A): same path -> /git/... -> Worker git-proxy: verify->session;
+   branch validation; inject installation token -> GitHub; stream pack back
+
+User secret, e.g. OpenAI (class B):
+  agent GET https://api.openai.com/v1/... (no/dummy key)
+   -> resolver(dummy IP) -> REDIRECT -> proxy (MITM, strip auth)
+   -> <gateway>/<openaiConnId>/v1/... ; Fly verifies this sprite is entitled;
+      injects the user's real OpenAI key -> api.openai.com; stream back
+
+Package manager (class C): agent -> npm/pypi/... resolves + egresses directly
+   (network-allowlisted; no connector)
+
+Anything else (class D): proxy has no route AND policy denies -> blocked
 ```
 
-Git fetch:
+## Staging (build order; each stage is a real subset, none undone later)
 
-```text
-agent: git fetch (HTTPS to <git-host>)
-  -> proxy -> <gateway>/<sessionConnId>/git/<repo>/git-upload-pack
-  -> gateway injects secret -> Worker git proxy: verify -> session;
-     branch validation; inject real git credential -> GitHub; stream pack back
-```
+The whole concept ships across stages that share one data model, one connector
+abstraction, and one proxy — so no stage requires redesigning another.
 
-Unrouted destination:
+- **S1 — connector spine + webhook.** `mintConnector` (Browser Rendering) + internal
+  per-session connector + `session_connectors` D1 + webhook cutover. Proves
+  identity-bound class-A end to end.
+- **S2 — git cutover.** Move git onto the internal connector; Worker rejects the
+  bearer. No new mechanism.
+- **S3 — transparent proxy data plane.** Toolchain, CA/trust, resolver, routing
+  table, redirect, gateway exclusion. Route webhook/git through it (replacing direct
+  connector-URL config). Enables class B.
+- **S4 — provider key as a class-B connector.** Move the agent's provider
+  credential (Anthropic/OpenAI) off the Sprite onto a class-B connector via the
+  proxy. Exercises class-B scoping with one system-owned secret.
+- **S5 — user-defined secrets.** `secrets` + `environment_secrets` D1, definition
+  UI/API, per-secret connector mint, routing-table + scoping wiring. General class B.
 
-```text
-agent -> some other https host -> proxy: no routing entry -> BLOCK (fail closed)
-```
+## Risks / Open questions
 
-## Out of scope for v1 (mechanism ready, not built)
+- **Class-B scoping mechanism** — is an in-VM root process able to change its own
+  Sprite's Fly labels? (Decides label-scoping vs per-session REST policy update.)
+  **Verify with a live test.**
+- **REST policy update semantics** — atomic add/remove of a Sprite id, or whole
+  policy replace? Drives the concurrency handling for class-B scoping under
+  concurrent sessions.
+- **Per-session internal mint latency** — browser mint on the session critical path;
+  minimize + overlap with VM boot; measure; Browser Rendering vs Fly by the number.
+- **Trust-store gaps** — enumerate the runtimes the agent uses that bypass the system
+  CA; document handling; rely on the network policy as backstop.
+- **Provider-credential shape** — is the agent's provider auth an API key or OAuth,
+  system- or user-owned, and does it survive being injected at a connector (vs
+  needing an interactive OAuth flow)? Confirm before S4.
+- **Current webhook callback auth** — confirm exactly how the VM authenticates
+  callbacks today (git uses `gitProxySecret`; webhook path to be read) so the cutover
+  is precise.
+- **git read latency** — the connector/proxy path for chunked pulls; measure; don't
+  reintroduce revoke-after-clone.
+- **Concurrent-session label/policy churn on shared class-B connectors** — teardown
+  ordering so one session ending doesn't revoke another's access.
 
-- **User-defined secrets.** Definition UI/API, encrypted D1 storage with allowed
-  hosts + environment links, and Worker-side custody/injection for arbitrary user
-  APIs. When added, they are additional routing-table entries → per-session
-  connectors (or a Worker egress route), needing SSRF protection (host allowlist,
-  block private/metadata ranges, no internal redirects). Not built now.
+## Resolved (verified)
 
-## Risks / Trade-offs
-
-- **Per-session mint latency** on the critical path. Minimize + overlap with VM
-  boot; measure. Not removable without a shared connector (ruled out).
-- **Agent has root (`sudo`) ⇒ can bypass the proxy — but this is a non-issue.** No
-  credential is in the Sprite to steal, connectors are Sprite-scoped, and the
-  network egress policy (enforced outside the VM) confines egress to the gateway. The
-  proxy is UX/routing, not a boundary.
-- **Toolchain install at provisioning** — the base image can't be modified, so the
-  nft toolchain is `sudo apt-get install`ed per boot; the lockdown must allow the
-  apt mirror during that step (or install before locking down). Fail closed if rules
-  can't be established.
-- **DNS/interception composition** — under a gateway-only policy the platform also
-  refuses DNS for non-allowlisted hosts, so transparent interception needs a local
-  resolver returning dummy IPs for proxied hosts (keep the policy gateway-only; do
-  not allowlist proxied hosts). Verified that IP-direct egress is blocked, so the
-  local-resolver approach is contained.
-- **Trust-store gaps** — static/pinned/Go-root runtimes bypass the local CA.
-  Enumerate and handle; document unsupported cases; the MITM fails closed
-  pre-trust.
-- **Gateway self-interception** — the proxy's calls to the gateway must be excluded
-  from REDIRECT/NO_PROXY or it loops. Pin gateway IPs at provisioning.
-- **Dashboard automation fragility / deny-all default / dashboard-session expiry** —
-  preflight shape checks, verify `allow_all == false` after scope, provisioner-only
-  auth with reauth-required status, fail closed.
-- **Browser Rendering caps** (120 concurrent, 1 create/sec) bound peak session
-  creation; size against concurrency; Fly fallback.
-- **Git read latency** — the original blocker; measure the connector path; don't
-  silently reintroduce revoke-after-clone.
-- **Per-session secret storage** — encrypt at rest, scope to session, delete on
-  teardown.
-
-## Migration Plan
-
-1. Sprite image: bundle/stage the nft/iptables toolchain; generalize
-   `sprite-egress-proxy.mjs` to a routing table with fail-closed default; CA install
-   across runtime trust stores; gateway-exclusion rules.
-2. D1: `session_connectors` + per-session secret storage.
-3. `mintConnector` via Browser Rendering: browser create → REST scope → REST verify
-   → delete-on-failure; preflight shape/drift checks; redact secrets.
-4. Worker endpoints: health `test_url`; `/webhook` and `/git` verifying the injected
-   per-session secret → session.
-5. Synchronous fail-closed provisioning: mint+scope, install proxy/CA/rules/routing,
-   hand the Sprite its connector URLs; teardown deletes connector + secret.
-6. Webhook cutover behind a flag; retire the extractable webhook token.
-7. Git cutover (fetch + push) behind a flag; keep branch validation; fix read
-   latency without revoke-after-clone.
-8. (Later) user-defined secrets on the same proxy mechanism.
-
-Rollback: keep the current token path behind a flag until each cutover is proven;
-the proxy blocks unrouted egress, so partial rollout stays fail-closed.
-
-## Open Questions
-
-- Which id do the REST connection endpoints take — gateway connection id vs detail
-  id — and the delete verb/path? (Quick live check.)
-- Can Sprite labels be set at Sprite creation, or must scoping be by Sprite id after
-  the Sprite exists? (Affects mint ordering.)
-- Does the connector gateway stream large/chunked bodies well enough for git pack
-  data? (The historical read-latency blocker — measure.)
-- Which Sprite runtimes ignore the system trust store, and how are they handled?
-- Real per-session mint latency via Browser Rendering, and how much overlaps VM
-  boot?
-- One per-session connector path-routing webhook+git, or two connectors?
-- Git: keep the injected credential for the session vs optimize streaming?
-
-Resolved:
-
-- ~~Gateway forwards a verifiable Sprite identity?~~ **No (tested)** → per-session
-  connectors; per-session secret carries identity.
-- ~~Multiplex one connector across sessions?~~ No.
-- ~~REST update access policy?~~ Yes, `PATCH`/`PUT /v1/oauth/connections/{id}`.
-- ~~REST create for Custom API?~~ No (preset providers only) — browser create.
-- ~~Create default access?~~ Deny-all (verified) — scope is a grant.
-- ~~Can a Worker drive a browser?~~ Yes, via Cloudflare Browser Rendering.
-- ~~Async connector-pending?~~ No — synchronous, fail-closed.
-- ~~Transparent proxy + iptables in scope?~~ **Yes, v1.** User-facing secret
-  definition/storage is the only deferred piece.
-- ~~Can the Sprite install nft/iptables?~~ **Yes (verified 2026-07-08):** passwordless
-  `sudo apt-get install -y nftables iptables` works; NAT REDIRECT diverts live
-  connections. No R2 staging hack, but the fixed base image means install is at
-  provisioning, not baked in.
-- ~~Is the agent having root a problem?~~ No — no credential is in the Sprite,
-  connectors are Sprite-scoped, and the network egress policy (enforced outside the
-  VM) is the boundary. The proxy is UX/routing, not security.
-- ~~Is there a network egress lockdown?~~ Yes — `POST /v1/sprites/{name}/policy/network`
-  (allow/deny domain rules, outside-VM). Lock to gateway-only.
-- ~~Does the policy enforce at L3/L4 or DNS-only?~~ **L3/L4 (verified 2026-07-08):**
-  IP-direct `connect()` to non-allowlisted hosts is refused even with no DNS. So the
-  gateway-only lockdown is a hard boundary; no IP-direct exfil.
-- ~~How do DNS filtering and transparent interception compose?~~ Under a gateway-only
-  policy the platform refuses DNS for non-allowlisted hosts, so use a local resolver
-  returning dummy IPs for proxied hosts (redirect catches the connection; L3/L4 block
-  contains any bypass). Do not allowlist proxied hosts.
-- ~~Browser automation host?~~ Cloudflare Browser Rendering first; switch to Fly if
-  latency is too high.
+- Gateway forwards a verifiable Sprite identity to the upstream? **No (tested)** →
+  per-session internal connector; per-session secret does session identification,
+  Fly does authorization.
+- Network policy enforcement: **L3/L4, not DNS-only (tested)** → gateway-only is a
+  hard boundary; in-VM root can't exfil by IP.
+- Sprite can install nft/iptables? **Yes** — passwordless sudo; install at
+  provisioning (base image fixed).
+- Custom API connector REST create? **No** — dashboard-only; REST does
+  scope/verify/delete (`PATCH/GET/DELETE /v1/oauth/connections/{id}`).
+- Create default access? **Deny-all** — scope is a grant.
+- Can a Worker drive a browser? **Yes** — Cloudflare Browser Rendering (Fly fallback).
+- Async provisioning? **No** — synchronous, fail-closed.
+- User secrets / transparent proxy in scope? **Yes, both** — part of the coherent
+  whole; sequenced in Staging, not deferred in concept.

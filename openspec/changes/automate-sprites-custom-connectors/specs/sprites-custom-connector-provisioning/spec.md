@@ -1,20 +1,61 @@
 ## ADDED Requirements
 
-### Requirement: Webhook and git secrets never enter the Sprite
+### Requirement: No credential enters the Sprite
 
-The system SHALL keep the webhook and git credentials out of the Sprite runtime and
-inject them only at the Sprites gateway after Fly authorizes the specific Sprite.
+The system SHALL keep every protected credential — webhook, git, provider, and
+user-defined secrets — out of the Sprite runtime and inject it only at the Sprites
+gateway after Fly authorizes the specific Sprite.
 
 #### Scenario: Secret is required for an outbound call
 
-- **WHEN** a Sprite makes a webhook callback or a git operation
+- **WHEN** a Sprite makes any credential-bearing outbound call (webhook, git,
+  provider API, or a user-defined secret's upstream)
 - **THEN** the credential is injected downstream of the Sprite and is never present
   in the Sprite's env, files, process args, or trust-store-readable material
 
 #### Scenario: Sprite is compromised
 
 - **WHEN** a process inside the Sprite reads all available Sprite state
-- **THEN** it obtains no reusable webhook or git credential
+- **THEN** it obtains no reusable webhook, git, provider, or user credential
+
+### Requirement: Arbitrary user-defined secrets via connectors
+
+The system SHALL let users define arbitrary secrets bound to upstream host(s), mint a
+per-secret Sprites connector that custodies the value, route the Sprite's egress to
+that upstream through the connector via the transparent proxy, and MUST store only
+secret metadata (never plaintext) in D1.
+
+#### Scenario: User adds a secret and the agent uses it
+
+- **WHEN** a user defines a secret for an upstream (e.g. an OpenAI key) and a session
+  entitled to it calls that upstream
+- **THEN** the transparent proxy routes the call to the per-secret connector, Fly
+  injects the real key, and the agent completes the call without ever holding the key
+
+#### Scenario: Secret value custody
+
+- **WHEN** a user-defined secret is created
+- **THEN** its value is custodied by Sprites in the connector and D1 stores only
+  metadata (name, upstream host(s), connector ids, scope), never the plaintext value
+
+### Requirement: Credential connectors are scoped to entitled Sprites
+
+The system SHALL scope each per-secret connector so only Sprites entitled to that
+secret (by server-decided environment entitlement) can use it, and MUST NOT let a
+Sprite assert its own entitlement.
+
+#### Scenario: Non-entitled session
+
+- **WHEN** a session not entitled to a secret attempts to reach that secret's upstream
+- **THEN** the request has no routing entry and is blocked, and the connector's access
+  policy would reject the Sprite regardless
+
+#### Scenario: Entitlement decided server-side
+
+- **WHEN** a session is provisioned
+- **THEN** its entitled secrets are determined from its environment server-side, and
+  the connector scoping (label or Sprite-id policy) is applied without trusting any
+  in-Sprite assertion
 
 ### Requirement: Transparent Sprite-side egress proxy
 
