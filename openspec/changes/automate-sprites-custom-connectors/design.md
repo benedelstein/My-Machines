@@ -17,14 +17,46 @@ their own secrets (OpenAI, Slack, ...) and storing/managing them. The transparen
 proxy is built generically so those slot in later as additional routing entries,
 but we do not build the definition UI, storage, or Worker secret custody now.
 
-### Current solution and why it is not enough
+### What already exists (important — the plan is not greenfield)
 
-Today a Sprite is handed a webhook callback token and a git proxy token as runtime
-material. Both are **extractable**: anything compromising the Sprite can read them
-and forge webhook callbacks impersonating the Sprite, or drive git from anywhere.
-The git read path is also degraded (revoke-after-clone, because chunked pulls
-through the proxy were too slow). The fix is to remove the secrets from the Sprite
-and inject them at the connector gateway after Fly authorizes the specific Sprite.
+Much of the "secrets proxy" is already built and working:
+
+- `network-policy.ts` already builds Sprite egress policies with a `locked` mode
+  (`buildFinalNetworkPolicy`) that allows only the Worker + provider and appends a
+  terminal `deny-all`. This is the same DNS+L3/L4 lockdown discussed elsewhere in
+  this doc — it exists.
+- `GitProxyService` already proxies git: the Sprite calls
+  `WORKER_URL/git-proxy/:sessionId/github.com/owner/repo.git/...` with a per-session
+  `gitProxySecret` bearer; the Worker mints an installation token and injects
+  `Authorization: Basic x-access-token:<token>` only when forwarding to GitHub. The
+  **real GitHub credential never enters the Sprite.** Push branch validation
+  (`cloude/*` + session suffix + branch lock) and repo allowlisting are enforced.
+- In `locked` mode, `cloneRepo` points `origin` at the Worker git proxy so fetch and
+  push both work with direct GitHub denied.
+
+So the existing **Worker-proxy + per-session-bearer + network-lockdown** pattern
+already keeps the real credentials out of the Sprite and works under lockdown. The
+only residual gap it leaves is that the per-session bearer secret is itself
+extractable from the Sprite.
+
+### The actual remaining gap
+
+For a bearer like `gitProxySecret`, extraction has a **tightly bounded** blast
+radius: it authorizes only that one repo, only `cloude/*` branches suffixed with the
+session id, only while the session installation token is valid, only at the Worker
+endpoint. So the incremental value of making it non-extractable is modest.
+
+The connector + transparent-proxy work in this change is therefore justified by two
+things the existing pattern does **not** do, not by a git/webhook emergency:
+
+1. **Non-extractable secrets** — moving a per-session bearer into a Sprites connector
+   so Fly injects it and the Sprite never holds it.
+2. **Transparent interception of unmodified code** — so a tool that hardcodes a real
+   upstream URL (e.g. `api.openai.com`) is routed to a connector without
+   reconfiguring its base URL. This is the "arbitrary connector URL" capability.
+
+Where the existing pattern already suffices (git today), prefer leaving it; apply
+connectors where one of the two properties above is actually needed.
 
 ## Decision: one connector per session (no multiplexing)
 
@@ -271,18 +303,18 @@ Fly injects the per-session secret; the Worker accepts the callback only when th
 injected secret maps to the session. Retire the extractable webhook token behind a
 flag once proven.
 
-## Git (v1)
+## Git (v1) — keep the current path as-is
 
-Requirements: the agent must **pull up to date and push**; branch validation stays;
-the extractable git proxy token goes away; read-path latency (chunked pulls) was the
-blocker behind revoke-after-clone.
+Decision: **do not connector-ize git in v1.** The existing `GitProxyService` +
+`locked` network policy already keeps the real GitHub credential out of the Sprite,
+handles fetch + push, enforces branch validation, and works under lockdown (see
+"What already exists"). The only thing left is making the per-session
+`gitProxySecret` non-extractable, and its blast radius is already tightly bounded, so
+it is not worth a per-session connector mint for v1.
 
-- Route git HTTPS (`info/refs`, `git-upload-pack` fetch, `git-receive-pack` push)
-  through the proxy → connector; inject the git credential at the Worker.
-- Keep branch validation at the Worker git-proxy layer.
-- Solve read latency without revoke-after-clone: the credential can now ride the
-  connector for the whole session (non-extractable), and/or optimize proxy pack
-  streaming. Measure (open).
+Leave git on its current path. Treat "route git through a connector so the secret is
+non-extractable" as optional later hardening. The transparent proxy needs no git
+routing entry in v1.
 
 ## Data model (D1) — v1
 

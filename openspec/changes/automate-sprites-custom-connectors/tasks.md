@@ -54,11 +54,10 @@
 - [ ] 7.1 Add a routing entry so the webhook host rewrites to this session's connector; Worker verifies the injected secret instead of a per-Sprite token.
 - [ ] 7.2 Retire the extractable webhook token behind a flag once proven.
 
-## 8. Git Cutover
+## 8. Git — keep as-is (no v1 work)
 
-- [ ] 8.1 Route git fetch (`info/refs`, `git-upload-pack`) and push (`git-receive-pack`) through the proxy → connector; inject the credential at the Worker.
-- [ ] 8.2 Keep branch validation at the Worker git-proxy layer.
-- [ ] 8.3 Solve read latency without revoke-after-clone (keep the injected credential for the session, and/or optimize proxy streaming); enable pull + push.
+- [x] 8.1 Decision: leave git on the existing `GitProxyService` + `locked` network-policy path. It already keeps the real GitHub credential in the Worker, does fetch + push, enforces branch validation, and works under lockdown. The only residual (extractable per-session `gitProxySecret`) has a tightly bounded blast radius.
+- [ ] 8.2 (Optional, later) Route git through a connector to make the per-session secret non-extractable — only after the connector path is proven elsewhere.
 
 ## 9. Tests And Validation
 
