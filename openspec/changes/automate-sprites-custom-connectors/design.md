@@ -86,7 +86,11 @@ the secret:
   session. This is how the *Worker identifies which session* (the gateway does not
   forward Sprite identity to the upstream — tested). Fly still does the identity
   *authorization*; the secret only does session *identification*.
-- **Scope:** the session's Sprite (id). Only that Sprite can invoke it.
+- **Scope:** a **per-session label** (e.g. `session:<sessionId>`) set on the Sprite at
+  creation; the connector policy is `sprite_labels: [session:<sessionId>]`. The API
+  has no Sprite-id scoping field (only `sprite_labels` / `name_prefix`), and in-VM
+  root cannot change Fly labels, so a unique per-session label uniquely and immutably
+  binds this connector to this one Sprite.
 
 ### Credential connectors (class B) — per secret
 
@@ -97,32 +101,41 @@ the secret:
 - **Base URL:** the real upstream host (e.g. `api.openai.com`).
 - **Injected secret:** the **real credential**, custodied by **Sprites** (we pass it
   once at connector creation and never store plaintext).
-- **Scope:** only the Sprites entitled to that secret. See "Scoping class-B
-  connectors" — this is the crux of keeping them identity-bound while long-lived.
+- **Scope:** `sprite_labels: [sec:<secretId>]`, set once at mint; entitled Sprites
+  carry that label (set at Sprite creation). See "Scoping class-B connectors."
 
 ## Scoping class-B connectors to the right Sprites
 
-A credential connector is long-lived but must be usable only by Sprites entitled to
-that secret (the owning user's / environment's session Sprites). Two mechanisms;
-**decide by the label-immutability test below.**
+**Decided: label scoping, set once at connector mint. No per-session policy
+updates.** This is forced and made safe by two facts:
 
-- **Primary — per-session REST policy update (robust, no browser).** At session
-  start, `PATCH /v1/oauth/connections/{id}` to add this session's **Sprite id** to
-  the connector's access policy; remove it at teardown. Exact per-Sprite scoping,
-  fast (REST, not browser), independent of label behavior. Cost: a PATCH per session
-  per entitled secret, and **concurrency care** — concurrent sessions editing the
-  same connector's allowed-Sprite list race on read-modify-write; need atomic
-  add/remove or per-connector serialization (open question: does the REST policy API
-  support atomic list add/remove, or only whole-policy replace?).
-- **Alternative — label scoping (simpler, if labels are in-VM-immutable).** Give
-  the connector a policy `sprite_labels: [entitlement]` once; set that label on
-  entitled Sprites at creation. No per-session PATCH. **Only safe if an in-VM root
-  process cannot change its own Sprite's Fly labels** — otherwise a compromised
-  Sprite adds another secret's label and steals it. **Must verify** (a live test,
-  like the network-policy test); if in-VM labels are immutable, prefer this.
+- The connector access policy has **no Sprite-id field** — scoping is only
+  `sprite_labels` (ANDed) or `name_prefix` (confirmed against the API docs). So
+  "enumerate allowed Sprite ids" is not even expressible; label/prefix is the only
+  way to scope.
+- **In-VM root cannot change its own Sprite's Fly labels** (they are platform
+  metadata set at creation, like the network policy). So a label reliably binds a
+  connector to exactly the Sprites we labelled, and a compromised Sprite cannot add
+  another secret's label to steal it.
 
-Either way, entitlement (which secrets a session may use) is decided server-side
-from the session's environment; the Sprite never asserts its own entitlement.
+Mechanism:
+
+- Each secret gets a stable entitlement label, e.g. `sec:<secretId>`. Its connector
+  is minted **once** with policy `sprite_labels: [sec:<secretId>]`.
+- At **Sprite creation**, the provisioner sets the labels for exactly the secrets the
+  session's environment is entitled to (server-decided; the Sprite never asserts its
+  own entitlement). That is the only per-session step, and it is a normal
+  Sprite-create parameter, not a connector edit.
+
+Because the connector policy is set once and never touched per session, there is **no
+per-session policy churn and therefore no concurrency race** between concurrent
+sessions sharing a per-secret connector. (For the record: the REST policy update is a
+**whole-object replacement**, not an incremental add/remove — which is exactly why we
+avoid using it on the hot path.) Policy updates are reserved for rare admin events
+(rotating a secret, changing entitlement), done off the session path.
+
+The internal per-session connector uses the same label mechanism with a unique
+`session:<sessionId>` label — set once at its per-session mint.
 
 ## Data plane: the transparent proxy (with every complication)
 
@@ -212,9 +225,9 @@ clear, an un-redirected egress, or an unusable callback path). Ordered:
    + apt mirror (for toolchain install) + class-C allowlist.
 2. Generate the per-session secret; **mint the internal connector** (base = Worker,
    token = per-session secret, scope = this Sprite); store both ids + secret in D1.
-3. Determine the session's entitled class-B secrets from its environment; **scope
-   their connectors to this Sprite** (REST policy update, or set entitlement labels
-   at Sprite create).
+3. Determine the session's entitled class-B secrets from its environment; set the
+   corresponding `sec:<secretId>` **labels** on the Sprite at creation (their
+   connectors are already scoped to those labels — no per-session connector edit).
 4. Install the data plane: toolchain, local CA + trust, local resolver, transparent
    proxy + **routing table** (webhook/git → internal connector; each entitled secret
    host → its class-B connector; class-C → direct; else block), redirect rules,
@@ -246,7 +259,7 @@ path until the connector path is proven, then remove it.
   dashboard detail id, per-session secret (encrypted), status, timestamps.
 - `secrets` — class-B secret metadata (NOT plaintext; Sprites custodies the value):
   `id`, `name`, owner (user/system), upstream host(s), connector gateway id + detail
-  id, scoping mode (label vs sprite-id list), status.
+  id, entitlement label (`sec:<id>`), status.
 - `environment_secrets` — which environments/sessions are entitled to which secrets
   (drives routing-table + scoping at provisioning).
 
@@ -295,12 +308,6 @@ abstraction, and one proxy — so no stage requires redesigning another.
 
 ## Risks / Open questions
 
-- **Class-B scoping mechanism** — is an in-VM root process able to change its own
-  Sprite's Fly labels? (Decides label-scoping vs per-session REST policy update.)
-  **Verify with a live test.**
-- **REST policy update semantics** — atomic add/remove of a Sprite id, or whole
-  policy replace? Drives the concurrency handling for class-B scoping under
-  concurrent sessions.
 - **Per-session internal mint latency** — browser mint on the session critical path;
   minimize + overlap with VM boot; measure; Browser Rendering vs Fly by the number.
 - **Trust-store gaps** — enumerate the runtimes the agent uses that bypass the system
@@ -313,8 +320,9 @@ abstraction, and one proxy — so no stage requires redesigning another.
   is precise.
 - **git read latency** — the connector/proxy path for chunked pulls; measure; don't
   reintroduce revoke-after-clone.
-- **Concurrent-session label/policy churn on shared class-B connectors** — teardown
-  ordering so one session ending doesn't revoke another's access.
+- **Label teardown** — with label scoping, a per-secret connector's policy is never
+  edited per session, so a session ending cannot revoke another's access. Confirm the
+  per-session `session:<sessionId>` label + connector are cleaned up on teardown.
 
 ## Resolved (verified)
 
@@ -328,6 +336,11 @@ abstraction, and one proxy — so no stage requires redesigning another.
 - Custom API connector REST create? **No** — dashboard-only; REST does
   scope/verify/delete (`PATCH/GET/DELETE /v1/oauth/connections/{id}`).
 - Create default access? **Deny-all** — scope is a grant.
+- How are connectors scoped to Sprites? **Labels only** — the access policy has no
+  Sprite-id field (`sprite_labels`/`name_prefix` only), and in-VM root cannot change
+  Fly labels, so a label is an immutable, unforgeable per-Sprite/per-secret binding.
+  Policy update is whole-object replacement, so we set policy once at mint and never
+  edit per session → no concurrency race.
 - Can a Worker drive a browser? **Yes** — Cloudflare Browser Rendering (Fly fallback).
 - Async provisioning? **No** — synchronous, fail-closed.
 - User secrets / transparent proxy in scope? **Yes, both** — part of the coherent

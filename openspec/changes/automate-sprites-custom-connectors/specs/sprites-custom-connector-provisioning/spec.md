@@ -54,8 +54,8 @@ Sprite assert its own entitlement.
 
 - **WHEN** a session is provisioned
 - **THEN** its entitled secrets are determined from its environment server-side, and
-  the connector scoping (label or Sprite-id policy) is applied without trusting any
-  in-Sprite assertion
+  the corresponding immutable Sprite labels are set at Sprite creation (the connector
+  is already scoped to those labels), without trusting any in-Sprite assertion
 
 ### Requirement: Transparent Sprite-side egress proxy
 

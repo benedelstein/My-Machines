@@ -6,8 +6,8 @@
 - [x] 0.4 Transparent egress proxy works (MITM, auth stripping, gateway rewrite/injection, REDIRECT captures curl/Node/Python).
 - [x] 0.5 Sprite has passwordless sudo; `sudo apt-get install -y nftables iptables` works; NAT REDIRECT diverts live connections; `cap_net_admin`+`cap_sys_admin`.
 - [x] 0.6 Network policy is enforced L3/L4 outside the VM (IP-direct to non-allowlisted hosts refused) — gateway-only is a hard boundary.
-- [ ] 0.7 **Verify (live test):** can an in-VM root process change its own Sprite's Fly labels? Decides class-B scoping (labels vs per-session REST policy update).
-- [ ] 0.8 Determine REST policy-update semantics (atomic Sprite-id add/remove vs whole-policy replace) → concurrency handling for shared connectors.
+- [x] 0.7 In-VM root cannot change its own Sprite's Fly labels (platform metadata, set at creation) → label scoping is safe.
+- [x] 0.8 Access policy has NO Sprite-id field (`sprite_labels`/`name_prefix` only); policy update is whole-object replacement → scope by label, set once at mint, never edit per session (no concurrency race).
 - [ ] 0.9 Read the current VM→Worker webhook callback auth precisely (git uses `gitProxySecret`; confirm webhook).
 - [ ] 0.10 Confirm the provider-credential shape (API key vs OAuth, system vs user owned) before S4.
 - [ ] 0.11 Which id do REST connection endpoints take (gateway conn id vs detail id); delete verb/path.
@@ -23,7 +23,7 @@
 ## 2. Data model (D1) — cross-cutting
 
 - [ ] 2.1 `session_connectors` (internal): session_id, gateway conn id, detail id, per-session secret (encrypted), status, timestamps.
-- [ ] 2.2 `secrets` (class B, metadata only — Sprites custodies value): id, name, owner, upstream host(s), conn id + detail id, scoping mode, status.
+- [ ] 2.2 `secrets` (class B, metadata only — Sprites custodies value): id, name, owner, upstream host(s), conn id + detail id, entitlement label `sec:<id>`, status.
 - [ ] 2.3 `environment_secrets`: which environments/sessions are entitled to which secrets.
 - [ ] 2.4 Zod schemas/types for connectors, secrets, entitlements, access-policy scopes, provisioning states.
 
@@ -56,13 +56,13 @@
 ## S4. Provider key as a class-B connector
 
 - [ ] S4.1 Mint a class-B connector for the agent's provider credential (base = provider host, injects the real key); route the provider host through the proxy; remove the provider key from the Sprite.
-- [ ] S4.2 Scope it per "Scoping class-B connectors" (labels or per-session REST policy update per §0.7/0.8).
+- [ ] S4.2 Scope it by label (`sprite_labels: [sec:provider]`, set once at mint); entitled Sprites carry the label at creation.
 
 ## S5. User-defined secrets
 
 - [ ] S5.1 Definition UI/API: users declare secrets (name, value, upstream host(s), environments).
 - [ ] S5.2 Mint a per-secret class-B connector on definition (value → Sprites custody; store metadata only in D1).
-- [ ] S5.3 At provisioning, add entitled secrets' hosts to the routing table and scope their connectors to the session Sprite; de-scope at teardown; handle concurrent-session churn.
+- [ ] S5.3 At provisioning, add entitled secrets' hosts to the routing table and set the `sec:<secretId>` labels on the Sprite at creation (connectors already scoped to those labels — no per-session connector edit, no churn).
 
 ## 6. Session provisioning (synchronous, fail-closed) — cross-cutting
 
