@@ -68,6 +68,8 @@ export async function mintConnector(
     if (dashboardResult.error.submitAttempted === true) {
       return failure(await reconcileAfterUncertainSubmit({
         originalCode: dashboardResult.error.code,
+        dashboardOperation: dashboardResult.error.operation,
+        dashboardShape: dashboardResult.error.dashboardShape,
         before: beforeResult.value,
         request,
         dependencies,
@@ -81,6 +83,8 @@ export async function mintConnector(
       code: dashboardResult.error.code,
       stage: "dashboard_create",
       retryable: dashboardResult.error.retryable,
+      dashboardOperation: dashboardResult.error.operation,
+      dashboardShape: dashboardResult.error.dashboardShape,
       cleanup: notAttempted(),
       durations,
       startedAt,
@@ -315,6 +319,8 @@ function buildError(params: {
   code: ConnectorProvisionerErrorCode;
   stage: ProvisioningStage;
   retryable: boolean;
+  dashboardOperation?: ConnectorProvisionerError["dashboardOperation"];
+  dashboardShape?: ConnectorProvisionerError["dashboardShape"];
   cleanup: CleanupStatus;
   durations: ConnectorProvisioningDurations;
   startedAt: number;
@@ -325,6 +331,12 @@ function buildError(params: {
     code: params.code,
     stage: params.stage,
     retryable: params.retryable,
+    ...(params.dashboardOperation === undefined
+      ? {}
+      : { dashboardOperation: params.dashboardOperation }),
+    ...(params.dashboardShape === undefined
+      ? {}
+      : { dashboardShape: params.dashboardShape }),
     message: errorMessage(params.code),
     cleanup: params.cleanup,
     durations: params.durations,
@@ -432,6 +444,8 @@ async function delay(milliseconds: number): Promise<void> {
 
 async function reconcileAfterUncertainSubmit(params: {
   originalCode: ConnectorProvisionerErrorCode;
+  dashboardOperation?: ConnectorProvisionerError["dashboardOperation"];
+  dashboardShape?: ConnectorProvisionerError["dashboardShape"];
   before: SpritesConnection[];
   request: MintConnectorRequest;
   dependencies: MintConnectorDependencies;
@@ -477,6 +491,8 @@ async function reconcileAfterUncertainSubmit(params: {
       : params.originalCode,
     stage: attributableIds.length === 0 ? "list_after" : "dashboard_create",
     retryable: attributableIds.length === 0,
+    dashboardOperation: params.dashboardOperation,
+    dashboardShape: params.dashboardShape,
     cleanup,
     durations: params.durations,
     startedAt: params.startedAt,

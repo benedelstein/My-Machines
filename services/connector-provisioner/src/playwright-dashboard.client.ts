@@ -13,6 +13,7 @@ import type {
   DashboardConnectorClient,
   DashboardCreateError,
   DashboardCreateResult,
+  DashboardOperation,
   MintConnectorRequest,
   Result,
 } from "./types";
@@ -47,7 +48,6 @@ interface PlaywrightDashboardClientOptions {
 }
 
 type StorageState = Exclude<BrowserContextOptions["storageState"], string | undefined>;
-type DashboardOperation = "browser" | "navigation" | "interaction";
 
 export class PlaywrightDashboardClient implements DashboardConnectorClient {
   private readonly browserBinding: BrowserWorker;
@@ -81,39 +81,45 @@ export class PlaywrightDashboardClient implements DashboardConnectorClient {
 
     let browser: Awaited<ReturnType<typeof launch>> | undefined;
     let submitAttempted = false;
-    let operation: DashboardOperation = "browser";
+    let operation: DashboardOperation = "browser_launch";
     const durations: Partial<DashboardCreateResult["durations"]> = {};
     try {
       const browserStartedAt = this.now();
       browser = await launch(this.browserBinding, { keep_alive: 60_000 });
       durations.browserLaunchMs = this.now() - browserStartedAt;
 
+      operation = "context_create";
       const context = await browser.newContext({
         storageState: parsedStorageState.value,
       });
+      operation = "page_create";
       const page = await context.newPage();
 
-      operation = "navigation";
+      operation = "goto";
       const preflightStartedAt = this.now();
       await page.goto(this.connectorCreateUrl(), {
         waitUntil: "commit",
         timeout: 30_000,
       });
+      operation = "form_wait";
       await waitForDashboardRender(page);
+      operation = "shape_read";
       const shape = await readDashboardShape(page);
       const shapeResult = validateDashboardShape(shape);
       durations.dashboardPreflightMs = this.now() - preflightStartedAt;
       if (!shapeResult.ok) {
         return failure({
           ...shapeResult.error,
+          operation,
           durations,
         });
       }
 
-      operation = "interaction";
+      operation = "fill";
       await fillNonSecretFields(page, request);
       await page.locator('input[name="access_token"]').fill(request.token);
 
+      operation = "connection_test";
       const testStartedAt = this.now();
       const testResult = await testConnection(page);
       durations.dashboardTestMs = this.now() - testStartedAt;
@@ -126,6 +132,7 @@ export class PlaywrightDashboardClient implements DashboardConnectorClient {
       }
 
       const createStartedAt = this.now();
+      operation = "submit";
       submitAttempted = true;
       const detailId = await createConnection(page);
       durations.dashboardCreateMs = this.now() - createStartedAt;
@@ -143,6 +150,7 @@ export class PlaywrightDashboardClient implements DashboardConnectorClient {
       return failure({
         code: dashboardFailureCode(operation),
         retryable: true,
+        operation,
         submitAttempted,
         durations,
       });
@@ -161,11 +169,18 @@ function dashboardFailureCode(
   operation: DashboardOperation,
 ): DashboardCreateError["code"] {
   switch (operation) {
-    case "browser":
+    case "browser_launch":
+    case "context_create":
+    case "page_create":
       return "dashboard_browser_failed";
-    case "navigation":
+    case "goto":
       return "dashboard_navigation_failed";
-    case "interaction":
+    case "form_wait":
+    case "shape_read":
+      return "dashboard_drift";
+    case "fill":
+    case "connection_test":
+    case "submit":
       return "dashboard_create_failed";
   }
 }
@@ -192,39 +207,55 @@ function parseStorageState(storageState: string): Result<StorageState, Dashboard
 }
 
 async function waitForDashboardRender(page: Page): Promise<void> {
-  if (await signInForm(page).count() > 0) {
-    return;
-  }
-  await page.locator("#custom-api-form").waitFor({
-    state: "attached",
-    timeout: 15_000,
-  }).catch(() => undefined);
+  await Promise.race([
+    page.locator('#custom-api-form input[name="auth_method"]').waitFor({
+      state: "attached",
+      timeout: 15_000,
+    }),
+    signInForm(page).waitFor({
+      state: "attached",
+      timeout: 15_000,
+    }),
+  ]).catch(() => undefined);
 }
 
 async function readDashboardShape(page: Page): Promise<DashboardShapeSnapshot> {
-  const form = page.locator("#custom-api-form");
-  const testButton = page.locator('[phx-click="test_custom_api"]');
-  const hasSignInForm = await signInForm(page).count() > 0;
-  const hasConnectorForm = await form.count() === 1;
+  return await page.evaluate(() => {
+    type BrowserElement = {
+      value?: string;
+      getAttribute: (name: string) => string | null;
+      querySelector: (selector: string) => BrowserElement | null;
+      querySelectorAll: (selector: string) => Iterable<BrowserElement>;
+    };
+    const browserGlobal = globalThis as unknown as {
+      document: {
+        querySelector: (selector: string) => BrowserElement | null;
+        querySelectorAll: (selector: string) => { length: number };
+      };
+      location: { href: string };
+    };
+    const form = browserGlobal.document.querySelector("#custom-api-form");
+    const authMethod = form?.querySelector('input[name="auth_method"]');
+    const testButton = browserGlobal.document.querySelector('[phx-click="test_custom_api"]');
+    const fieldNames = form === null
+      ? []
+      : Array.from(form.querySelectorAll("input[name], textarea[name]"))
+        .map((element) => element.getAttribute("name"))
+        .filter((name): name is string => name !== null);
 
-  return {
-    currentUrl: page.url(),
-    hasSignInForm,
-    hasLiveViewRoot: await page.locator("[data-phx-main]").count() === 1,
-    authMethodValue: hasConnectorForm
-      ? await form.locator('input[name="auth_method"]').inputValue()
-      : null,
-    formChangeEvent: hasConnectorForm ? await form.getAttribute("phx-change") : null,
-    formSubmitEvent: hasConnectorForm ? await form.getAttribute("phx-submit") : null,
-    fieldNames: hasConnectorForm
-      ? await form.locator("input[name], textarea[name]").evaluateAll((elements) => {
-        return elements
-          .map((element) => element.getAttribute("name"))
-          .filter((name): name is string => name !== null);
-      })
-      : [],
-    testEvent: hasConnectorForm ? await testButton.getAttribute("phx-click") : null,
-  };
+    return {
+      currentUrl: browserGlobal.location.href,
+      hasSignInForm: browserGlobal.document.querySelector(
+        'form[action*="sign-in"], form[action*="login"], input[name="password"]',
+      ) !== null,
+      hasLiveViewRoot: browserGlobal.document.querySelectorAll("[data-phx-main]").length === 1,
+      authMethodValue: authMethod?.value ?? null,
+      formChangeEvent: form?.getAttribute("phx-change") ?? null,
+      formSubmitEvent: form?.getAttribute("phx-submit") ?? null,
+      fieldNames,
+      testEvent: testButton?.getAttribute("phx-click") ?? null,
+    };
+  });
 }
 
 function signInForm(page: Page) {

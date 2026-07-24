@@ -89,9 +89,31 @@ export type DashboardCreateErrorCode =
   | "dashboard_navigation_failed"
   | "dashboard_create_failed";
 
+export type DashboardOperation =
+  | "browser_launch"
+  | "context_create"
+  | "page_create"
+  | "goto"
+  | "form_wait"
+  | "shape_read"
+  | "fill"
+  | "connection_test"
+  | "submit";
+
+export interface DashboardShapeDiagnostics {
+  hasLiveViewRoot: boolean;
+  authMethodValue: string | null;
+  formChangeEvent: string | null;
+  formSubmitEvent: string | null;
+  fieldNames: string[];
+  testEvent: string | null;
+}
+
 export interface DashboardCreateError {
   code: DashboardCreateErrorCode;
   retryable: boolean;
+  operation?: DashboardOperation;
+  dashboardShape?: DashboardShapeDiagnostics;
   submitAttempted?: boolean;
   durations?: Partial<DashboardCreateResult["durations"]>;
 }
@@ -151,6 +173,8 @@ export interface ConnectorProvisionerError {
   code: ConnectorProvisionerErrorCode;
   stage: ProvisioningStage;
   retryable: boolean;
+  dashboardOperation?: DashboardOperation;
+  dashboardShape?: DashboardShapeDiagnostics;
   message: string;
   cleanup: CleanupStatus;
   durations: ConnectorProvisioningDurations;

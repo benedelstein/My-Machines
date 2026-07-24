@@ -1,15 +1,13 @@
-import type { DashboardCreateError, Result } from "./types";
+import type {
+  DashboardCreateError,
+  DashboardShapeDiagnostics,
+  Result,
+} from "./types";
 import { failure, success } from "./types";
 
-export interface DashboardShapeSnapshot {
+export interface DashboardShapeSnapshot extends DashboardShapeDiagnostics {
   currentUrl: string;
   hasSignInForm: boolean;
-  hasLiveViewRoot: boolean;
-  authMethodValue: string | null;
-  formChangeEvent: string | null;
-  formSubmitEvent: string | null;
-  fieldNames: string[];
-  testEvent: string | null;
 }
 
 const REQUIRED_FIELD_NAMES = [
@@ -44,6 +42,14 @@ export function validateDashboardShape(
     return failure({
       code: "dashboard_drift",
       retryable: false,
+      dashboardShape: {
+        hasLiveViewRoot: snapshot.hasLiveViewRoot,
+        authMethodValue: snapshot.authMethodValue,
+        formChangeEvent: snapshot.formChangeEvent,
+        formSubmitEvent: snapshot.formSubmitEvent,
+        fieldNames: snapshot.fieldNames,
+        testEvent: snapshot.testEvent,
+      },
     });
   }
 

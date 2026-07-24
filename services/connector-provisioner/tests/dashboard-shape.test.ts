@@ -58,11 +58,14 @@ describe("validateDashboardShape", () => {
       fieldNames: expectedFields.filter((fieldName) => fieldName !== "access_token"),
     };
 
-    expect(validateDashboardShape(shape)).toEqual({
+    expect(validateDashboardShape(shape)).toMatchObject({
       ok: false,
       error: {
         code: "dashboard_drift",
         retryable: false,
+        dashboardShape: {
+          fieldNames: expectedFields.filter((fieldName) => fieldName !== "access_token"),
+        },
       },
     });
   });
