@@ -1,0 +1,28 @@
+{
+  "name": "@repo/connector-provisioner",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir=dist",
+    "deploy": "wrangler deploy",
+    "lint": "eslint src/ tests/ scripts/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:live": "tsx scripts/test-live.ts",
+    "clean": "rm -rf dist .wrangler"
+  },
+  "dependencies": {
+    "@cloudflare/playwright": "^1.3.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260421.1",
+    "@types/node": "^22.0.0",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "^4.84.1"
+  }
+}

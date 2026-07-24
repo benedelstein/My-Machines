@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloude-code-connector-provisioner",
+  "account_id": "fc436be76ce4378e78419c5f0c62e345",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "browser": {
+    "binding": "BROWSER",
+    "remote": true
+  },
+  "vars": {
+    "SPRITES_API_URL": "https://api.sprites.dev",
+    "SPRITES_DASHBOARD_URL": "https://fly.io/dashboard"
+  },
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": false
+    }
+  }
+  // Secrets (set via wrangler secret put):
+  // - CONNECTOR_PROVISIONER_BEARER_TOKEN
+  // - SPRITES_API_KEY
+  // - SPRITES_DASHBOARD_STORAGE_STATE
+  // - SPRITES_ORG_SLUG
+}

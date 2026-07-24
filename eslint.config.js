@@ -134,6 +134,7 @@ export default tseslint.config(
           "./packages/vm-agent/tsconfig.eslint.json",
           "./scripts/tsconfig.json",
           "./services/api-server/tsconfig.eslint.json",
+          "./services/connector-provisioner/tsconfig.eslint.json",
         ],
         tsconfigRootDir,
       },
