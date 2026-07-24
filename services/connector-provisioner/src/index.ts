@@ -2,7 +2,7 @@ import type { BrowserWorker } from "@cloudflare/playwright";
 import { deleteConnectorAndVerify, mintConnector } from "./mint-connector";
 import { PlaywrightDashboardClient } from "./playwright-dashboard.client";
 import { HttpSpritesConnectionsClient } from "./sprites-connections.client";
-import { LiveTestRequestSchema } from "./types";
+import { LiveTestRequestSchema, type SpritesConnection } from "./types";
 
 export interface Env {
   BROWSER: BrowserWorker;
@@ -26,11 +26,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return jsonResponse({ error: { code: "not_found" } }, 404);
   }
 
-  if (!hasBaseConfiguration(env)) {
-    return jsonResponse({ error: { code: "service_configuration_invalid" } }, 503);
-  }
   if (!await hasValidBearer(request, env.CONNECTOR_PROVISIONER_BEARER_TOKEN)) {
     return jsonResponse({ error: { code: "unauthorized" } }, 401);
+  }
+  if (!hasBaseConfiguration(env)) {
+    return jsonResponse({ error: { code: "service_configuration_invalid" } }, 503);
   }
 
   const sprites = new HttpSpritesConnectionsClient({
@@ -38,6 +38,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     apiToken: env.SPRITES_API_KEY,
   });
   if (deleteConnectionId !== undefined) {
+    const existing = await sprites.getConnection(deleteConnectionId);
+    if (!existing.ok) {
+      return jsonResponse({ error: { code: existing.error.code } }, 502);
+    }
+    if (existing.value === null) {
+      return jsonResponse({ error: { code: "connector_not_found" } }, 404);
+    }
+    if (!isDeletableSessionConnector(existing.value)) {
+      return jsonResponse({ error: { code: "connector_delete_refused" } }, 403);
+    }
     const deleteResult = await deleteConnectorAndVerify(deleteConnectionId, sprites);
     if (!deleteResult.ok) {
       return jsonResponse({ error: { code: deleteResult.error } }, 502);
@@ -144,7 +154,12 @@ function hasMintConfiguration(env: Env): boolean {
 
 async function hasValidBearer(request: Request, expectedToken: string): Promise<boolean> {
   const authorization = request.headers.get("Authorization");
-  if (authorization === null || !authorization.startsWith("Bearer ")) {
+  if (
+    typeof expectedToken !== "string"
+    || expectedToken.length === 0
+    || authorization === null
+    || !authorization.startsWith("Bearer ")
+  ) {
     return false;
   }
 
@@ -182,6 +197,14 @@ function jsonResponse(body: unknown, status = 200): Response {
       "Content-Type": "application/json",
     },
   });
+}
+
+function isDeletableSessionConnector(connection: SpritesConnection): boolean {
+  const labels = connection.accessPolicy?.spriteLabels ?? [];
+  return connection.provider === "custom_api"
+    && connection.accessPolicy?.allowAll === false
+    && labels.length > 0
+    && labels.every((label) => label.startsWith("session:"));
 }
 
 function getDeleteConnectionId(method: string, pathname: string): string | undefined {

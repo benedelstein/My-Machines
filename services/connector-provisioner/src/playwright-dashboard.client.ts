@@ -6,6 +6,7 @@ import {
 } from "@cloudflare/playwright";
 import { z } from "zod";
 import {
+  isAuthenticationUrl,
   validateDashboardShape,
   type DashboardShapeSnapshot,
 } from "./dashboard-shape";
@@ -48,6 +49,12 @@ interface PlaywrightDashboardClientOptions {
 }
 
 type StorageState = Exclude<BrowserContextOptions["storageState"], string | undefined>;
+
+class ReauthenticationRequiredError extends Error {
+  constructor() {
+    super("Dashboard session expired during submit");
+  }
+}
 
 export class PlaywrightDashboardClient implements DashboardConnectorClient {
   private readonly browserBinding: BrowserWorker;
@@ -146,7 +153,16 @@ export class PlaywrightDashboardClient implements DashboardConnectorClient {
           dashboardCreateMs: durations.dashboardCreateMs ?? 0,
         },
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof ReauthenticationRequiredError) {
+        return failure({
+          code: "reauthentication_required",
+          retryable: false,
+          operation,
+          submitAttempted,
+          durations,
+        });
+      }
       return failure({
         code: dashboardFailureCode(operation),
         retryable: true,
@@ -313,6 +329,10 @@ async function createConnection(page: Page): Promise<string | undefined> {
   await page.waitForURL((url) => url.toString() !== createUrl, {
     timeout: 30_000,
   });
+
+  if (isAuthenticationUrl(page.url())) {
+    throw new ReauthenticationRequiredError();
+  }
 
   const url = new URL(page.url());
   const segments = url.pathname.split("/").filter(Boolean);

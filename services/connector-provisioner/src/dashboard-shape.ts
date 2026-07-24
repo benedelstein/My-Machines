@@ -55,7 +55,7 @@ export function validateDashboardShape(
   return success(undefined);
 }
 
-function isAuthenticationUrl(currentUrl: string): boolean {
+export function isAuthenticationUrl(currentUrl: string): boolean {
   try {
     const url = new URL(currentUrl);
     return url.hostname === "fly.io" && url.pathname.includes("sign-in")

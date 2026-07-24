@@ -264,7 +264,7 @@ describe("mintConnector", () => {
     expect(sprites.listCallCount).toBe(1);
   });
 
-  it("deletes every attributable connector when reconciliation is ambiguous", async () => {
+  it("deletes nothing when reconciliation is ambiguous", async () => {
     const sprites = new FakeSpritesClient();
     sprites.listResponses = [
       success([]),
@@ -284,16 +284,13 @@ describe("mintConnector", () => {
       ok: false,
       error: {
         code: "connector_reconciliation_failed",
+        retryable: false,
         cleanup: {
-          attempted: true,
-          succeeded: true,
+          attempted: false,
         },
       },
     });
-    expect(sprites.deletedIds.sort()).toEqual([
-      "gateway-connection-id",
-      "second-gateway-id",
-    ]);
+    expect(sprites.deletedIds).toEqual([]);
   });
 
   it("does not accept one exact match when another same-name connector appears", async () => {
@@ -324,18 +321,14 @@ describe("mintConnector", () => {
       error: {
         code: "connector_reconciliation_failed",
         cleanup: {
-          attempted: true,
-          succeeded: true,
+          attempted: false,
         },
       },
     });
-    expect(sprites.deletedIds.sort()).toEqual([
-      "gateway-connection-id",
-      "same-name-different-target",
-    ]);
+    expect(sprites.deletedIds).toEqual([]);
   });
 
-  it("cleans up rather than throwing when Sprites returns malformed provider URLs", async () => {
+  it("fails without deleting when Sprites returns malformed provider URLs", async () => {
     const sprites = new FakeSpritesClient();
     sprites.listResponses = [
       success([]),
@@ -359,12 +352,11 @@ describe("mintConnector", () => {
       error: {
         code: "connector_reconciliation_failed",
         cleanup: {
-          attempted: true,
-          succeeded: true,
+          attempted: false,
         },
       },
     });
-    expect(sprites.deletedIds).toEqual(["gateway-connection-id"]);
+    expect(sprites.deletedIds).toEqual([]);
   });
 
   it("retries list-after and reports an orphan condition if REST remains unavailable", async () => {
@@ -479,5 +471,39 @@ describe("mintConnector", () => {
       },
     });
     expect(sprites.deletedIds).toEqual(["gateway-connection-id"]);
+  });
+
+  it("deletes nothing after an uncertain submit when attribution is ambiguous", async () => {
+    const sprites = new FakeSpritesClient();
+    sprites.listResponses = [
+      success([]),
+      success([
+        createdConnection,
+        { ...createdConnection, id: "second-gateway-id" },
+      ]),
+    ];
+
+    const result = await mintConnector(request, {
+      dashboard: new FakeDashboardClient(failure({
+        code: "dashboard_create_failed",
+        retryable: true,
+        submitAttempted: true,
+      })),
+      sprites,
+      now: clock(),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "connector_reconciliation_failed",
+        stage: "list_after",
+        retryable: false,
+        cleanup: {
+          attempted: false,
+        },
+      },
+    });
+    expect(sprites.deletedIds).toEqual([]);
   });
 });

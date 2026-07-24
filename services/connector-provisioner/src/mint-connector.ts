@@ -119,19 +119,15 @@ export async function mintConnector(
     request,
   );
   if (reconciliation.connection === undefined) {
-    const cleanup = await cleanupConnections(
-      reconciliation.attributableConnectionIds,
-      dependencies.sprites,
-      now,
-      durations,
-    );
+    // An ambiguous match set can include a concurrent mint's live connector;
+    // deleting on ambiguity is worse than leaking a deny-all orphan.
     return failure(buildError({
       code: reconciliation.attributableConnectionIds.length === 0
         ? "orphan_reconciliation_required"
         : "connector_reconciliation_failed",
       stage: "list_after",
       retryable: reconciliation.attributableConnectionIds.length === 0,
-      cleanup,
+      cleanup: notAttempted(),
       durations,
       startedAt,
       now,
@@ -474,23 +470,44 @@ async function reconcileAfterUncertainSubmit(params: {
     });
   }
 
-  const attributableIds = findAttributableConnections(
+  const attributable = findAttributableConnections(
     params.before,
     afterResult.value,
     params.request,
-  ).map((connection) => connection.id);
-  const cleanup = await cleanupConnections(
-    attributableIds,
-    params.dependencies.sprites,
-    params.now,
-    params.durations,
   );
+  const orphan = attributable.length === 1
+    && attributable[0] !== undefined
+    && providerInfoUrlMatches(attributable[0].providerInfo, "base_api_url", params.request.baseApiUrl)
+    && providerInfoUrlMatches(attributable[0].providerInfo, "test_url", params.request.testUrl)
+    ? attributable[0]
+    : undefined;
+  if (attributable.length > 0 && orphan === undefined) {
+    // Multiple or unprovable matches may belong to a concurrent mint; never
+    // delete what cannot be uniquely attributed to this call.
+    return buildError({
+      code: "connector_reconciliation_failed",
+      stage: "list_after",
+      retryable: false,
+      dashboardOperation: params.dashboardOperation,
+      dashboardShape: params.dashboardShape,
+      cleanup: notAttempted(),
+      durations: params.durations,
+      startedAt: params.startedAt,
+      now: params.now,
+    });
+  }
+  const cleanup = orphan === undefined
+    ? notAttempted()
+    : await cleanupConnections(
+      [orphan.id],
+      params.dependencies.sprites,
+      params.now,
+      params.durations,
+    );
   return buildError({
-    code: attributableIds.length === 0
-      ? "orphan_reconciliation_required"
-      : params.originalCode,
-    stage: attributableIds.length === 0 ? "list_after" : "dashboard_create",
-    retryable: attributableIds.length === 0,
+    code: orphan === undefined ? "orphan_reconciliation_required" : params.originalCode,
+    stage: orphan === undefined ? "list_after" : "dashboard_create",
+    retryable: orphan === undefined,
     dashboardOperation: params.dashboardOperation,
     dashboardShape: params.dashboardShape,
     cleanup,
