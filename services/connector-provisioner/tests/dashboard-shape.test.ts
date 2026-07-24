@@ -7,7 +7,6 @@ import {
 const expectedFields = [
   "access_token",
   "auth_header_prefix",
-  "auth_method",
   "base_api_url",
   "description",
   "name",
@@ -20,9 +19,9 @@ function validShape(): DashboardShapeSnapshot {
     currentUrl: "https://fly.io/dashboard/example/sprites/connectors/new?type=custom_api",
     hasSignInForm: false,
     hasLiveViewRoot: true,
-    authMethodValue: "header",
-    formChangeEvent: "validate_custom_api_form",
-    formSubmitEvent: "create_custom_api",
+    authMethodOptions: ["Header", "URL path", "Query param", "Custom header"],
+    formChangeEvent: "validate_custom_api",
+    formSubmitEvent: "submit_custom_api",
     fieldNames: expectedFields,
     testEvent: "test_custom_api",
   };

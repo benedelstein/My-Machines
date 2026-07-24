@@ -102,7 +102,7 @@ export type DashboardOperation =
 
 export interface DashboardShapeDiagnostics {
   hasLiveViewRoot: boolean;
-  authMethodValue: string | null;
+  authMethodOptions: string[];
   formChangeEvent: string | null;
   formSubmitEvent: string | null;
   fieldNames: string[];

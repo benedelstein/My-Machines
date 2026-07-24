@@ -208,7 +208,7 @@ function parseStorageState(storageState: string): Result<StorageState, Dashboard
 
 async function waitForDashboardRender(page: Page): Promise<void> {
   await Promise.race([
-    page.locator('#custom-api-form input[name="auth_method"]').waitFor({
+    page.locator('#custom-api-form input[name="access_token"]').waitFor({
       state: "attached",
       timeout: 15_000,
     }),
@@ -223,6 +223,7 @@ async function readDashboardShape(page: Page): Promise<DashboardShapeSnapshot> {
   return await page.evaluate(() => {
     type BrowserElement = {
       value?: string;
+      textContent?: string;
       getAttribute: (name: string) => string | null;
       querySelector: (selector: string) => BrowserElement | null;
       querySelectorAll: (selector: string) => Iterable<BrowserElement>;
@@ -230,12 +231,14 @@ async function readDashboardShape(page: Page): Promise<DashboardShapeSnapshot> {
     const browserGlobal = globalThis as unknown as {
       document: {
         querySelector: (selector: string) => BrowserElement | null;
-        querySelectorAll: (selector: string) => { length: number };
+        querySelectorAll: (selector: string) => Iterable<BrowserElement> & { length: number };
       };
       location: { href: string };
     };
     const form = browserGlobal.document.querySelector("#custom-api-form");
-    const authMethod = form?.querySelector('input[name="auth_method"]');
+    const authMethodOptions = Array.from(browserGlobal.document.querySelectorAll(
+      'button[phx-click="set_custom_api_auth_method"]',
+    )).map((element) => (element.textContent ?? "").trim());
     const testButton = browserGlobal.document.querySelector('[phx-click="test_custom_api"]');
     const fieldNames = form === null
       ? []
@@ -249,7 +252,7 @@ async function readDashboardShape(page: Page): Promise<DashboardShapeSnapshot> {
         'form[action*="sign-in"], form[action*="login"], input[name="password"]',
       ) !== null,
       hasLiveViewRoot: browserGlobal.document.querySelectorAll("[data-phx-main]").length === 1,
-      authMethodValue: authMethod?.value ?? null,
+      authMethodOptions,
       formChangeEvent: form?.getAttribute("phx-change") ?? null,
       formSubmitEvent: form?.getAttribute("phx-submit") ?? null,
       fieldNames,
@@ -265,10 +268,11 @@ function signInForm(page: Page) {
 }
 
 async function fillNonSecretFields(page: Page, request: MintConnectorRequest): Promise<void> {
-  const authMethod = page.locator('input[name="auth_method"]');
-  if (await authMethod.inputValue() !== "header") {
-    throw new Error("Unexpected dashboard auth method");
-  }
+  await page.getByRole("button", { name: "Header", exact: true }).click();
+  await page.locator('input[name="auth_header_prefix"]').waitFor({
+    state: "attached",
+    timeout: 15_000,
+  });
 
   await page.locator('input[name="base_api_url"]').fill(request.baseApiUrl);
   await page.locator('input[name="name"]').fill(request.name);
@@ -281,7 +285,7 @@ async function fillNonSecretFields(page: Page, request: MintConnectorRequest): P
 async function testConnection(page: Page): Promise<boolean> {
   const testButton = page.locator('[phx-click="test_custom_api"]');
   const createButton = page.getByRole("button", {
-    name: "Create Connection",
+    name: "Add connector",
     exact: true,
   });
 
@@ -301,7 +305,7 @@ async function testConnection(page: Page): Promise<boolean> {
 async function createConnection(page: Page): Promise<string | undefined> {
   const createUrl = page.url();
   const createButton = page.getByRole("button", {
-    name: "Create Connection",
+    name: "Add connector",
     exact: true,
   });
 

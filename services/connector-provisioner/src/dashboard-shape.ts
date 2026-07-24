@@ -13,7 +13,6 @@ export interface DashboardShapeSnapshot extends DashboardShapeDiagnostics {
 const REQUIRED_FIELD_NAMES = [
   "access_token",
   "auth_header_prefix",
-  "auth_method",
   "base_api_url",
   "description",
   "name",
@@ -33,10 +32,10 @@ export function validateDashboardShape(
 
   const fieldNames = new Set(snapshot.fieldNames);
   const hasRequiredFields = REQUIRED_FIELD_NAMES.every((fieldName) => fieldNames.has(fieldName));
-  const hasExpectedEvents = snapshot.formChangeEvent === "validate_custom_api_form"
-    && snapshot.formSubmitEvent === "create_custom_api"
+  const hasExpectedEvents = snapshot.formChangeEvent === "validate_custom_api"
+    && snapshot.formSubmitEvent === "submit_custom_api"
     && snapshot.testEvent === "test_custom_api"
-    && snapshot.authMethodValue === "header";
+    && snapshot.authMethodOptions.includes("Header");
 
   if (!snapshot.hasLiveViewRoot || !hasRequiredFields || !hasExpectedEvents) {
     return failure({
@@ -44,7 +43,7 @@ export function validateDashboardShape(
       retryable: false,
       dashboardShape: {
         hasLiveViewRoot: snapshot.hasLiveViewRoot,
-        authMethodValue: snapshot.authMethodValue,
+        authMethodOptions: snapshot.authMethodOptions,
         formChangeEvent: snapshot.formChangeEvent,
         formSubmitEvent: snapshot.formSubmitEvent,
         fieldNames: snapshot.fieldNames,
