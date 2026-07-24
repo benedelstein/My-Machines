@@ -1,0 +1,21 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "claude-oauth-control-plane-proxy-spike",
+  "main": "claude-oauth-control-plane-proxy.worker.ts",
+  "compatibility_date": "2024-12-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ENVIRONMENT": "development",
+    "LOG_LEVEL": "info"
+  },
+  "dev": {
+    "port": 8787
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cloude-code-db",
+      "database_id": "83f9e684-6771-446f-bff6-7e2eb4e6d5e3"
+    }
+  ]
+}

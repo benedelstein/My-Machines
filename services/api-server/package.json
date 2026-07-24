@@ -15,6 +15,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:live:sprite": "tsx scripts/test-sprite.ts",
+    "test:live:claude-oauth-control-plane-proxy": "tsx scripts/test-claude-oauth-control-plane-proxy.ts",
+    "test:live:codex-oauth-control-plane-proxy": "tsx scripts/test-codex-oauth-control-plane-proxy.ts",
     "test:fcm": "tsx scripts/test-fcm.ts"
   },
   "dependencies": {

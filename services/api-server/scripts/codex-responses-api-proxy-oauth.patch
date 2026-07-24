@@ -1,0 +1,146 @@
+diff --git a/codex-rs/responses-api-proxy/src/lib.rs b/codex-rs/responses-api-proxy/src/lib.rs
+index 307fa05..42ce193 100644
+--- a/codex-rs/responses-api-proxy/src/lib.rs
++++ b/codex-rs/responses-api-proxy/src/lib.rs
+@@ -1,3 +1,4 @@
++use std::env;
+ use std::fs::File;
+ use std::fs::{self};
+ use std::io::Read;
+@@ -67,11 +68,22 @@ struct ServerInfo {
+ struct ForwardConfig {
+     upstream_url: Url,
+     host_header: HeaderValue,
++    downstream_auth_header: HeaderValue,
++    chatgpt_account_id: HeaderValue,
+ }
+ 
+ /// Entry point for the library main, for parity with other crates.
+ pub fn run_main(args: Args) -> Result<()> {
+     let auth_header = read_auth_header_from_stdin()?;
++    let downstream_token =
++        env::var("CLOUDE_DOWNSTREAM_TOKEN").context("reading CLOUDE_DOWNSTREAM_TOKEN")?;
++    let mut downstream_auth_header = HeaderValue::from_str(&format!("Bearer {downstream_token}"))
++        .context("constructing downstream Authorization header")?;
++    downstream_auth_header.set_sensitive(true);
++    let chatgpt_account_id = HeaderValue::from_str(
++        &env::var("CLOUDE_CHATGPT_ACCOUNT_ID").context("reading CLOUDE_CHATGPT_ACCOUNT_ID")?,
++    )
++    .context("constructing ChatGPT account header")?;
+ 
+     let upstream_url = Url::parse(&args.upstream_url).context("parsing --upstream-url")?;
+     let host = match (upstream_url.host_str(), upstream_url.port()) {
+@@ -85,6 +97,8 @@ pub fn run_main(args: Args) -> Result<()> {
+     let forward_config = Arc::new(ForwardConfig {
+         upstream_url,
+         host_header,
++        downstream_auth_header,
++        chatgpt_account_id,
+     });
+     let dump_dir = args
+         .dump_dir
+@@ -167,10 +181,30 @@ fn forward_request(
+     dump_dir: Option<&ExchangeDumper>,
+     mut req: Request,
+ ) -> Result<()> {
+-    // Only allow POST /v1/responses exactly, no query string.
+     let method = req.method().clone();
+     let url_path = req.url().to_string();
+-    let allow = method == Method::Post && url_path == "/v1/responses";
++    eprintln!("downstream request method={method:?} path={url_path}");
++    if method == Method::Get && url_path == "/health" {
++        let _ = req.respond(Response::new_empty(StatusCode(200)));
++        return Ok(());
++    }
++
++    let authorized = req.headers().iter().any(|header| {
++        header
++            .field
++            .as_str()
++            .as_str()
++            .eq_ignore_ascii_case("authorization")
++            && header.value.as_str() == config.downstream_auth_header.to_str().unwrap_or_default()
++    });
++    if !authorized {
++        let resp = Response::new_empty(StatusCode(401));
++        let _ = req.respond(resp);
++        return Ok(());
++    }
++
++    let allow =
++        method == Method::Post && matches!(url_path.as_str(), "/responses" | "/v1/responses");
+ 
+     if !allow {
+         let resp = Response::new_empty(StatusCode(403));
+@@ -199,7 +233,22 @@ fn forward_request(
+     for header in req.headers() {
+         let name_ascii = header.field.as_str();
+         let lower = name_ascii.to_ascii_lowercase();
+-        if lower.as_str() == "authorization" || lower.as_str() == "host" {
++        if matches!(
++            lower.as_str(),
++            "authorization"
++                | "cdn-loop"
++                | "chatgpt-account-id"
++                | "cookie"
++                | "forwarded"
++                | "host"
++                | "x-api-key"
++                | "x-forwarded-for"
++                | "x-forwarded-host"
++                | "x-forwarded-port"
++                | "x-forwarded-proto"
++                | "x-real-ip"
++        ) || lower.as_str().starts_with("cf-")
++        {
+             continue;
+         }
+ 
+@@ -217,6 +266,10 @@ fn forward_request(
+     let mut auth_header_value = HeaderValue::from_static(auth_header);
+     auth_header_value.set_sensitive(true);
+     headers.insert(AUTHORIZATION, auth_header_value);
++    headers.insert(
++        HeaderName::from_static("chatgpt-account-id"),
++        config.chatgpt_account_id.clone(),
++    );
+ 
+     headers.insert(HOST, config.host_header.clone());
+ 
+@@ -232,6 +285,7 @@ fn forward_request(
+     // implements `Read`, so we can use it directly as the body of the
+     // `tiny_http::Response`.
+     let status = upstream_resp.status();
++    eprintln!("upstream response status={status}");
+     let mut response_headers = Vec::new();
+     for (name, value) in upstream_resp.headers().iter() {
+         // Skip headers that tiny_http manages itself.
+diff --git a/codex-rs/responses-api-proxy/src/read_api_key.rs b/codex-rs/responses-api-proxy/src/read_api_key.rs
+index df5e210..5d7bfaa 100644
+--- a/codex-rs/responses-api-proxy/src/read_api_key.rs
++++ b/codex-rs/responses-api-proxy/src/read_api_key.rs
+@@ -5,7 +5,7 @@ use zeroize::Zeroize;
+ 
+ /// Use a generous buffer size to avoid truncation and to allow for longer API
+ /// keys in the future.
+-const BUFFER_SIZE: usize = 1024;
++const BUFFER_SIZE: usize = 8192;
+ const AUTH_HEADER_PREFIX: &[u8] = b"Bearer ";
+ 
+ /// Reads the auth token from stdin and returns a static `Authorization` header
+@@ -208,13 +208,13 @@ fn mlock_str(_value: &str) {}
+ fn validate_auth_header_bytes(key_bytes: &[u8]) -> Result<()> {
+     if key_bytes
+         .iter()
+-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
++        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+     {
+         return Ok(());
+     }
+ 
+     Err(anyhow!(
+-        "API key may only contain ASCII letters, numbers, '-' or '_'"
++        "API key may only contain ASCII letters, numbers, '-', '_', or '.'"
+     ))
+ }
+ 
