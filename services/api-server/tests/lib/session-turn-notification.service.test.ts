@@ -43,6 +43,41 @@ describe("SessionTurnNotificationService", () => {
     });
   });
 
+  it("uses the final text part of the message as the preview", async () => {
+    const publishTurnFinished = vi.fn<NotificationPublisher["publishTurnFinished"]>()
+      .mockResolvedValue(undefined);
+    const service = new SessionTurnNotificationService({
+      notificationPublisher: { publishTurnFinished } as unknown as NotificationPublisher,
+      sessionsRepository: {
+        getByIdForUser: vi.fn().mockResolvedValue({
+          title: "Fix notification copy",
+          repoFullName: "owner/repo",
+        }),
+      },
+    });
+
+    await service.publishTurnFinished({
+      toUserId: "user-1",
+      sessionId: "session-1",
+      messageId: "message-1",
+      repoFullName: "owner/repo",
+      message: {
+        id: "message-1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "Let me look at the code." },
+          { type: "step-start" },
+          { type: "text", text: "Done. The bug was in the parser." },
+          { type: "text", text: "   " },
+        ],
+      },
+    });
+
+    expect(publishTurnFinished).toHaveBeenCalledWith(expect.objectContaining({
+      messagePreview: "Done. The bug was in the parser.",
+    }));
+  });
+
   it("falls back to the current repo name when the session title is missing", async () => {
     const publishTurnFinished = vi.fn<NotificationPublisher["publishTurnFinished"]>()
       .mockResolvedValue(undefined);
