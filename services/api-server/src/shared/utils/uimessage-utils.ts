@@ -59,20 +59,24 @@ export const getUserMessageTextContent = (
   return text || undefined;
 };
 
-export function extractUiMessageText(message: UIMessage): string {
+/**
+ * Returns the last non-empty text part of the message. Assistant turns
+ * interleave text parts with tool calls; the last one is the final response.
+ */
+export function extractFinalUiMessageText(message: UIMessage): string {
   const messageParts = Array.isArray(message.parts) ? message.parts : [];
-  const textParts: string[] = [];
 
-  for (const part of messageParts) {
-    if (part.type === "text" && typeof part.text === "string") {
+  for (let i = messageParts.length - 1; i >= 0; i--) {
+    const part = messageParts[i];
+    if (part && part.type === "text" && typeof part.text === "string") {
       const normalizedText = part.text.replace(/\s+/g, " ").trim();
       if (normalizedText) {
-        textParts.push(normalizedText);
+        return normalizedText;
       }
     }
   }
 
-  return textParts.join(" ").trim();
+  return "";
 }
 
 export const buildAttachmentContentUrl = (attachmentId: string): string => {
