@@ -14,6 +14,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const sourceRoots = [
   "packages/shared/src",
+  "packages/sprites-client/src",
   "packages/vm-agent/src",
   "services/api-server/src",
   "services/connector-provisioner/src",

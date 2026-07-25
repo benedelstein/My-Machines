@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as SpritesClientModule from "@repo/sprites-client";
 import type { AgentSettings, ClientState, Logger, SessionSetupRun } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
 import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
@@ -17,7 +18,7 @@ vi.mock("@repo/vm-agent/dist/vm-agent-webhook.bundle.js", () => ({
   default: "// mocked vm-agent bundle",
 }));
 
-vi.mock("@/shared/integrations/sprites", () => {
+vi.mock("@repo/sprites-client", () => {
   class SpritesError extends Error {
     constructor(
       message: string,
@@ -48,8 +49,13 @@ vi.mock("../../src/modules/session-agent/services/agent-attachment.service", () 
 }));
 
 import { encodeAgentInput, encodeAgentOutput } from "@repo/shared";
-import { SpritesError } from "../../src/shared/integrations/sprites/types";
 import { SpriteAgentProcessManager } from "../../src/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
+
+// The barrel is mocked above with its own SpritesError class; importActual
+// preserves the pre-move behavior of deep-importing the real class.
+const { SpritesError } = await vi.importActual<typeof SpritesClientModule>(
+  "@repo/sprites-client",
+);
 
 function createLogger(): Logger {
   return {

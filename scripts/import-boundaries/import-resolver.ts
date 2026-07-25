@@ -28,6 +28,10 @@ const workspacePackages = new Map([
     { root: "packages/shared", entrypoint: "packages/shared/src/index.ts" },
   ],
   [
+    "@repo/sprites-client",
+    { root: "packages/sprites-client", entrypoint: "packages/sprites-client/src/index.ts" },
+  ],
+  [
     "@repo/vm-agent",
     { root: "packages/vm-agent", entrypoint: "packages/vm-agent/src/index-ndjson.ts" },
   ],

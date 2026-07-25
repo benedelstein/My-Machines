@@ -17,6 +17,7 @@
   "dependencies": {
     "@cloudflare/playwright": "^1.3.0",
     "@repo/shared": "workspace:*",
+    "@repo/sprites-client": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -25,6 +26,6 @@
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "wrangler": "^4.84.1"
+    "wrangler": "catalog:"
   }
 }

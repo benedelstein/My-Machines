@@ -1,12 +1,11 @@
 import { z } from "zod";
+import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
-  Result,
   SpritesConnection,
   SpritesConnectionsClient,
   SpritesRestError,
-} from "./types";
-import { failure, success } from "./types";
+} from "./sprites-connections.types";
 
 const AccessPolicySchema = z.object({
   allow_all: z.boolean().optional(),

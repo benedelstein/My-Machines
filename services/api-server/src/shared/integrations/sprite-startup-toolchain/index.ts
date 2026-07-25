@@ -1,6 +1,6 @@
 import type { Logger, ProviderId, Result } from "@repo/shared";
 import { failure, success } from "@repo/shared";
-import type { WorkersSpriteClient } from "..";
+import type { WorkersSpriteClient } from "@repo/sprites-client";
 import { sha256 } from "@/shared/utils/crypto";
 import type {
   StartupToolchainCheckpoint,

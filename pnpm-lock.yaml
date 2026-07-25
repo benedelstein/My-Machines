@@ -39,6 +39,9 @@ catalogs:
     vitest:
       specifier: ^3.1.1
       version: 3.2.4
+    wrangler:
+      specifier: ^4.84.1
+      version: 4.84.1
     zod:
       specifier: ^4.3.6
       version: 4.3.6
@@ -103,7 +106,7 @@ importers:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.8)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
       wrangler:
-        specifier: ^4.84.1
+        specifier: 'catalog:'
         version: 4.84.1(@cloudflare/workers-types@4.20260421.1)
 
   apps/web:
@@ -271,6 +274,34 @@ importers:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.8)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
 
+  packages/sprites-client:
+    dependencies:
+      '@fly/sprites':
+        specifier: ^0.0.1
+        version: 0.0.1
+      '@repo/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 4.20260421.1
+        version: 4.20260421.1
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.8
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@22.19.8)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.8)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
+
   packages/vm-agent:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
@@ -334,6 +365,9 @@ importers:
       '@repo/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@repo/sprites-client':
+        specifier: workspace:*
+        version: link:../../packages/sprites-client
       '@repo/vm-agent':
         specifier: workspace:*
         version: link:../../packages/vm-agent
@@ -378,7 +412,7 @@ importers:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.12)(@types/node@25.6.0)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
       wrangler:
-        specifier: ^4.84.1
+        specifier: 'catalog:'
         version: 4.84.1(@cloudflare/workers-types@4.20260421.1)
 
   services/connector-provisioner:
@@ -389,6 +423,9 @@ importers:
       '@repo/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@repo/sprites-client':
+        specifier: workspace:*
+        version: link:../../packages/sprites-client
       zod:
         specifier: 'catalog:'
         version: 4.3.6
@@ -409,7 +446,7 @@ importers:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.8)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
       wrangler:
-        specifier: ^4.84.1
+        specifier: 'catalog:'
         version: 4.84.1(@cloudflare/workers-types@4.20260421.1)
 
 packages:

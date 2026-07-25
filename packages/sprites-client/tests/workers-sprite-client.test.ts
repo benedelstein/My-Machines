@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WorkersSpriteClient } from "../../src/shared/integrations/sprites/WorkersSpriteClient";
+import { WorkersSpriteClient } from "../src/WorkersSpriteClient";
 
 const encoder = new TextEncoder();
 

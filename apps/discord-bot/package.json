@@ -22,7 +22,7 @@
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "wrangler": "^4.84.1",
+    "wrangler": "catalog:",
     "@types/node": "^22.0.0"
   }
 }

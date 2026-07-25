@@ -15,8 +15,6 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:live:sprite": "tsx scripts/test-sprite.ts",
-    "test:live:claude-oauth-control-plane-proxy": "tsx scripts/test-claude-oauth-control-plane-proxy.ts",
-    "test:live:codex-oauth-control-plane-proxy": "tsx scripts/test-codex-oauth-control-plane-proxy.ts",
     "test:fcm": "tsx scripts/test-fcm.ts"
   },
   "dependencies": {
@@ -26,6 +24,7 @@
     "@hono/zod-openapi": "catalog:",
     "@repo/api-contract": "workspace:*",
     "@repo/shared": "workspace:*",
+    "@repo/sprites-client": "workspace:*",
     "@repo/vm-agent": "workspace:*",
     "agents": "catalog:",
     "ai": "catalog:",
@@ -42,6 +41,6 @@
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "wrangler": "^4.84.1"
+    "wrangler": "catalog:"
   }
 }

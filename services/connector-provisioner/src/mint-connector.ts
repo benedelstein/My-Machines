@@ -1,5 +1,10 @@
+import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
+  SpritesConnection,
+  SpritesConnectionsClient,
+} from "@repo/sprites-client";
+import type {
   CleanupStatus,
   ConnectorProvisionerError,
   ConnectorProvisionerErrorCode,
@@ -8,11 +13,7 @@ import type {
   MintConnectorRequest,
   MintConnectorResult,
   ProvisioningStage,
-  Result,
-  SpritesConnection,
-  SpritesConnectionsClient,
 } from "./types";
-import { failure, success } from "./types";
 
 interface MintConnectorDependencies {
   dashboard: DashboardConnectorClient;

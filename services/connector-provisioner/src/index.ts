@@ -1,12 +1,11 @@
 import type { BrowserWorker } from "@cloudflare/playwright";
 import { ConsoleLogger, type LogFields } from "@repo/shared";
+import { HttpSpritesConnectionsClient, type SpritesConnection } from "@repo/sprites-client";
 import { deleteConnectorAndVerify, mintConnector } from "./mint-connector";
 import { PlaywrightDashboardClient } from "./playwright-dashboard.client";
-import { HttpSpritesConnectionsClient } from "./sprites-connections.client";
 import {
   LiveTestRequestSchema,
   type ConnectorProvisioningDurations,
-  type SpritesConnection,
 } from "./types";
 
 const logger = new ConsoleLogger({ format: "pretty" }, "connector-provisioner");

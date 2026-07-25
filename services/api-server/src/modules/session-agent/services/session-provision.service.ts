@@ -12,14 +12,15 @@ import type {
 } from "@repo/shared";
 import { dedent } from "@repo/shared";
 import type { Env } from "@/shared/types";
-import type { SpritesCoordinator } from "@/shared/integrations/sprites/sprites";
-import { WorkersSpriteClient } from "@/shared/integrations/sprites/WorkersSpriteClient";
-import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
 import {
   buildBootstrapNetworkPolicy,
   buildFinalNetworkPolicy,
-} from "@/shared/integrations/sprites/network-policy";
-import { ensureSpriteStartupToolchain } from "@/shared/integrations/sprites/startup-toolchain";
+  WorkersSpriteClient,
+  type SpritesCoordinator,
+} from "@repo/sprites-client";
+import { createLogger } from "@/shared/logging";
+import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
+import { ensureSpriteStartupToolchain } from "@/shared/integrations/sprite-startup-toolchain";
 import type { GitHubAppResult } from "@/shared/types/github";
 import type { ServerState } from "../repositories/server-state.repository";
 import { isTerminalSetupTask } from "./session-setup-run.service";
@@ -239,6 +240,7 @@ export class SessionProvisionService {
         this.spriteName!,
         this.env.SPRITES_API_KEY,
         this.env.SPRITES_API_URL,
+        createLogger("SpriteWebsocketSession.ts"),
       );
       const workerHostname = new URL(this.env.WORKER_URL).hostname;
       const networkPolicy = buildBootstrapNetworkPolicy({ workerHostname });
@@ -278,6 +280,7 @@ export class SessionProvisionService {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("SpriteWebsocketSession.ts"),
     );
 
     this.setupOutputCollector?.beginRun();
@@ -356,6 +359,7 @@ export class SessionProvisionService {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("SpriteWebsocketSession.ts"),
     );
 
     this.logger.info("Ensuring startup toolchain", {
@@ -415,6 +419,7 @@ export class SessionProvisionService {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("SpriteWebsocketSession.ts"),
     );
 
     const proxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
@@ -521,6 +526,7 @@ export class SessionProvisionService {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("SpriteWebsocketSession.ts"),
     );
     const workerHostname = new URL(this.env.WORKER_URL).hostname;
 

@@ -24,7 +24,8 @@ const mockState = vi.hoisted(() => ({
   getReadOnlyTokenForRepo: vi.fn(),
 }));
 
-vi.mock("@/shared/integrations/sprites/WorkersSpriteClient", () => {
+vi.mock("@repo/sprites-client", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
   class WorkersSpriteClient {
     public name: string;
     constructor(name: string) {
@@ -34,16 +35,14 @@ vi.mock("@/shared/integrations/sprites/WorkersSpriteClient", () => {
     execWs = mockState.execWs;
   }
   return {
+    ...actual,
     WorkersSpriteClient,
+    buildBootstrapNetworkPolicy: () => [{ domain: "bootstrap", action: "allow" }],
+    buildFinalNetworkPolicy: () => [{ domain: "final", action: "allow" }],
   };
 });
 
-vi.mock("@/shared/integrations/sprites/network-policy", () => ({
-  buildBootstrapNetworkPolicy: () => [{ domain: "bootstrap", action: "allow" }],
-  buildFinalNetworkPolicy: () => [{ domain: "final", action: "allow" }],
-}));
-
-vi.mock("@/shared/integrations/sprites/startup-toolchain", () => ({
+vi.mock("@/shared/integrations/sprite-startup-toolchain", () => ({
   ensureSpriteStartupToolchain: mockState.ensureSpriteStartupToolchain,
 }));
 

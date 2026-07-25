@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Session} from "@fly/sprites";
 import { SpritesClient } from "@fly/sprites";
-import { createLogger } from "@/shared/logging";
+import { ConsoleLogger, type Logger } from "@repo/shared";
 
 // =============================================================================
 // Zod Schemas
@@ -38,9 +38,8 @@ export type CreateSpriteRequest = z.infer<typeof CreateSpriteRequest>;
 export interface SpritesClientConfig {
   apiKey: string;
   timeout?: number;
+  logger?: Logger;
 }
-
-const logger = createLogger("sprites.ts");
 
 /**
  * SpritesCoordinator - Wraps @fly/sprites for sprite lifecycle management
@@ -48,11 +47,13 @@ const logger = createLogger("sprites.ts");
  */
 export class SpritesCoordinator {
   private spritesClient: SpritesClient;
+  private logger: Logger;
 
   constructor(config: SpritesClientConfig) {
     this.spritesClient = new SpritesClient(config.apiKey, {
       timeout: config.timeout,
     });
+    this.logger = config.logger ?? new ConsoleLogger({ format: "pretty" }, "sprites.ts");
   }
 
   async createSprite(request: CreateSpriteRequest): Promise<SpriteResponse> {
@@ -65,7 +66,7 @@ export class SpritesCoordinator {
       : undefined;
     const d0 = Date.now();
     const sprite = await this.spritesClient.createSprite(request.name, config);
-    logger.info("Created sprite", {
+    this.logger.info("Created sprite", {
       fields: {
         spriteName: sprite.name,
         spriteId: sprite.id ?? null,

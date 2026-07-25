@@ -5,7 +5,7 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 import type { Sprite } from "@fly/sprites";
 import { SpritesClient } from "@fly/sprites";
-import { SpritesCoordinator } from "../src/shared/integrations/sprites";
+import { SpritesCoordinator } from "@repo/sprites-client";
 
 const SPRITES_API_KEY = process.env.SPRITES_API_KEY!;
 const SPRITES_API_URL = process.env.SPRITES_API_URL || "https://api.sprites.dev";

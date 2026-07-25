@@ -6,7 +6,7 @@ import {
   SessionInfoMessageSchema,
   SpriteServerMessageSchema,
 } from "./types";
-import { createLogger } from "@/shared/logging";
+import { ConsoleLogger, type Logger } from "@repo/shared";
 
 type NewExecSessionConfig = {
   mode: "exec";
@@ -33,8 +33,6 @@ export enum StreamID {
 }
 
 type WorkersSessionConfig = NewExecSessionConfig | AttachSessionConfig;
-
-const logger = createLogger("SpriteWebsocketSession.ts");
 
 const WEBSOCKET_CLOSED_OK_CODE = 1000;
 const WEBSOCKET_CLOSED_GOING_AWAY_CODE = 1001;
@@ -75,17 +73,21 @@ export class SpriteWebsocketSession {
   private serverMessageHandlers: Set<(msg: SpriteServerMessage) => void> =
     new Set();
 
+  private readonly logger: Logger;
+
   constructor(
     spriteName: string,
     apiKey: string,
     baseUrl: string,
     config: WorkersSessionConfig,
+    logger?: Logger,
   ) {
     this.spriteName = spriteName;
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.config = config;
     this.ttyMode = config.mode === "exec" ? Boolean(config.options.tty) : false;
+    this.logger = logger ?? new ConsoleLogger({ format: "pretty" }, "SpriteWebsocketSession.ts");
   }
 
   async start(): Promise<void> {
@@ -122,7 +124,7 @@ export class SpriteWebsocketSession {
     const ws = response.webSocket;
     if (!ws) {
       const body = await response.text();
-      logger.error("WebSocket upgrade failed", {
+      this.logger.error("WebSocket upgrade failed", {
         fields: { status: response.status, body },
       });
       throw new Error(
@@ -151,13 +153,13 @@ export class SpriteWebsocketSession {
 
     ws.addEventListener("error", (error) => {
       if (this.done) {
-        logger.debug("Ignoring websocket error after terminal state", {
+        this.logger.debug("Ignoring websocket error after terminal state", {
           error: error.message,
         });
         return;
       }
 
-      logger.error("WebSocket error", {
+      this.logger.error("WebSocket error", {
         error: error.message,
       });
       this.finalizeTransportFailure(new Error("WebSocket error"), {
@@ -190,13 +192,13 @@ export class SpriteWebsocketSession {
 
       const closeHandler = () => {
         cleanup();
-        logger.error("WebSocket closed before session_info");
+        this.logger.error("WebSocket closed before session_info");
         reject(new Error("WebSocket closed before session_info"));
       };
 
       const errorHandler = () => {
         cleanup();
-        logger.error("WebSocket error before session_info");
+        this.logger.error("WebSocket error before session_info");
         reject(new Error("WebSocket error before session_info"));
       };
 
@@ -208,7 +210,7 @@ export class SpriteWebsocketSession {
           const result = SessionInfoMessageSchema.safeParse(message);
           if (result.success) {
             cleanup();
-            logger.info("Process info received", {
+            this.logger.info("Process info received", {
               fields: { tty: result.data.tty },
             });
             this.ttyMode = result.data.tty;
@@ -319,7 +321,7 @@ export class SpriteWebsocketSession {
     }
 
     this.idleTimeout = setTimeout(() => {
-      logger.error("WebSocket idle timeout", {
+      this.logger.error("WebSocket idle timeout", {
         fields: { idleTimeoutMs },
       });
       this.finalizeTransportFailure(
@@ -453,7 +455,7 @@ export class SpriteWebsocketSession {
   private dispatchServerMessage(msg: unknown): void {
     const result = SpriteServerMessageSchema.safeParse(msg);
     if (!result.success) {
-      logger.warn("[SpriteWebsocketSession] Unknown server message", {
+      this.logger.warn("[SpriteWebsocketSession] Unknown server message", {
         fields: {
           message: JSON.stringify(msg),
           issues: JSON.stringify(result.error.format()),
@@ -466,7 +468,7 @@ export class SpriteWebsocketSession {
     this.serverMessageHandlers.forEach((h) => h(parsed));
 
     if (parsed.type === "exit") {
-      logger.debug("Received exit message");
+      this.logger.debug("Received exit message");
       this.finalizeExit(parsed.exit_code);
     }
   }
@@ -475,7 +477,7 @@ export class SpriteWebsocketSession {
     if (this.done) {
       // the sprite may send an exit message both via ExitMessage json and a binary frame - `done` makes this idempotent.
       if (this.exitCode !== null && this.exitCode !== exitCode) {
-        logger.warn("Ignoring duplicate exit code", {
+        this.logger.warn("Ignoring duplicate exit code", {
           fields: {
             exitCode,
             recordedExitCode: this.exitCode,
@@ -485,7 +487,7 @@ export class SpriteWebsocketSession {
       return;
     }
 
-    logger.debug("Finalizing exit", {
+    this.logger.debug("Finalizing exit", {
       fields: { exitCode },
     });
     this.done = true;

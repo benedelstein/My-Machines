@@ -18,8 +18,7 @@ import type {
 } from "../repositories/pending-chunk.repository";
 import type { LatestPlanRepository } from "../repositories/latest-plan.repository";
 import type { ServerState } from "../repositories/server-state.repository";
-import { SpritesError } from "@/shared/integrations/sprites/types";
-import { WorkersSpriteClient } from "@/shared/integrations/sprites/WorkersSpriteClient";
+import { SpritesError, WorkersSpriteClient } from "@repo/sprites-client";
 
 export interface FinishedAssistantTurn {
   message: UIMessage;
@@ -395,6 +394,7 @@ export class AgentTurnCoordinator {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("SpriteWebsocketSession.ts"),
     );
     const session = sprite.attachSession(String(agentProcessId), {
       idleTimeoutMs: 3_000,

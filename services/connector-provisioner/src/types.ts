@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { Result } from "@repo/shared";
+import type { AccessPolicy, SpritesRestErrorCode } from "@repo/sprites-client";
 
 const httpsUrl = z.string().url().superRefine((value, context) => {
   const url = new URL(value);
@@ -98,22 +100,6 @@ export const LiveTestRequestSchema = MintConnectorRequestBaseSchema.superRefine(
 
 export type LiveTestRequest = z.infer<typeof LiveTestRequestSchema>;
 
-export interface AccessPolicy {
-  allowAll: boolean;
-  spriteLabels: string[];
-  namePrefix?: string;
-  allowedEndpoints?: string[];
-  blockedEndpoints?: string[];
-}
-
-export interface SpritesConnection {
-  id: string;
-  provider: string;
-  providerAccountName?: string;
-  providerInfo?: Record<string, unknown>;
-  accessPolicy?: AccessPolicy;
-}
-
 export interface DashboardCreateResult {
   detailId?: string;
   durations: {
@@ -165,29 +151,6 @@ export interface DashboardConnectorClient {
   createConnector(
     request: MintConnectorRequest,
   ): Promise<Result<DashboardCreateResult, DashboardCreateError>>;
-}
-
-export type SpritesRestErrorCode =
-  | "sprites_authentication_failed"
-  | "sprites_rate_limited"
-  | "sprites_request_failed"
-  | "sprites_response_invalid";
-
-export interface SpritesRestError {
-  code: SpritesRestErrorCode;
-  retryable: boolean;
-}
-
-export interface SpritesConnectionsClient {
-  listConnections(): Promise<Result<SpritesConnection[], SpritesRestError>>;
-  updateAccessPolicy(
-    connectionId: string,
-    policy: AccessPolicy,
-  ): Promise<Result<SpritesConnection, SpritesRestError>>;
-  getConnection(
-    connectionId: string,
-  ): Promise<Result<SpritesConnection | null, SpritesRestError>>;
-  deleteConnection(connectionId: string): Promise<Result<void, SpritesRestError>>;
 }
 
 export type ProvisioningStage =
@@ -244,14 +207,3 @@ export interface MintConnectorResult {
   durations: ConnectorProvisioningDurations;
 }
 
-export type Result<T, E> =
-  | { ok: true; value: T }
-  | { ok: false; error: E };
-
-export function success<T>(value: T): Result<T, never> {
-  return { ok: true, value };
-}
-
-export function failure<E>(error: E): Result<never, E> {
-  return { ok: false, error };
-}

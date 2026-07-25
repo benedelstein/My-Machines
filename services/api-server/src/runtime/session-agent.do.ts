@@ -1,4 +1,4 @@
-import { SpritesCoordinator } from "@/shared/integrations/sprites/sprites";
+import { SpritesCoordinator } from "@repo/sprites-client";
 import {
   type ClientState,
   type Logger,
@@ -155,6 +155,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     });
     this.spritesCoordinator = new SpritesCoordinator({
       apiKey: this.env.SPRITES_API_KEY,
+      logger: createLogger("sprites.ts"),
     });
     this.attachmentService = new SessionAgentAttachmentProvider(this.env.DB);
     this.githubAppService = new GitHubAppService(this.env, this.logger);

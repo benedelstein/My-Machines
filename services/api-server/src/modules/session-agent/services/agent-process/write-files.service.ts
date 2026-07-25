@@ -1,4 +1,4 @@
-import type { WorkersSpriteClient } from "@/shared/integrations/sprites";
+import type { WorkersSpriteClient } from "@repo/sprites-client";
 import { createLogger } from "@/shared/logging";
 import type { AuthCredentialSnapshot } from "../../types/agent-process-manager.types";
 

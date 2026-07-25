@@ -131,6 +131,7 @@ export default tseslint.config(
           "./apps/discord-bot/tsconfig.json",
           "./packages/api-contract/tsconfig.eslint.json",
           "./packages/shared/tsconfig.eslint.json",
+          "./packages/sprites-client/tsconfig.eslint.json",
           "./packages/vm-agent/tsconfig.eslint.json",
           "./scripts/tsconfig.json",
           "./services/api-server/tsconfig.eslint.json",

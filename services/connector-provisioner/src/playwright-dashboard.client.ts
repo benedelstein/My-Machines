@@ -10,15 +10,14 @@ import {
   validateDashboardShape,
   type DashboardShapeSnapshot,
 } from "./dashboard-shape";
+import { failure, success, type Result } from "@repo/shared";
 import type {
   DashboardConnectorClient,
   DashboardCreateError,
   DashboardCreateResult,
   DashboardOperation,
   MintConnectorRequest,
-  Result,
 } from "./types";
-import { failure, success } from "./types";
 
 const StorageStateSchema = z.object({
   cookies: z.array(z.object({

@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { mintConnector } from "../src/mint-connector";
+import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
+  SpritesConnection,
+  SpritesConnectionsClient,
+  SpritesRestError,
+} from "@repo/sprites-client";
+import type {
   DashboardConnectorClient,
   DashboardCreateError,
   DashboardCreateResult,
   MintConnectorRequest,
-  Result,
-  SpritesConnection,
-  SpritesConnectionsClient,
-  SpritesRestError,
 } from "../src/types";
-import { failure, success } from "../src/types";
 
 const request: MintConnectorRequest = {
   name: "connector-test-123",

@@ -2,7 +2,7 @@ import { type AgentOutput, decodeAgentOutput } from "@repo/shared";
 import type {
   SpriteServerMessage,
   SpriteWebsocketSession,
-} from "@/shared/integrations/sprites";
+} from "@repo/sprites-client";
 
 export type SessionSignalDecision<T> =
   | { type: "continue" }

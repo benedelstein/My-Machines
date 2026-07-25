@@ -1,5 +1,5 @@
-import { WorkersSpriteClient } from "@/shared/integrations/sprites/WorkersSpriteClient";
-import { buildNetworkPolicy } from "@/shared/integrations/sprites/network-policy";
+import { buildNetworkPolicy, WorkersSpriteClient } from "@repo/sprites-client";
+import { createLogger } from "@/shared/logging";
 import type { Logger } from "@repo/shared";
 import type { Env } from "@/shared/types";
 import type { SecretRepository } from "../repositories/secret.repository";
@@ -46,6 +46,7 @@ export async function handleEditorOpen(context: EditorContext): Promise<EditorOp
     context.spriteName,
     env.SPRITES_API_KEY,
     env.SPRITES_API_URL,
+    createLogger("SpriteWebsocketSession.ts"),
   );
 
   try {
@@ -149,6 +150,7 @@ export async function handleEditorClose(context: EditorContext): Promise<EditorO
     context.spriteName,
     env.SPRITES_API_KEY,
     env.SPRITES_API_URL,
+    createLogger("SpriteWebsocketSession.ts"),
   );
 
   try {

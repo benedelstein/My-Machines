@@ -10,6 +10,7 @@ export const repoRoot = path.resolve(
 const sourceRoots = [
   "apps/web",
   "packages/shared",
+  "packages/sprites-client",
   "packages/vm-agent",
   "services/api-server",
   "scripts",

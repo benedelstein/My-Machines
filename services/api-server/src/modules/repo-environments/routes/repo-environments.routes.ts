@@ -2,7 +2,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import type { MiddlewareHandler } from "hono";
 import type { AuthContext } from "@/shared/types/auth";
 import type { Env } from "@/shared/types";
-import { getDefaultNetworkAllowlistDomains } from "@/shared/integrations/sprites/network-policy";
+import { getDefaultNetworkAllowlistDomains } from "@repo/sprites-client";
 import type { RepoEnvironmentsService } from "../services/repo-environments.service";
 import {
   createRepoEnvironmentRoute,
