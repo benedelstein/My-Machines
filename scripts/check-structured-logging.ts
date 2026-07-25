@@ -16,6 +16,7 @@ const sourceRoots = [
   "packages/shared/src",
   "packages/vm-agent/src",
   "services/api-server/src",
+  "services/connector-provisioner/src",
 ];
 
 const ignoredDirectories = new Set([

@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@cloudflare/playwright": "^1.3.0",
+    "@repo/shared": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

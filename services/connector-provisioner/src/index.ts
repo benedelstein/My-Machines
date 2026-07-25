@@ -1,8 +1,15 @@
 import type { BrowserWorker } from "@cloudflare/playwright";
+import { ConsoleLogger, type LogFields } from "@repo/shared";
 import { deleteConnectorAndVerify, mintConnector } from "./mint-connector";
 import { PlaywrightDashboardClient } from "./playwright-dashboard.client";
 import { HttpSpritesConnectionsClient } from "./sprites-connections.client";
-import { LiveTestRequestSchema, type SpritesConnection } from "./types";
+import {
+  LiveTestRequestSchema,
+  type ConnectorProvisioningDurations,
+  type SpritesConnection,
+} from "./types";
+
+const logger = new ConsoleLogger({ format: "pretty" }, "connector-provisioner");
 
 export interface Env {
   BROWSER: BrowserWorker;
@@ -15,7 +22,26 @@ export interface Env {
 }
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  const startedAt = performance.now();
   const url = new URL(request.url);
+  const response = await route(request, url, env);
+  const requestFields: LogFields = {
+    method: request.method,
+    path: url.pathname,
+    status: response.status,
+    durationMs: Math.round(performance.now() - startedAt),
+  };
+  if (response.status >= 500) {
+    logger.error("Request completed", { fields: requestFields });
+  } else if (response.status >= 400) {
+    logger.warn("Request completed", { fields: requestFields });
+  } else if (url.pathname !== "/health") {
+    logger.info("Request completed", { fields: requestFields });
+  }
+  return response;
+}
+
+async function route(request: Request, url: URL, env: Env): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/health") {
     return jsonResponse({ status: "ok" });
   }
@@ -46,12 +72,21 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       return jsonResponse({ error: { code: "connector_not_found" } }, 404);
     }
     if (!isDeletableSessionConnector(existing.value)) {
+      logger.warn("Connector delete refused", {
+        fields: { gatewayConnectionId: deleteConnectionId },
+      });
       return jsonResponse({ error: { code: "connector_delete_refused" } }, 403);
     }
     const deleteResult = await deleteConnectorAndVerify(deleteConnectionId, sprites);
     if (!deleteResult.ok) {
+      logger.error("Connector delete failed", {
+        fields: { gatewayConnectionId: deleteConnectionId, code: deleteResult.error },
+      });
       return jsonResponse({ error: { code: deleteResult.error } }, 502);
     }
+    logger.info("Connector deleted", {
+      fields: { gatewayConnectionId: deleteConnectionId },
+    });
     return jsonResponse({ connector: { gatewayConnectionId: deleteConnectionId, deleted: true } });
   }
   if (!hasMintConfiguration(env)) {
@@ -71,13 +106,33 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     storageState: env.SPRITES_DASHBOARD_STORAGE_STATE,
   });
 
+  const mode = isMint ? "mint" : "live-test";
   const mintResult = await mintConnector(
     parsedRequest.data,
     { dashboard, sprites },
   );
   if (!mintResult.ok) {
+    logger.warn("Connector mint failed", {
+      fields: {
+        mode,
+        code: mintResult.error.code,
+        stage: mintResult.error.stage,
+        retryable: mintResult.error.retryable,
+        ...(mintResult.error.dashboardOperation === undefined
+          ? {}
+          : { dashboardOperation: mintResult.error.dashboardOperation }),
+        durations: durationFields(mintResult.error.durations),
+      },
+    });
     return jsonResponse({ error: mintResult.error }, 502);
   }
+  logger.info("Connector minted", {
+    fields: {
+      mode,
+      gatewayConnectionId: mintResult.value.gatewayConnectionId,
+      durations: durationFields(mintResult.value.durations),
+    },
+  });
   if (isMint) {
     return jsonResponse({
       connector: {
@@ -197,6 +252,14 @@ function jsonResponse(body: unknown, status = 200): Response {
       "Content-Type": "application/json",
     },
   });
+}
+
+function durationFields(durations: ConnectorProvisioningDurations): LogFields {
+  return Object.fromEntries(
+    Object.entries(durations)
+      .filter((entry): entry is [string, number] => typeof entry[1] === "number")
+      .map(([key, value]) => [key, Math.round(value)]),
+  );
 }
 
 function isDeletableSessionConnector(connection: SpritesConnection): boolean {
