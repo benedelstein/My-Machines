@@ -7,7 +7,7 @@ struct PromptComposerView<TrailingAccessory: View>: View {
     @Environment(\.theme) private var theme: Theme
     @Environment(\.style) private var style: Style
     @Environment(\.showToast) private var showToast: ShowToastAction?
-    @Environment(\.notificationFeedback) private var notificationFeedback: UINotificationFeedbackGenerator
+    @Environment(\.hapticFeedbackPlayer) private var haptics
 
     @Binding private var text: String
     private var focused: Binding<Bool>
@@ -319,7 +319,7 @@ private extension PromptComposerView {
                 verbatimSubtitle: failure.canRetry ? "Tap the red image to retry." : failure.message,
                 icon: Image(systemName: "exclamationmark.circle.fill")
             )
-            notificationFeedback.notificationOccurred(.error)
+            haptics.play(.error)
             notifiedFailedAttachmentIDs.insert(failure.id)
         }
     }

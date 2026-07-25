@@ -6,7 +6,7 @@ import UIKit
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.notificationFeedback) private var notificationFeedback
+    @Environment(\.hapticFeedbackPlayer) private var haptics
     @Environment(\.showToast) private var showToast
     @State private var isConfirmingSignOut = false
     @State private var isConfirmingDisconnect = false
@@ -164,7 +164,7 @@ struct SettingsView: View {
 
     private func providerDidConnect(_ provider: SettingsViewModel.Provider) {
         connectionRequest = nil
-        notificationFeedback.notificationOccurred(.success)
+        haptics.play(.success)
         showToast?(
             title: Text(verbatim: "\(provider.connectedToastName) connected"),
             icon: Image(systemName: "checkmark.circle.fill")
@@ -174,13 +174,13 @@ struct SettingsView: View {
     private func handle(_ notice: SettingsViewModel.Notice) {
         switch notice.kind {
         case .disconnected:
-            notificationFeedback.notificationOccurred(.success)
+            haptics.play(.success)
             showToast?(
                 title: Text(verbatim: notice.message),
                 icon: Image(systemName: "checkmark.circle.fill")
             )
         case .error:
-            notificationFeedback.notificationOccurred(.error)
+            haptics.play(.error)
             showToast?(
                 title: Text("Failed to disconnect provider"),
                 verbatimSubtitle: notice.message,

@@ -4,7 +4,7 @@ import UIKit
 
 extension AgentSessionView {
     struct BranchBar: View {
-        @Environment(\.lightFeedback) private var lightFeedback
+        @Environment(\.hapticFeedbackPlayer) private var haptics
         @Environment(\.openURL) private var openURL
         @Environment(\.showToast) private var showToast
         @Environment(\.style) private var style
@@ -174,7 +174,7 @@ extension AgentSessionView {
 
         private func copyBranchName(_ branchName: String) {
             UIPasteboard.general.string = branchName
-            lightFeedback.impactOccurred()
+            haptics.play(.light)
             showToast?(title: "Copied", icon: Image(systemName: "square.on.square"))
         }
     }

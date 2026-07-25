@@ -23,6 +23,7 @@ struct CloudeCodeApp: App {
         WindowGroup {
             RootView(component: component, logStore: logStore)
                 .environment(\.showToast, ShowToastAction(windowController: toastWindowController))
+                .environment(\.hapticFeedbackPlayer, component.hapticFeedbackPlayer)
                 .background {
                     ToastWindowInstaller(controller: toastWindowController)
                 }

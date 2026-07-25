@@ -142,7 +142,7 @@ struct AssistantMessageView: View {
 private struct CopyFinalResponseButton: View {
     @Environment(\.theme) private var theme
     @Environment(\.showToast) private var showToast
-    @Environment(\.lightFeedback) private var lightFeedback
+    @Environment(\.hapticFeedbackPlayer) private var haptics
 
     let text: String
 
@@ -161,7 +161,7 @@ private struct CopyFinalResponseButton: View {
 
     private func copyText() {
         UIPasteboard.general.string = text
-        lightFeedback.impactOccurred()
+        haptics.play(.light)
         showToast?(
             title: "Copied",
             icon: Image(systemName: "square.on.square")

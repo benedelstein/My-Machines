@@ -22,7 +22,7 @@ extension AgentSessionView {
     struct Destinations: ViewModifier {
         @Environment(\.providerConnectionBuilder) private var providerConnectionBuilder
         @Environment(\.showToast) private var showToast
-        @Environment(\.notificationFeedback) private var notificationFeedback
+        @Environment(\.hapticFeedbackPlayer) private var haptics
         @Binding var destination: Modal<Destination>?
         let onProviderConnected: (ProviderConnectionContext) -> Void
 
@@ -54,7 +54,7 @@ extension AgentSessionView {
         private func providerDidConnect(_ context: ProviderConnectionContext) {
             onProviderConnected(context)
             destination = nil
-            notificationFeedback.notificationOccurred(.success)
+            haptics.play(.success)
             showToast?(
                 title: connectionSuccessTitle(for: context),
                 icon: Image(systemName: "checkmark.circle.fill")

@@ -32,6 +32,7 @@ final class AgentSessionViewModel {
     let renameSessionAction: RenameSessionAction
     let archiveSessionAction: ArchiveSessionAction
     let deleteSessionAction: DeleteSessionAction
+    let hapticFeedback: any AgentSessionHapticFeedbackProviding
     var subscriptionTask: Task<Void, Never>?
     /// Whether the view is currently on screen (between `bind` and `unbind`).
     /// Session creation is allowed to finish after the view goes away, but we
@@ -141,6 +142,7 @@ final class AgentSessionViewModel {
         archiveSessionAction: ArchiveSessionAction,
         deleteSessionAction: DeleteSessionAction,
         sessionCreatedSubject: PassthroughSubject<String, Never>,
+        hapticFeedback: (any AgentSessionHapticFeedbackProviding)? = nil,
         pullRequestPollInterval: Duration = .seconds(30)
     ) {
         self.context = context
@@ -160,6 +162,7 @@ final class AgentSessionViewModel {
         self.renameSessionAction = renameSessionAction
         self.archiveSessionAction = archiveSessionAction
         self.deleteSessionAction = deleteSessionAction
+        self.hapticFeedback = hapticFeedback ?? AgentSessionHapticFeedback()
         attachmentStore = ImageAttachmentStore(
             sessionId: context.session?.id,
             attachmentsAPI: attachmentsAPI
@@ -351,8 +354,15 @@ extension AgentSessionViewModel {
         _ chunks: [SessionStreamChunk],
         messageMetadata: SessionStreamMessageMetadata?
     ) async {
+        guard !chunks.isEmpty else {
+            return
+        }
+        let isFirstLiveChunk = streamAccumulator == nil
         if streamAccumulator == nil {
             replaceStreamAccumulator()
+        }
+        if isFirstLiveChunk && isBound {
+            hapticFeedback.turnStarted()
         }
 
         await streamAccumulator?.append(chunks, messageMetadata: messageMetadata)

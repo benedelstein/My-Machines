@@ -5,7 +5,7 @@ import UIKit
 extension PromptComposerView {
     struct InlinePhotoPickerContent: View {
         @Environment(\.composerStyle) private var composerStyle: ComposerStyle
-        @Environment(\.lightFeedback) var lightFeedback: UIImpactFeedbackGenerator
+        @Environment(\.hapticFeedbackPlayer) var haptics
         @Environment(\.theme) private var theme: Theme
         @Environment(\.style) private var style: Style
 
@@ -81,7 +81,7 @@ extension PromptComposerView {
                 // the first time you tap confirm on a session.
                 // this button should remain fixed in its spot.
                 Button {
-                    lightFeedback.impactOccurred()
+                    haptics.play(.light)
                     if hasStagedSelection {
                         confirmSelection()
                     } else {

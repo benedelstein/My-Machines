@@ -2,7 +2,7 @@ import SwiftUI
 
 struct Wordmark: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.softFeedback) private var softFeedback
+    @Environment(\.hapticFeedbackPlayer) private var haptics
     @State private var isVisible = false
     @State private var extraEyeCount = 0
     @State private var eyeSequenceID = 0
@@ -177,7 +177,7 @@ struct Wordmark: View {
 
     @MainActor
     private func transitionEyes(to count: Int, animation: Animation) {
-        softFeedback.impactOccurred(intensity: 0.6)
+        haptics.play(.soft(intensity: 0.6))
         withAnimation(animation) {
             extraEyeCount = count
         }
