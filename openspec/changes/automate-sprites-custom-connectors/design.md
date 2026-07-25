@@ -107,8 +107,8 @@ flowchart LR
 
   subgraph sprites["Fly / Sprites-managed boundary — outside the Sprite"]
     networkPolicy["External L3/L4 policy<br/>gateway + class-C allowlist; deny everything else"]
-    sessionConnector["Per-session internal connector<br/>policy: session:&lt;sessionId&gt;<br/>inject per-session credential"]
-    environmentConnector["Environment connector<br/>policy: env:&lt;environmentId&gt;<br/>inject environment API credential"]
+    sessionConnector["Per-session internal connector<br/>policy: session:{sessionId}<br/>inject per-session credential"]
+    environmentConnector["Environment connector<br/>policy: env:{environmentId}<br/>inject environment API credential"]
   end
 
   subgraph control["Cloude control plane"]
@@ -408,7 +408,7 @@ sequenceDiagram
   Agent->>Proxy: POST /internal/session/:id/chunks or /events<br/>(no webhook secret)
   Proxy->>Proxy: Match class-A route, strip client auth,<br/>rewrite to gateway + connector id
   Proxy->>Connector: Forward original method, path, headers, and streamed body
-  Note over Connector: Fly verifies Sprite identity and<br/>session:&lt;id&gt; label policy
+  Note over Connector: Fly verifies Sprite identity and<br/>session:{id} label policy
   alt Label policy matches
     Connector->>Worker: Forward request with injected DO webhook token
     Worker->>DO: Resolve Durable Object from :sessionId and forward
@@ -453,7 +453,7 @@ sequenceDiagram
 
   Git->>Proxy: git fetch or push to configured Worker URL<br/>(no session bearer)
   Proxy->>Connector: Rewrite to gateway + connector id,<br/>preserving Git smart-HTTP stream
-  Note over Connector: Verify Sprite identity and<br/>session:&lt;id&gt; label policy
+  Note over Connector: Verify Sprite identity and<br/>session:{id} label policy
   Connector->>GitProxy: Forward with injected per-session credential
   GitProxy->>GitProxy: Validate session, repository, cloude/* branch,<br/>session suffix, and branch lock
   GitProxy->>GitHub: Git smart-HTTP request with<br/>server-custodied installation token
@@ -491,7 +491,7 @@ flowchart LR
   end
 
   subgraph managed["Fly / Sprites-managed boundary"]
-    sessionConnector["Per-session class-A connector<br/>immutable session:&lt;sessionId&gt; policy"]
+    sessionConnector["Per-session class-A connector<br/>immutable session:{sessionId} policy"]
   end
 
   subgraph cloude["Cloude control plane"]
@@ -544,7 +544,7 @@ sequenceDiagram
   Tool->>Proxy: HTTPS request to reserved IP<br/>(SNI/Host identify upstream)
   Proxy->>Proxy: Terminate trusted local TLS, strip client auth,<br/>select connector by hostname
   Proxy->>Connector: Forward to gateway + connector id
-  Note over Connector: Verify Sprite identity and<br/>env:&lt;environmentId&gt; label policy
+  Note over Connector: Verify Sprite identity and<br/>env:{environmentId} label policy
   Connector->>API: Forward with injected environment API header
   API-->>Connector: Stream response
   Connector-->>Proxy: Stream response

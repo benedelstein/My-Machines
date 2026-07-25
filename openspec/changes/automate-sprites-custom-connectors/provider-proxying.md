@@ -124,7 +124,9 @@ added it.
 
 ### Live spike evidence — 2026-07-23
 
-`test:live:claude-oauth-control-plane-proxy` exercised Claude Code 2.1.207 in a fresh
+The spike harness (`test:live:claude-oauth-control-plane-proxy` and its Worker) was
+removed from the tree after this evidence was captured; recover it from the history
+of this branch if it needs to be re-run. It exercised Claude Code 2.1.207 in a fresh
 Sprite against a local Worker exposed through `webhooks.bze.llc`:
 
 - The Worker read/refreshed the actual user-owned Claude OAuth credential from local
@@ -192,8 +194,10 @@ configuration](https://developers.openai.com/codex/config-advanced#custom-model-
 
 ### Live spike evidence — 2026-07-23
 
-`test:live:codex-oauth-control-plane-proxy` exercised Codex 0.144.3 in a fresh
-Sprite through `webhooks.bze.llc`:
+The spike harness (`test:live:codex-oauth-control-plane-proxy`, its Worker, and the
+patched native Responses proxy) was likewise removed after capture; recover it from
+this branch's history to re-run. It exercised Codex 0.144.3 in a fresh Sprite through
+`webhooks.bze.llc`:
 
 - An invalid control-plane token returned `401`.
 - Codex ran without `auth.json`, accepted the custom provider URL plus short-lived
