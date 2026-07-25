@@ -16,8 +16,11 @@ extension AgentSessionViewModel {
         guard let session else {
             return
         }
-        let snapshot = await sessionClientStateStore.snapshot(sessionId: session.id)
-        guard !Task.isCancelled, let snapshot else {
+        let cachedModels = try? await sessionClientStateStore.get(
+            [session.id],
+            scopes: [.memory, .disk]
+        )
+        guard !Task.isCancelled, let snapshot = cachedModels?.first?.snapshot else {
             return
         }
 
@@ -66,6 +69,6 @@ extension AgentSessionViewModel {
         }
 
         lastCachedClientStateSnapshot = snapshot
-        sessionClientStateStore.save(snapshot)
+        sessionClientStateStore.putSnapshotsToDisk([snapshot])
     }
 }

@@ -60,3 +60,6 @@ public final class SessionClientStateModel: EntityModel {
         )
     }
 }
+
+/// Identity-mapped cache store for curated session client state.
+public typealias SessionClientStateStore = EntityStore<SessionClientStateModel>

@@ -38,9 +38,9 @@ For these fields, the view uses live client state first and the cached client-st
 
 ### D2. Persistence follows the existing Entities pattern
 
-Add a Codable Domain snapshot, SwiftData entity, observable entity model, and shared store in `Modules/Entities`. The entity stores each curated snapshot value in a matching SwiftData field rather than encoding the entire snapshot into one opaque data field. Register the new entity in the current schema without adding a schema version because this is an independent additive model.
+Add a Codable Domain snapshot, SwiftData entity, and observable entity model in `Modules/Entities`. The entity stores each curated snapshot value in a matching SwiftData field rather than encoding the entire snapshot into one opaque data field. Register the new entity in the current schema without adding a schema version because this is an independent additive model.
 
-The store exposes per-session load, save, delete, and delete-all operations. SwiftData objects remain inside the cache actor.
+Use `EntityStore<SessionClientStateModel>` directly for memory and disk reads, upserts, deletion, and cache reset. SwiftData objects remain inside the cache actor.
 
 ### D3. Cache hydration precedes message hydration
 

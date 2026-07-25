@@ -11,7 +11,7 @@ import Testing
 extension AgentSessionTranscriptStateTests {
     @Test func cachedClientStateRestoresBeforeCachedTranscript() async throws {
         let stateStore = SessionClientStateStore()
-        stateStore.save(cachedState(provider: .openaiCodex, isResponding: true))
+        stateStore.putMemory([cachedState(provider: .openaiCodex, isResponding: true)])
         let messageStore = SessionMessageStore()
         try await messageStore.replace(
             sessionId: "session-1",
@@ -40,12 +40,12 @@ extension AgentSessionTranscriptStateTests {
 
     @Test func cachedClientStateWinsOverSummaryValues() async {
         let stateStore = SessionClientStateStore()
-        stateStore.save(cachedState(
+        stateStore.putMemory([cachedState(
             provider: .openaiCodex,
             pullRequest: nil,
             pushedBranch: nil,
             isResponding: false
-        ))
+        )])
         let summary = makeSession(
             provider: .claudeCode,
             title: "Cached title",
@@ -105,7 +105,7 @@ extension AgentSessionTranscriptStateTests {
 
     @Test func liveStateReplacesAndPersistsCachedSnapshot() async {
         let stateStore = SessionClientStateStore()
-        stateStore.save(cachedState(provider: .claudeCode, isResponding: true))
+        stateStore.putMemory([cachedState(provider: .claudeCode, isResponding: true)])
         let viewModel = makeViewModel(sessionClientStateStore: stateStore)
         await viewModel.loadCachedClientState()
         var live = liveState(provider: .openaiCodex)
@@ -130,7 +130,7 @@ extension AgentSessionTranscriptStateTests {
 
     @Test func inactiveSyncClearsCachedRespondingState() async {
         let stateStore = SessionClientStateStore()
-        stateStore.save(cachedState(provider: .claudeCode, isResponding: true))
+        stateStore.putMemory([cachedState(provider: .claudeCode, isResponding: true)])
         let viewModel = makeViewModel(sessionClientStateStore: stateStore)
         await viewModel.loadCachedClientState()
 
@@ -147,7 +147,7 @@ extension AgentSessionTranscriptStateTests {
 
     @Test func draftDoesNotRestoreSessionClientState() async {
         let stateStore = SessionClientStateStore()
-        stateStore.save(cachedState(provider: .openaiCodex, isResponding: true))
+        stateStore.putMemory([cachedState(provider: .openaiCodex, isResponding: true)])
         let preferences = NewSessionPreferences(userDefaults: UserDefaults(
             suiteName: "AgentSessionClientStateCacheTests-\(UUID().uuidString)"
         ) ?? .standard)
@@ -210,7 +210,7 @@ extension AgentSessionTranscriptStateTests {
 
     @Test func cancelledHydrationDoesNotApplyCachedClientState() async {
         let stateStore = SessionClientStateStore()
-        stateStore.save(cachedState(provider: .openaiCodex, isResponding: true))
+        stateStore.putMemory([cachedState(provider: .openaiCodex, isResponding: true)])
         let viewModel = makeViewModel(sessionClientStateStore: stateStore)
         let hydrationTask = Task {
             await viewModel.loadCachedClientState()
@@ -226,7 +226,7 @@ extension AgentSessionTranscriptStateTests {
 
     @Test func successfulDeletionClearsCachedClientState() async throws {
         let stateStore = SessionClientStateStore()
-        stateStore.save(cachedState(provider: .claudeCode, isResponding: false))
+        stateStore.putMemory([cachedState(provider: .claudeCode, isResponding: false)])
         let summaryStore = SessionSummaryStore()
         let session = summaryStore.putMemory([makeSession(provider: .claudeCode).snapshot])[0]
         let action = DeleteSessionAction(
@@ -242,7 +242,7 @@ extension AgentSessionTranscriptStateTests {
 
     @Test func failedDeletionRetainsCachedClientState() async {
         let stateStore = SessionClientStateStore()
-        stateStore.save(cachedState(provider: .claudeCode, isResponding: false))
+        stateStore.putMemory([cachedState(provider: .claudeCode, isResponding: false)])
         let summaryStore = SessionSummaryStore()
         let session = summaryStore.putMemory([makeSession(provider: .claudeCode).snapshot])[0]
         let action = DeleteSessionAction(

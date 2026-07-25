@@ -15,12 +15,15 @@ final class SessionClientStateStoreTests: XCTestCase {
         let store = SessionClientStateStore(cache: cache)
         let snapshot = testSessionClientStateSnapshot("s1")
 
-        store.save(snapshot)
+        store.putSnapshotsToDisk([snapshot])
         _ = try await pollUntil {
             try await cache.count(SessionClientStateEntity.self) == 1 ? true : nil
         }
         let restoredStore = SessionClientStateStore(cache: cache)
-        let restored = await restoredStore.snapshot(sessionId: "s1")
+        let restored = try await restoredStore.get(
+            ["s1"],
+            scopes: [.memory, .disk]
+        ).first?.snapshot
 
         XCTAssertEqual(restored, snapshot)
     }
@@ -28,8 +31,11 @@ final class SessionClientStateStoreTests: XCTestCase {
     func testReplacementClearsOptionalValues() async throws {
         let cache = try makeCache()
         let store = SessionClientStateStore(cache: cache)
-        store.save(testSessionClientStateSnapshot("s1"))
-        store.save(testSessionClientStateSnapshot(
+        store.putSnapshotsToDisk([testSessionClientStateSnapshot("s1")])
+        _ = try await pollUntil {
+            try await cache.count(SessionClientStateEntity.self) == 1 ? true : nil
+        }
+        store.putSnapshotsToDisk([testSessionClientStateSnapshot(
             "s1",
             repoFullName: nil,
             sessionSetupRun: nil,
@@ -37,7 +43,7 @@ final class SessionClientStateStoreTests: XCTestCase {
             pushedBranch: nil,
             baseBranch: nil,
             isResponding: false
-        ))
+        )])
 
         let restored = try await pollUntil {
             let snapshots = try await cache.fetch(SessionClientStateEntity.self, ids: ["s1"])
@@ -73,34 +79,18 @@ final class SessionClientStateStoreTests: XCTestCase {
         XCTAssertEqual(try entity.makeSnapshot(), snapshot)
     }
 
-    func testCancelledSnapshotDoesNotHydrateMemory() async throws {
-        let cache = try makeCache()
-        let snapshot = testSessionClientStateSnapshot("s1")
-        try await cache.put(SessionClientStateEntity.self, snapshots: [snapshot])
-        let store = SessionClientStateStore(cache: cache)
-        let hydrationTask = Task {
-            await store.snapshot(sessionId: "s1")
-        }
-
-        hydrationTask.cancel()
-        let cancelledSnapshot = await hydrationTask.value
-
-        XCTAssertNil(cancelledSnapshot)
-        XCTAssertNil(store["s1"])
-        let restoredSnapshot = await store.snapshot(sessionId: "s1")
-        XCTAssertEqual(restoredSnapshot, snapshot)
-    }
-
     func testDeleteAndDeleteAllClearSnapshots() async throws {
         let cache = try makeCache()
         let store = SessionClientStateStore(cache: cache)
-        store.save(testSessionClientStateSnapshot("s1"))
-        store.save(testSessionClientStateSnapshot("s2"))
+        store.putSnapshotsToDisk([
+            testSessionClientStateSnapshot("s1"),
+            testSessionClientStateSnapshot("s2")
+        ])
         _ = try await pollUntil {
             try await cache.count(SessionClientStateEntity.self) == 2 ? true : nil
         }
 
-        store.delete(sessionId: "s1")
+        store.delete(["s1"])
         _ = try await pollUntil {
             try await cache.count(SessionClientStateEntity.self) == 1 ? true : nil
         }
