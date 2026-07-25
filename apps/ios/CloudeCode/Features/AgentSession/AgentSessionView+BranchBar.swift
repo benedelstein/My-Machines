@@ -13,7 +13,7 @@ extension AgentSessionView {
         let vm: AgentSessionViewModel
 
         var body: some View {
-            if let branchName = vm.pushedBranchForDisplay {
+            if let branchName = vm.clientState.pushedBranch {
                 VStack(alignment: .leading, spacing: style.gridSize / 2) {
                     HStack(spacing: style.gridSize) {
                         statusIcon
@@ -68,7 +68,7 @@ extension AgentSessionView {
         }
 
         private var statusIconPresentation: StatusIconPresentation {
-            guard case .created(_, _, let state) = vm.pullRequestForDisplay else {
+            guard case .created(_, _, let state) = vm.clientState.pullRequest else {
                 return StatusIconPresentation(
                     image: .gitBranch,
                     color: theme.tertiaryLabelColor,
@@ -155,7 +155,7 @@ extension AgentSessionView {
         }
 
         private var showsRetryAction: Bool {
-            if case .failed = vm.pullRequestForDisplay {
+            if case .failed = vm.clientState.pullRequest {
                 return true
             }
             return vm.pullRequestOperationErrorMessage != nil

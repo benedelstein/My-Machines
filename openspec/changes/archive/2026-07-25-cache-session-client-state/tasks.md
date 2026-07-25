@@ -13,7 +13,7 @@
 
 - [x] 3.1 Load cached session state before cached messages and socket connection for existing sessions, while skipping the cache for drafts.
 - [x] 3.2 Restore cached client-state fields as canonical, while continuing to read title and missing-snapshot fallback values from the existing session summary.
-- [x] 3.3 Replace restored values from live state and sync responses, and persist only changed curated snapshots.
+- [x] 3.3 Replace restored values from live state and sync responses, and persist curated snapshots after relevant mutations.
 - [x] 3.4 Save the latest snapshot before `unbind()` resets local responding and socket state.
 
 ## 4. Regression coverage and verification

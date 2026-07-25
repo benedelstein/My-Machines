@@ -49,7 +49,7 @@ extension AgentSessionViewModel {
     func unbind() {
         isBound = false
         stopPullRequestPolling()
-        persistClientStateIfNeeded(force: true)
+        persistClientState()
         subscriptionTask?.cancel()
         subscriptionTask = nil
         connectionState = .disconnected

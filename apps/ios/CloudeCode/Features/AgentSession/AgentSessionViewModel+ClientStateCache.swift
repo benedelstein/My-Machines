@@ -1,17 +1,6 @@
 import Domain
 
 extension AgentSessionViewModel {
-    var repoFullNameForDisplay: String? {
-        hasHydratedClientState ? clientState.repoFullName : session?.repoFullName
-    }
-
-    var sessionStatusForDisplay: SessionClientState.Status {
-        guard !hasHydratedClientState, let status = session?.status else {
-            return clientState.status
-        }
-        return SessionClientState.Status(rawValue: status.rawValue)
-    }
-
     func loadCachedClientState() async {
         guard let session else {
             return
@@ -39,7 +28,6 @@ extension AgentSessionViewModel {
         clientState.agentMode = snapshot.agentMode
         clientStateIsResponding = snapshot.isResponding
         hasHydratedClientState = true
-        lastCachedClientStateSnapshot = snapshot
 
         if previousProvider != transcriptProvider, !messagesByID.isEmpty {
             rebuildTranscriptDisplayData()
@@ -47,7 +35,7 @@ extension AgentSessionViewModel {
         reconcilePullRequestState()
     }
 
-    func persistClientStateIfNeeded(force: Bool = false) {
+    func persistClientState() {
         guard let session, hasHydratedClientState, !hasDeletedSession else {
             return
         }
@@ -64,11 +52,6 @@ extension AgentSessionViewModel {
             agentMode: clientState.agentMode,
             isResponding: isResponding
         )
-        guard force || snapshot != lastCachedClientStateSnapshot else {
-            return
-        }
-
-        lastCachedClientStateSnapshot = snapshot
         sessionClientStateStore.putSnapshotsToDisk([snapshot])
     }
 }

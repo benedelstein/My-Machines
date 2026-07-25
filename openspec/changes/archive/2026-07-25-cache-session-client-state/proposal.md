@@ -9,7 +9,7 @@ Opening an iOS agent session restores cached transcript messages immediately, bu
 - Treat the cached client-state snapshot as canonical over overlapping session summary fields.
 - Cache repository, status, setup-run state, agent settings, agent mode, pull request, pushed and base branches, and a derived responding flag.
 - Continue using the session summary for title and as a fallback when no client-state snapshot exists.
-- Write only when the curated snapshot changes and save the latest snapshot when the session view disappears.
+- Persist the curated snapshot after relevant client-state mutations and when the session view disappears.
 - Clear the new cache on sign-out and when its session is deleted.
 
 ## Capabilities

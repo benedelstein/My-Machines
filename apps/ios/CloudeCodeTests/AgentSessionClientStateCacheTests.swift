@@ -66,16 +66,16 @@ extension AgentSessionTranscriptStateTests {
 
         await viewModel.loadCachedClientState()
 
-        #expect(viewModel.repoFullNameForDisplay == "cached/repo")
-        #expect(viewModel.sessionStatusForDisplay == .ready)
+        #expect(viewModel.clientState.repoFullName == "cached/repo")
+        #expect(viewModel.clientState.status == .ready)
         #expect(viewModel.transcriptProvider == .openaiCodex)
-        #expect(viewModel.pushedBranchForDisplay == nil)
-        #expect(viewModel.pullRequestForDisplay == nil)
+        #expect(viewModel.clientState.pushedBranch == nil)
+        #expect(viewModel.clientState.pullRequest == nil)
         #expect(!viewModel.isResponding)
         #expect(viewModel.session?.title == "Cached title")
     }
 
-    @Test func summarySeedsPresentationWhenClientStateCacheIsMissing() async {
+    @Test func summarySeedsClientStateWhenCacheIsMissing() async {
         let summary = makeSession(
             provider: .claudeCode,
             title: "Summary title",
@@ -94,10 +94,10 @@ extension AgentSessionTranscriptStateTests {
         await viewModel.loadCachedClientState()
 
         #expect(!viewModel.hasHydratedClientState)
-        #expect(viewModel.repoFullNameForDisplay == "summary/repo")
-        #expect(viewModel.sessionStatusForDisplay == .ready)
+        #expect(viewModel.clientState.repoFullName == "summary/repo")
+        #expect(viewModel.clientState.status == .ready)
         #expect(viewModel.transcriptProvider == .claudeCode)
-        #expect(viewModel.pushedBranchForDisplay == "summary-branch")
+        #expect(viewModel.clientState.pushedBranch == "summary-branch")
         #expect(viewModel.createdPullRequestURL?.absoluteString == "https://github.com/summary/repo/pull/2")
         #expect(viewModel.isResponding)
         #expect(viewModel.session?.title == "Summary title")
@@ -168,7 +168,7 @@ extension AgentSessionTranscriptStateTests {
         )
 
         await viewModel.loadCachedClientState()
-        viewModel.persistClientStateIfNeeded(force: true)
+        viewModel.persistClientState()
 
         #expect(!viewModel.hasHydratedClientState)
         #expect(viewModel.clientState == .empty)
@@ -220,7 +220,8 @@ extension AgentSessionTranscriptStateTests {
         await hydrationTask.value
 
         #expect(!viewModel.hasHydratedClientState)
-        #expect(viewModel.clientState == .empty)
+        #expect(viewModel.clientState.repoFullName == "octo/repo")
+        #expect(viewModel.clientState.agentSettings.provider == .unknown(""))
         #expect(!viewModel.isResponding)
     }
 

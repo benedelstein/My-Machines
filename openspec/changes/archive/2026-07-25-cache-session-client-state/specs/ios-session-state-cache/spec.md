@@ -52,13 +52,13 @@ After socket connection, iOS SHALL replace cached curated values with the corres
 - **WHEN** cached state says the session is responding and a sync response reports no active turn
 - **THEN** iOS clears the restored responding state and persists the inactive snapshot
 
-### Requirement: Snapshot writes are limited to meaningful changes
+### Requirement: Snapshot writes follow relevant state mutations
 
-iOS SHALL save a session-state snapshot only when its curated value differs from the last loaded or saved value, and SHALL save the latest value before view disappearance resets local response state.
+iOS SHALL save a session-state snapshot after mutations that can affect its curated values and SHALL save the latest value before view disappearance resets local response state.
 
-#### Scenario: Unrelated live state changes
-- **WHEN** live state changes only in a field excluded from the curated snapshot
-- **THEN** iOS does not write another session-state snapshot
+#### Scenario: Curated presentation state changes
+- **WHEN** live or local state changes a field included in the curated snapshot
+- **THEN** iOS persists the current curated snapshot
 
 #### Scenario: Session view disappears while responding
 - **WHEN** the session view disappears while its presentation state is responding

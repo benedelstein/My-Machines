@@ -26,7 +26,7 @@ extension AgentSessionViewModel {
         }
         clearOptimisticUserMessageTracking()
         resetPendingResponse()
-        persistClientStateIfNeeded()
+        persistClientState()
     }
 
     func applyUserMessage(_ message: SessionMessage) {

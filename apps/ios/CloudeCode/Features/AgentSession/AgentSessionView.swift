@@ -174,7 +174,7 @@ struct AgentSessionView: View {
                 .lineLimit(1)
 
             HStack(spacing: style.gridSize) {
-                Text(store.repoFullNameForDisplay ?? "No repository selected")
+                Text(store.clientState.repoFullName ?? "No repository selected")
                     .lineLimit(1)
             }
             .styledFont(.caption)

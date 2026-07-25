@@ -69,19 +69,13 @@ final class AgentSessionViewModel {
     /// Guard so that we do not accumulate to a stream that is no longer active
     var streamGeneration = 0
     var streamStatus = SessionMessageStreamStatus()
-    var clientState = SessionClientState.empty
+    var clientState: SessionClientState
     var clientStateIsResponding = false
     var hasHydratedClientState = false
     var hasDeletedSession = false
-    @ObservationIgnored var lastCachedClientStateSnapshot: SessionClientStateSnapshot?
     private(set) var isSetupRunExpanded = false
     var transcriptProvider: AgentProviderID {
-        let clientProvider = clientState.agentSettings.provider
-        if !hasHydratedClientState, case .unknown = clientProvider {
-            return session?.provider ?? clientProvider
-        } else {
-            return clientProvider
-        }
+        clientState.agentSettings.provider
     }
     /// Message send is in progress
     var isSending = false
@@ -123,7 +117,7 @@ final class AgentSessionViewModel {
         isResponding
             && !isCreatingSession
             && connectionState == .connected
-            && sessionStatusForDisplay == .ready
+            && clientState.status == .ready
             && clientState.sessionSetupRun?.status != .running
     }
 
@@ -145,6 +139,7 @@ final class AgentSessionViewModel {
         pullRequestPollInterval: Duration = .seconds(30)
     ) {
         self.context = context
+        clientState = Self.initialClientState(from: context.session)
         self.sessionCreatedSubject = sessionCreatedSubject
         self.modelCatalogStore = modelCatalogStore
         self.preferences = preferences
@@ -167,6 +162,31 @@ final class AgentSessionViewModel {
             attachmentsAPI: attachmentsAPI
         )
         clientStateIsResponding = context.session?.workingState == "responding"
+    }
+
+    static func initialClientState(
+        from session: SessionSummaryModel?
+    ) -> SessionClientState {
+        guard let session else {
+            return .empty
+        }
+
+        var state = SessionClientState.empty
+        state.repoFullName = session.repoFullName
+        state.status = session.status.map {
+            SessionClientState.Status(rawValue: $0.rawValue)
+        } ?? .preparing
+        state.agentSettings = SessionClientState.AgentSettings(
+            provider: session.provider ?? .unknown(""),
+            model: "",
+            effort: "",
+            maxTokens: 0
+        )
+        state.pullRequest = session.pullRequest.map {
+            .created(url: $0.url, number: $0.number, state: $0.state)
+        }
+        state.pushedBranch = session.pushedBranch
+        return state
     }
 }
 
@@ -233,7 +253,7 @@ extension AgentSessionViewModel {
             removePendingOptimisticUserMessage(restoreDraft: draftText.isEmpty)
             restoreLastSubmittedAttachments()
             resetPendingResponse()
-            persistClientStateIfNeeded()
+            persistClientState()
         case .chatAccepted(let clientMessageId, let messageId):
             acceptOptimisticUserMessage(
                 clientMessageId: clientMessageId,
@@ -241,7 +261,7 @@ extension AgentSessionViewModel {
             )
         case .connected(let status):
             clientState.status = status
-            persistClientStateIfNeeded()
+            persistClientState()
         case .editorReady(let url):
             clientState.editorURL = url
         case .liveState(let state):
@@ -280,7 +300,7 @@ extension AgentSessionViewModel {
             rebuildTranscriptDisplayData()
         }
         reconcilePullRequestState()
-        persistClientStateIfNeeded()
+        persistClientState()
     }
 
     func toggleSetupRunExpansion() {
@@ -357,7 +377,7 @@ extension AgentSessionViewModel {
             )
         }
         markLatestAssistantMessageRead(in: transcriptMessages)
-        persistClientStateIfNeeded()
+        persistClientState()
     }
 
     private func applyAgentChunks(
