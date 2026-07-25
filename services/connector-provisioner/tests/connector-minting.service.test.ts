@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mintConnector } from "../src/mint-connector";
+import { mintConnector } from "../src/connector-minting.service";
 import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,

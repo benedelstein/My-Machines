@@ -14,6 +14,7 @@ import type {
   MintConnectorResult,
   ProvisioningStage,
 } from "./types";
+import { arraysEqual } from "./utils";
 
 interface MintConnectorDependencies {
   dashboard: DashboardConnectorClient;
@@ -22,6 +23,11 @@ interface MintConnectorDependencies {
   sleep?: (milliseconds: number) => Promise<void>;
   nameSuffix?: () => string;
 }
+
+const NOT_ATTEMPTED: CleanupStatus = Object.freeze({
+  attempted: false,
+  succeeded: false,
+});
 
 export async function mintConnector(
   callerRequest: MintConnectorRequest,
@@ -48,7 +54,7 @@ export async function mintConnector(
       code: beforeResult.error.code,
       stage: "list_before",
       retryable: beforeResult.error.retryable,
-      cleanup: notAttempted(),
+      cleanup: NOT_ATTEMPTED,
       durations,
       startedAt,
       now,
@@ -62,7 +68,7 @@ export async function mintConnector(
       code: "connector_name_conflict",
       stage: "list_before",
       retryable: false,
-      cleanup: notAttempted(),
+      cleanup: NOT_ATTEMPTED,
       durations,
       startedAt,
       now,
@@ -95,7 +101,7 @@ export async function mintConnector(
       retryable: dashboardResult.error.retryable,
       dashboardOperation: dashboardResult.error.operation,
       dashboardShape: dashboardResult.error.dashboardShape,
-      cleanup: notAttempted(),
+      cleanup: NOT_ATTEMPTED,
       durations,
       startedAt,
       now,
@@ -116,7 +122,7 @@ export async function mintConnector(
       code: "orphan_reconciliation_required",
       stage: "list_after",
       retryable: true,
-      cleanup: notAttempted(),
+      cleanup: NOT_ATTEMPTED,
       durations,
       startedAt,
       now,
@@ -137,7 +143,7 @@ export async function mintConnector(
         : "connector_reconciliation_failed",
       stage: "list_after",
       retryable: reconciliation.attributableConnectionIds.length === 0,
-      cleanup: notAttempted(),
+      cleanup: NOT_ATTEMPTED,
       durations,
       startedAt,
       now,
@@ -289,11 +295,6 @@ function policiesMatch(
   );
 }
 
-function arraysEqual(left: string[], right: string[]): boolean {
-  return left.length === right.length
-    && left.every((value, index) => value === right[index]);
-}
-
 async function buildErrorWithCleanup(params: {
   code: ConnectorProvisionerErrorCode;
   stage: ProvisioningStage;
@@ -389,13 +390,6 @@ function errorMessage(code: ConnectorProvisionerErrorCode): string {
   }
 }
 
-function notAttempted(): CleanupStatus {
-  return {
-    attempted: false,
-    succeeded: false,
-  };
-}
-
 async function listConnectionsAfterCreate(
   sprites: SpritesConnectionsClient,
   sleep: (milliseconds: number) => Promise<void>,
@@ -431,7 +425,7 @@ async function cleanupConnections(
   durations: ConnectorProvisioningDurations,
 ): Promise<CleanupStatus> {
   if (connectionIds.length === 0) {
-    return notAttempted();
+    return NOT_ATTEMPTED;
   }
 
   const cleanupStartedAt = now();
@@ -478,7 +472,7 @@ async function reconcileAfterUncertainSubmit(params: {
       code: "orphan_reconciliation_required",
       stage: "list_after",
       retryable: true,
-      cleanup: notAttempted(),
+      cleanup: NOT_ATTEMPTED,
       durations: params.durations,
       startedAt: params.startedAt,
       now: params.now,
@@ -505,14 +499,14 @@ async function reconcileAfterUncertainSubmit(params: {
       retryable: false,
       dashboardOperation: params.dashboardOperation,
       dashboardShape: params.dashboardShape,
-      cleanup: notAttempted(),
+      cleanup: NOT_ATTEMPTED,
       durations: params.durations,
       startedAt: params.startedAt,
       now: params.now,
     });
   }
   const cleanup = orphan === undefined
-    ? notAttempted()
+    ? NOT_ATTEMPTED
     : await cleanupConnections(
       [orphan.id],
       params.dependencies.sprites,

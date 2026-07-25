@@ -1,12 +1,10 @@
 import type { BrowserWorker } from "@cloudflare/playwright";
 import { ConsoleLogger, type LogFields } from "@repo/shared";
 import { HttpSpritesConnectionsClient, type SpritesConnection } from "@repo/sprites-client";
-import { deleteConnectorAndVerify, mintConnector } from "./mint-connector";
+import { deleteConnectorAndVerify, mintConnector } from "./connector-minting.service";
 import { PlaywrightDashboardClient } from "./playwright-dashboard.client";
-import {
-  LiveTestRequestSchema,
-  type ConnectorProvisioningDurations,
-} from "./types";
+import { LiveTestRequestSchema } from "./types";
+import { durationFields, hasValidBearer, jsonResponse, readJson } from "./utils";
 
 const logger = new ConsoleLogger({ format: "pretty" }, "connector-provisioner");
 
@@ -207,61 +205,6 @@ function hasMintConfiguration(env: Env): boolean {
     env.SPRITES_ORG_SLUG,
   ].every((value) => typeof value === "string" && value.length > 0)
     && typeof env.BROWSER?.fetch === "function";
-}
-
-async function hasValidBearer(request: Request, expectedToken: string): Promise<boolean> {
-  const authorization = request.headers.get("Authorization");
-  if (
-    typeof expectedToken !== "string"
-    || expectedToken.length === 0
-    || authorization === null
-    || !authorization.startsWith("Bearer ")
-  ) {
-    return false;
-  }
-
-  const providedToken = authorization.slice("Bearer ".length);
-  const [providedDigest, expectedDigest] = await Promise.all([
-    digest(providedToken),
-    digest(expectedToken),
-  ]);
-
-  let difference = 0;
-  for (let index = 0; index < providedDigest.length; index += 1) {
-    difference |= (providedDigest[index] ?? 0) ^ (expectedDigest[index] ?? 0);
-  }
-  return difference === 0;
-}
-
-async function digest(value: string): Promise<Uint8Array> {
-  const encoded = new TextEncoder().encode(value);
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", encoded));
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return undefined;
-  }
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Cache-Control": "no-store",
-      "Content-Type": "application/json",
-    },
-  });
-}
-
-function durationFields(durations: ConnectorProvisioningDurations): LogFields {
-  return Object.fromEntries(
-    Object.entries(durations)
-      .filter((entry): entry is [string, number] => typeof entry[1] === "number")
-      .map(([key, value]) => [key, Math.round(value)]),
-  );
 }
 
 function isDeletableSessionConnector(connection: SpritesConnection): boolean {
