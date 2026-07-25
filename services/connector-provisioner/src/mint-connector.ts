@@ -19,14 +19,23 @@ interface MintConnectorDependencies {
   sprites: SpritesConnectionsClient;
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  nameSuffix?: () => string;
 }
 
 export async function mintConnector(
-  request: MintConnectorRequest,
+  callerRequest: MintConnectorRequest,
   dependencies: MintConnectorDependencies,
 ): Promise<Result<MintConnectorResult, ConnectorProvisionerError>> {
   const now = dependencies.now ?? performance.now.bind(performance);
   const sleep = dependencies.sleep ?? delay;
+  const nameSuffix = dependencies.nameSuffix ?? defaultNameSuffix;
+  // The suffixed name is globally unique per attempt, so name-based
+  // attribution and delete-on-failure can only ever match this call's own
+  // connector, even across concurrent duplicate requests.
+  const request: MintConnectorRequest = {
+    ...callerRequest,
+    name: `${callerRequest.name}-${nameSuffix()}`,
+  };
   const startedAt = now();
   const durations: ConnectorProvisioningDurations = { totalMs: 0 };
 
@@ -190,6 +199,7 @@ export async function mintConnector(
 
   durations.totalMs = now() - startedAt;
   return success({
+    name: request.name,
     gatewayConnectionId,
     ...(dashboardResult.value.detailId === undefined
       ? {}
@@ -436,6 +446,10 @@ async function cleanupConnections(
 
 async function delay(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function defaultNameSuffix(): string {
+  return crypto.randomUUID().slice(0, 8);
 }
 
 async function reconcileAfterUncertainSubmit(params: {

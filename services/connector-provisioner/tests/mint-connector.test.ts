@@ -26,7 +26,7 @@ const request: MintConnectorRequest = {
 const createdConnection: SpritesConnection = {
   id: "gateway-connection-id",
   provider: "custom_api",
-  providerAccountName: request.name,
+  providerAccountName: `${request.name}-suffix01`,
   providerInfo: {
     base_api_url: "https://httpbin.org/",
     test_url: request.testUrl,
@@ -125,6 +125,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -156,6 +157,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -186,6 +188,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -220,6 +223,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
     const serialized = JSON.stringify(result);
 
@@ -249,6 +253,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(failure(dashboardError)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -262,6 +267,35 @@ describe("mintConnector", () => {
       },
     });
     expect(sprites.listCallCount).toBe(1);
+  });
+
+  it("attributes only its own connector when a concurrent same-name mint is visible", async () => {
+    const concurrentTwin: SpritesConnection = {
+      ...createdConnection,
+      id: "concurrent-gateway-id",
+      providerAccountName: `${request.name}-suffix02`,
+    };
+    const sprites = new FakeSpritesClient();
+    sprites.listResponses = [
+      success([]),
+      success([concurrentTwin, createdConnection]),
+    ];
+
+    const result = await mintConnector(request, {
+      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
+      sprites,
+      now: clock(),
+      nameSuffix: () => "suffix01",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        name: `${request.name}-suffix01`,
+        gatewayConnectionId: "gateway-connection-id",
+      },
+    });
+    expect(sprites.deletedIds).toEqual([]);
   });
 
   it("deletes nothing when reconciliation is ambiguous", async () => {
@@ -278,6 +312,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -314,6 +349,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -345,6 +381,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -378,6 +415,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
       sleep: async (milliseconds) => {
         retryDelays.push(milliseconds);
       },
@@ -405,6 +443,7 @@ describe("mintConnector", () => {
       dashboard,
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -431,6 +470,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(success(dashboardSuccess)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
       sleep: async (milliseconds) => {
         retryDelays.push(milliseconds);
       },
@@ -457,6 +497,7 @@ describe("mintConnector", () => {
       dashboard: new FakeDashboardClient(failure(dashboardError)),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({
@@ -491,6 +532,7 @@ describe("mintConnector", () => {
       })),
       sprites,
       now: clock(),
+      nameSuffix: () => "suffix01",
     });
 
     expect(result).toMatchObject({

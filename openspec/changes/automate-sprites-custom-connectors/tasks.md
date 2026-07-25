@@ -35,7 +35,7 @@
 
 ## S1. Connector spine + webhook
 
-- [ ] S1.1 Create the Sprite with `session:<sessionId>` and `env:<environmentId>` labels, then mint the internal connector (base = Worker, token = existing DO webhook token, policy = session label); store connector metadata in D1 and fail closed. Connector names MUST be unique per mint attempt (session id + random suffix) — name-based reconciliation cannot distinguish exact-duplicate concurrent mints (2026-07-25 review).
+- [ ] S1.1 Create the Sprite with `session:<sessionId>` and `env:<environmentId>` labels, then mint the internal connector (base = Worker, token = existing DO webhook token, policy = session label); store connector metadata in D1 and fail closed. The provisioner enforces per-attempt name uniqueness (appends a random suffix), making name attribution definitive across concurrent duplicate mints; store the returned `name` alongside the ids (2026-07-25).
 - [ ] S1.2 Preserve `/internal/session/:sessionId/chunks` and `/events`; the route resolves the DO and the DO validates the gateway-injected token from SQLite. Add a connector health `test_url` without introducing a generic `/webhook` or D1 secret mapping.
 - [ ] S1.3 Give the VM the connector gateway base instead of `DO_WEBHOOK_TOKEN`; cut over behind a flag and retire Sprite-held webhook-token delivery once proven.
 - [ ] S1.4 Teardown deletes the internal connector and DO webhook token. It does not edit class-B policies.

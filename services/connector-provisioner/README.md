@@ -7,7 +7,10 @@ through the supported Sprites REST API.
 The Worker keeps dashboard storage state and the Sprites API token in
 provisioner-only secrets. Every operation requires a separate provisioner bearer:
 
-- `POST /v1/connectors/mint` creates and returns a verified connector.
+- `POST /v1/connectors/mint` creates and returns a verified connector. The
+  requested `name` gets a random per-attempt suffix so attribution is
+  unambiguous even across concurrent duplicate requests; the final `name` is
+  returned and should be stored with the ids.
 - `DELETE /v1/connectors/:id` deletes a connector and confirms it is gone.
 - `POST /v1/connectors/live-test` mints and then deletes a disposable connector.
 

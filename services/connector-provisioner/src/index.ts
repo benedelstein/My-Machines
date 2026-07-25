@@ -129,6 +129,7 @@ async function route(request: Request, url: URL, env: Env): Promise<Response> {
   logger.info("Connector minted", {
     fields: {
       mode,
+      name: mintResult.value.name,
       gatewayConnectionId: mintResult.value.gatewayConnectionId,
       durations: durationFields(mintResult.value.durations),
     },
@@ -136,6 +137,7 @@ async function route(request: Request, url: URL, env: Env): Promise<Response> {
   if (isMint) {
     return jsonResponse({
       connector: {
+        name: mintResult.value.name,
         gatewayConnectionId: mintResult.value.gatewayConnectionId,
         ...(mintResult.value.detailId === undefined
           ? {}
@@ -172,6 +174,7 @@ async function route(request: Request, url: URL, env: Env): Promise<Response> {
 
   return jsonResponse({
     connector: {
+      name: mintResult.value.name,
       gatewayConnectionId: mintResult.value.gatewayConnectionId,
       ...(mintResult.value.detailId === undefined
         ? {}

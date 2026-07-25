@@ -63,7 +63,8 @@ const safeHeaderValue = z.string().max(128).refine((value) => !/[\r\n]/u.test(va
 });
 
 const MintConnectorRequestBaseSchema = z.object({
-  name: z.string().min(1).max(120).refine((value) => !/[\r\n]/u.test(value)),
+  // Leaves room for the provisioner's "-<8 char>" uniqueness suffix.
+  name: z.string().min(1).max(100).refine((value) => !/[\r\n]/u.test(value)),
   baseApiUrl: httpsUrl,
   token: z.string().min(1).max(16_384),
   testUrl: httpsUrl,
@@ -236,6 +237,7 @@ export interface ConnectorProvisioningDurations {
 }
 
 export interface MintConnectorResult {
+  name: string;
   gatewayConnectionId: string;
   detailId?: string;
   accessPolicy: AccessPolicy;
