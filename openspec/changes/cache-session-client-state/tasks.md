@@ -2,7 +2,7 @@
 
 - [x] 1.1 Add the curated per-session Domain snapshot with repository, status, agent settings, agent mode, setup run, pull request, pushed and base branches, and responding flag.
 - [x] 1.2 Add its SwiftData entity and observable entity model, register the additive model in the current schema, and implement per-session load, save, delete, and delete-all store operations.
-- [x] 1.3 Add Entities tests for snapshot round trips, replacement including cleared optionals, unreadable-row cleanup, deletion, and reopening an existing on-disk cache with the new model.
+- [x] 1.3 Add Entities tests for flat field mapping, snapshot round trips, replacement including cleared optionals, deletion, and reopening an existing on-disk cache with the new model.
 
 ## 2. Dependency and cache lifecycle wiring
 

@@ -56,33 +56,21 @@ final class SessionClientStateStoreTests: XCTestCase {
         XCTAssertEqual(restored.status, .ready)
     }
 
-    func testUnreadableRowIsDeleted() async throws {
-        let cache = try makeCache()
-        try await cache.put(
-            SessionClientStateEntity.self,
-            snapshots: [testSessionClientStateSnapshot("s1")]
-        )
-        let descriptor = FetchDescriptor<SessionClientStateEntity>(
-            predicate: SessionClientStateEntity.singleItemPredicate("s1")
-        )
-        try await cache.runBackgroundTask { context in
-            guard let row = try context.fetch(descriptor).first else {
-                throw CocoaError(.fileReadUnknown)
-            }
-            row.snapshotData = Data([0xFF])
-        }
-        let store = SessionClientStateStore(cache: cache)
+    func testEntityMapsSnapshotToFlatFields() throws {
+        let snapshot = testSessionClientStateSnapshot("s1")
+        let entity = SessionClientStateEntity(snapshot)
 
-        let restored = await store.snapshot(sessionId: "s1")
-
-        XCTAssertNil(restored)
-        _ = try await pollUntil {
-            let count = try await cache.count(
-                SessionClientStateEntity.self,
-                predicate: SessionClientStateEntity.singleItemPredicate("s1")
-            )
-            return count == 0 ? true : nil
-        }
+        XCTAssertEqual(entity.id, snapshot.id)
+        XCTAssertEqual(entity.repoFullName, snapshot.repoFullName)
+        XCTAssertEqual(entity.status, snapshot.status)
+        XCTAssertEqual(entity.sessionSetupRun, snapshot.sessionSetupRun)
+        XCTAssertEqual(entity.agentSettings, snapshot.agentSettings)
+        XCTAssertEqual(entity.pullRequest, snapshot.pullRequest)
+        XCTAssertEqual(entity.pushedBranch, snapshot.pushedBranch)
+        XCTAssertEqual(entity.baseBranch, snapshot.baseBranch)
+        XCTAssertEqual(entity.agentMode, snapshot.agentMode)
+        XCTAssertEqual(entity.isResponding, snapshot.isResponding)
+        XCTAssertEqual(try entity.makeSnapshot(), snapshot)
     }
 
     func testCancelledSnapshotDoesNotHydrateMemory() async throws {

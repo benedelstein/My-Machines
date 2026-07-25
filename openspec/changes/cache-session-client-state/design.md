@@ -38,7 +38,7 @@ For these fields, the view uses live client state first and the cached client-st
 
 ### D2. Persistence follows the existing Entities pattern
 
-Add a Codable Domain snapshot, SwiftData entity, observable entity model, and shared store in `Modules/Entities`. The entity may encode the small nested values as data, following the existing session-message cache pattern. Register the new entity in the current schema without adding a schema version because this is an independent additive model.
+Add a Codable Domain snapshot, SwiftData entity, observable entity model, and shared store in `Modules/Entities`. The entity stores each curated snapshot value in a matching SwiftData field rather than encoding the entire snapshot into one opaque data field. Register the new entity in the current schema without adding a schema version because this is an independent additive model.
 
 The store exposes per-session load, save, delete, and delete-all operations. SwiftData objects remain inside the cache actor.
 
@@ -62,7 +62,6 @@ This avoids a timer or a separate synchronization state machine while preventing
 
 - **[Cached responding state can be briefly stale]** -> Treat it as presentation-only and replace it as soon as live state or sync arrives.
 - **[A newly added SwiftData model could expose store compatibility issues]** -> Add an on-disk reopen test using the previous model list and the new current schema.
-- **[Corrupt encoded snapshot data cannot be restored]** -> Drop the unreadable row and continue with the summary and live server hydration.
 
 ## Migration Plan
 
