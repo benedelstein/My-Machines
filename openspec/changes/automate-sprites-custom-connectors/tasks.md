@@ -19,7 +19,7 @@
 - [x] 1.1 `mintConnector({...}) -> {gatewayConnectionId, detailId?}`: REST list-before → browser create → REST list-after/reconcile authoritative gateway id → REST scope → REST verify (`allow_all==false`) → delete-on-failure.
 - [ ] 1.2 Run in a dedicated private Cloudflare Worker via Browser Rendering (`@cloudflare/playwright`, dashboard `storageState`); call it from the api-server through a service binding when integrated; Fly.io Machine fallback; instrument latency.
 - [x] 1.3 Preflight dashboard shape/drift check before entering any secret; provisioner-only auth with reauth-required status; redact tokens/cookies/CSRF/storageState.
-- [ ] 1.4 REST scope-update + delete + reconciliation; re-assert `allow_all==false` on tracked connectors.
+- [ ] 1.4 REST scope-update + delete + reconciliation; re-assert `allow_all==false` on tracked connectors. Reconciliation must also re-verify the external deny-all-on-create invariant the orphan-leak safety argument depends on (2026-07-25 review).
 
 ## 2. Data model (D1) — cross-cutting
 
@@ -35,7 +35,7 @@
 
 ## S1. Connector spine + webhook
 
-- [ ] S1.1 Create the Sprite with `session:<sessionId>` and `env:<environmentId>` labels, then mint the internal connector (base = Worker, token = existing DO webhook token, policy = session label); store connector metadata in D1 and fail closed.
+- [ ] S1.1 Create the Sprite with `session:<sessionId>` and `env:<environmentId>` labels, then mint the internal connector (base = Worker, token = existing DO webhook token, policy = session label); store connector metadata in D1 and fail closed. Connector names MUST be unique per mint attempt (session id + random suffix) — name-based reconciliation cannot distinguish exact-duplicate concurrent mints (2026-07-25 review).
 - [ ] S1.2 Preserve `/internal/session/:sessionId/chunks` and `/events`; the route resolves the DO and the DO validates the gateway-injected token from SQLite. Add a connector health `test_url` without introducing a generic `/webhook` or D1 secret mapping.
 - [ ] S1.3 Give the VM the connector gateway base instead of `DO_WEBHOOK_TOKEN`; cut over behind a flag and retire Sprite-held webhook-token delivery once proven.
 - [ ] S1.4 Teardown deletes the internal connector and DO webhook token. It does not edit class-B policies.
