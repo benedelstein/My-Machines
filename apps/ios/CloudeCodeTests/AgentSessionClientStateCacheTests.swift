@@ -32,7 +32,7 @@ extension AgentSessionTranscriptStateTests {
         #expect(viewModel.clientState.repoFullName == "cached/repo")
         #expect(viewModel.clientState.status == .ready)
         #expect(viewModel.clientState.sessionSetupRun?.id == "setup-cached")
-        #expect(viewModel.clientState.agentMode == "plan")
+        #expect(viewModel.clientState.agentMode == .plan)
         #expect(viewModel.transcriptProvider == .openaiCodex)
         #expect(viewModel.isResponding)
         #expect(builder.providers == [.openaiCodex])
@@ -113,7 +113,7 @@ extension AgentSessionTranscriptStateTests {
         live.status = .setupFailed
         live.pushedBranch = "live-branch"
         live.baseBranch = "develop"
-        live.agentMode = "edit"
+        live.agentMode = .edit
         live.pullRequest = .failed(error: "failed", details: nil)
 
         viewModel.applyLiveState(live)
@@ -285,7 +285,7 @@ extension AgentSessionTranscriptStateTests {
             pullRequest: pullRequest,
             pushedBranch: pushedBranch,
             baseBranch: "main",
-            agentMode: "plan",
+            agentMode: .plan,
             isResponding: isResponding
         )
     }

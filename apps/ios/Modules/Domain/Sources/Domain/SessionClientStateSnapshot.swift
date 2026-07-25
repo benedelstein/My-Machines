@@ -8,7 +8,7 @@ public struct SessionClientStateSnapshot: Sendable, Equatable, Codable, Identifi
     public let pullRequest: SessionClientState.PullRequest?
     public let pushedBranch: String?
     public let baseBranch: String?
-    public let agentMode: String
+    public let agentMode: SessionClientState.AgentMode
     public let isResponding: Bool
 
     /// Creates a curated snapshot for one session.
@@ -21,7 +21,7 @@ public struct SessionClientStateSnapshot: Sendable, Equatable, Codable, Identifi
         pullRequest: SessionClientState.PullRequest?,
         pushedBranch: String?,
         baseBranch: String?,
-        agentMode: String,
+        agentMode: SessionClientState.AgentMode,
         isResponding: Bool
     ) {
         self.id = id

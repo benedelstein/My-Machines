@@ -12,7 +12,7 @@ public final class SessionClientStateEntity: Entity {
     var pullRequest: SessionClientState.PullRequest?
     var pushedBranch: String?
     var baseBranch: String?
-    var agentMode: String
+    var agentMode: SessionClientState.AgentMode
     var isResponding: Bool
 
     /// Creates a persistence row from a curated client-state snapshot.

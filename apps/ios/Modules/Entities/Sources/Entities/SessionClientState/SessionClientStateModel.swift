@@ -15,7 +15,7 @@ public final class SessionClientStateModel: EntityModel {
     public var pullRequest: SessionClientState.PullRequest?
     public var pushedBranch: String?
     public var baseBranch: String?
-    public var agentMode: String
+    public var agentMode: SessionClientState.AgentMode
     public var isResponding: Bool
 
     /// Creates a model from a curated client-state snapshot.

@@ -94,7 +94,7 @@ func testSessionClientStateSnapshot(
         pullRequest: pullRequest,
         pushedBranch: pushedBranch,
         baseBranch: baseBranch,
-        agentMode: "edit",
+        agentMode: .edit,
         isResponding: isResponding
     )
 }
