@@ -19,7 +19,7 @@
 - [x] 1.1 `mintConnector({...}) -> {gatewayConnectionId, detailId?}`: REST list-before → browser create → REST list-after/reconcile authoritative gateway id → REST scope → REST verify (`allow_all==false`) → delete-on-failure.
 - [ ] 1.2 Run in a dedicated private Cloudflare Worker via Browser Rendering (`@cloudflare/playwright`, dashboard `storageState`); call it from the api-server through a service binding when integrated; Fly.io Machine fallback; instrument latency.
 - [x] 1.3 Preflight dashboard shape/drift check before entering any secret; provisioner-only auth with reauth-required status; redact tokens/cookies/CSRF/storageState.
-- [ ] 1.4 REST scope-update + delete + reconciliation; re-assert `allow_all==false` on tracked connectors. Reconciliation must also re-verify the external deny-all-on-create invariant the orphan-leak safety argument depends on (2026-07-25 review).
+- [ ] 1.4 REST scope-update + delete + reconciliation; re-assert `allow_all==false` on tracked connectors. Reconciliation must also re-verify the external deny-all-on-create invariant the orphan-leak safety argument depends on (2026-07-25 review). Verify whether `GET /v1/oauth/connections` paginates; with unique per-attempt names, replace list-diff attribution with definitive lookup-by-name that pages until found.
 
 ## 2. Data model (D1) — cross-cutting
 
