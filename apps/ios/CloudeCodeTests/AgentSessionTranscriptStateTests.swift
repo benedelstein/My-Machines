@@ -340,6 +340,12 @@ extension AgentSessionTranscriptStateTests {
     }
 
     struct StubSessionsAPI: SessionsAPIProviding {
+        let deleteSucceeds: Bool
+
+        init(deleteSucceeds: Bool = false) {
+            self.deleteSucceeds = deleteSucceeds
+        }
+
         func listSessions(
             repoId: Int?,
             repoCursor: String?,
@@ -383,7 +389,9 @@ extension AgentSessionTranscriptStateTests {
         }
 
         func delete(sessionId: String) async throws {
-            throw URLError(.badServerResponse)
+            if !deleteSucceeds {
+                throw URLError(.badServerResponse)
+            }
         }
 
         func sessionWebSocketToken(sessionId: String) async throws -> WebSocketToken {
@@ -397,16 +405,18 @@ extension AgentSessionTranscriptStateTests {
 
     func makeViewModel(
         provider: AgentProviderID? = nil,
+        context: AgentSessionViewModel.Context? = nil,
         modelsAPI: any ModelsAPIProviding = StubModelsAPI(),
+        sessionsAPI: any SessionsAPIProviding = StubSessionsAPI(),
         sessionMessageStore: SessionMessageStore? = nil,
+        sessionClientStateStore: SessionClientStateStore = SessionClientStateStore(),
         transcriptBuilder: any AgentSessionTranscriptBuilding = StubTranscriptBuilder(),
         hapticFeedback: any AgentSessionHapticFeedbackProviding = NoopHapticFeedback()
     ) -> AgentSessionViewModel {
         let sessionMessageStore = sessionMessageStore ?? SessionMessageStore()
         let sessionSummaryStore = SessionSummaryStore()
-        let sessionsAPI = StubSessionsAPI()
         return AgentSessionViewModel(
-            context: .session(makeSession(provider: provider)),
+            context: context ?? .session(makeSession(provider: provider)),
             modelCatalogStore: ModelCatalogStore(modelsAPI: modelsAPI),
             // Unused in session mode: preferences only seed draft selections.
             preferences: NewSessionPreferences(userDefaults: UserDefaults(
@@ -421,6 +431,7 @@ extension AgentSessionTranscriptStateTests {
                 )
             },
             sessionMessageStore: sessionMessageStore,
+            sessionClientStateStore: sessionClientStateStore,
             sessionSummaryStore: sessionSummaryStore,
             transcriptBuilder: transcriptBuilder,
             sessionsAPI: sessionsAPI,
@@ -435,60 +446,11 @@ extension AgentSessionTranscriptStateTests {
             ),
             deleteSessionAction: DeleteSessionAction(
                 sessionsAPI: sessionsAPI,
-                sessionSummaryStore: sessionSummaryStore
+                sessionSummaryStore: sessionSummaryStore,
+                sessionClientStateStore: sessionClientStateStore
             ),
             sessionCreatedSubject: PassthroughSubject<String, Never>(),
             hapticFeedback: hapticFeedback
         )
-    }
-
-    func makeSession(provider: AgentProviderID?) -> SessionSummaryModel {
-        SessionSummaryModel(SessionSummary(
-            id: "session-1",
-            repoId: 1,
-            repoFullName: "octo/repo",
-            provider: provider,
-            archived: false,
-            workingState: "idle",
-            createdAt: "2026-01-01T00:00:00Z",
-            updatedAt: "2026-01-01T00:00:00Z",
-            hasUnread: false
-        ))
-    }
-
-    func liveState(
-        provider: AgentProviderID,
-        pendingUserMessage: SessionMessage? = nil,
-        activeTurnUserMessageID: String? = nil,
-        setupRun: SessionClientState.SessionSetupRun? = nil
-    ) -> SessionClientState {
-        var state = SessionClientState.empty
-        state.agentSettings = .init(
-            provider: provider,
-            model: "model",
-            effort: "high",
-            maxTokens: 8_192
-        )
-        state.pendingUserMessage = pendingUserMessage
-        state.activeTurnUserMessageId = activeTurnUserMessageID
-        state.sessionSetupRun = setupRun
-        return state
-    }
-
-    func userMessage(id: String, text: String = "hello") -> SessionMessage {
-        SessionMessage(id: id, role: .user, text: text)
-    }
-
-    func optimisticUserMessage(id: String, text: String = "hello") -> SessionMessage {
-        SessionMessage(
-            id: id,
-            role: .user,
-            text: text,
-            metadata: .object(["optimistic": .bool(true)])
-        )
-    }
-
-    func assistantMessage(id: String, text: String = "hi") -> SessionMessage {
-        SessionMessage(id: id, role: .assistant, text: text)
     }
 }

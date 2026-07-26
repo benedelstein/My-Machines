@@ -65,7 +65,7 @@ extension SessionClientState {
             activeTurnUserMessageId: state.activeTurn?.userMessageId,
             editorURL: state.editorUrl,
             providerConnection: state.providerConnection.map(ProviderConnection.init),
-            agentMode: state.agentMode.rawValue,
+            agentMode: SessionClientState.AgentMode(rawValue: state.agentMode.rawValue),
             lastError: state.lastError,
             createdAt: state.createdAt
         )

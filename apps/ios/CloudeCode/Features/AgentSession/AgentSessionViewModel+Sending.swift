@@ -63,6 +63,7 @@ extension AgentSessionViewModel {
         isSending = true
         isWaitingForResponse = true
         errorMessage = nil
+        persistClientState()
 
         if isDraftMode {
             isCreatingSession = true
@@ -176,6 +177,7 @@ extension AgentSessionViewModel {
         )
         let session = sessionSummaryStore.putSnapshotsToDisk([summary])[0]
         context = .session(session)
+        clientState = Self.initialClientState(from: session)
         attachmentStore.adoptSessionId(response.sessionId)
         // Lets HomeRouter map this screen's draft route to the real session id.
         sessionCreatedSubject.send(response.sessionId)
@@ -207,5 +209,6 @@ extension AgentSessionViewModel {
         )
         attachmentStore.restore(submittedAttachments)
         resetPendingResponse()
+        persistClientState()
     }
 }

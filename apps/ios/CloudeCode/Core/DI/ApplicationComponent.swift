@@ -157,6 +157,7 @@ final class ApplicationComponent: Component<ApplicationDependency> {
                 userStore: userStore,
                 sessionSummaryStore: sessionSummaryStore,
                 sessionMessageStore: homeComponent.sessionMessageStore,
+                sessionClientStateStore: sessionClientStateStore,
                 modelCatalogStore: homeComponent.modelCatalogStore,
                 repoEnvironmentsStore: repoEnvironmentsStore
             )
@@ -219,6 +220,12 @@ final class ApplicationComponent: Component<ApplicationDependency> {
         shared {
             // todo add a summary get endpoint rn we just have a get that returns data from the do.
             SessionSummaryStore(cache: cache)
+        }
+    }
+
+    @MainActor var sessionClientStateStore: SessionClientStateStore {
+        shared {
+            SessionClientStateStore(cache: cache)
         }
     }
 

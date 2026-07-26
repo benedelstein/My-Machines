@@ -13,6 +13,8 @@ protocol HomeDependency: Dependency {
     @MainActor
     var sessionSummaryStore: SessionSummaryStore { get }
     @MainActor
+    var sessionClientStateStore: SessionClientStateStore { get }
+    @MainActor
     var newSessionPreferences: NewSessionPreferences { get }
     var cache: Cache { get }
     var userSessionsSocket: UserSessionsSocket { get }
@@ -34,7 +36,8 @@ final class HomeComponent: Component<HomeDependency> {
         shared {
             DeleteSessionAction(
                 sessionsAPI: dependency.sessionsAPI,
-                sessionSummaryStore: dependency.sessionSummaryStore
+                sessionSummaryStore: dependency.sessionSummaryStore,
+                sessionClientStateStore: dependency.sessionClientStateStore
             )
         }
     }
@@ -77,6 +80,11 @@ final class HomeComponent: Component<HomeDependency> {
         shared {
             SessionMessageStore(cache: dependency.cache)
         }
+    }
+
+    @MainActor
+    var sessionClientStateStore: SessionClientStateStore {
+        dependency.sessionClientStateStore
     }
 
     /// Shared across all agent sessions so the model catalog is fetched once

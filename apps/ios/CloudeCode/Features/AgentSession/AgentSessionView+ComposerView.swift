@@ -35,7 +35,7 @@ extension AgentSessionView {
                 measuredComposer
             }
             .animation(style.fadeAnimation, value: showsRepoBranchPicker)
-            .animation(style.fadeAnimation, value: vm.pushedBranchForDisplay)
+            .animation(style.fadeAnimation, value: vm.clientState.pushedBranch)
             .task {
                 if vm.isDraftMode {
                     try? await Task.sleep(for: .milliseconds(100))
@@ -46,7 +46,7 @@ extension AgentSessionView {
 
         private var measuredComposer: some View {
             VStack(alignment: .leading, spacing: style.gridSize) {
-                if vm.pushedBranchForDisplay != nil {
+                if vm.clientState.pushedBranch != nil {
                     BranchBar(vm: vm)
                         .transition(.blurReplace)
                 }

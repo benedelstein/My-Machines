@@ -370,7 +370,7 @@ struct SessionMessagesTests {
         #expect(clientState.activeTurnUserMessageId == "pending_1")
         #expect(clientState.editorURL == "https://example.com/editor")
         #expect(clientState.providerConnection?.connected == true)
-        #expect(clientState.agentMode == "edit")
+        #expect(clientState.agentMode == .edit)
         #expect(clientState.createdAt == "2026-06-13T00:00:00.000Z")
     }
 

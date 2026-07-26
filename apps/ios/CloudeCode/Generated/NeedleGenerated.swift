@@ -47,6 +47,11 @@ private final class HomeDependencyProvider: HomeDependency {
     }
 
     @MainActor
+    var sessionClientStateStore: SessionClientStateStore {
+        applicationComponent.sessionClientStateStore
+    }
+
+    @MainActor
     var newSessionPreferences: NewSessionPreferences {
         applicationComponent.newSessionPreferences
     }
@@ -123,6 +128,11 @@ private final class AgentSessionDependencyProvider: AgentSessionDependency {
     @MainActor
     var sessionSummaryStore: SessionSummaryStore {
         applicationComponent.sessionSummaryStore
+    }
+
+    @MainActor
+    var sessionClientStateStore: SessionClientStateStore {
+        applicationComponent.sessionClientStateStore
     }
 
     @MainActor

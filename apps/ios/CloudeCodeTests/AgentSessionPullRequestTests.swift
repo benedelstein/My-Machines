@@ -19,7 +19,7 @@ struct AgentSessionPullRequestTests {
             )
         )
 
-        #expect(viewModel.pushedBranchForDisplay == "codex/mobile-branch-bar")
+        #expect(viewModel.clientState.pushedBranch == "codex/mobile-branch-bar")
         #expect(viewModel.createdPullRequestURL?.absoluteString == "https://github.com/example/repo/pull/42")
     }
 
@@ -57,7 +57,7 @@ struct AgentSessionPullRequestTests {
         #expect(url?.absoluteString == "https://github.com/example/repo/pull/42")
         #expect(await api.createCallCount == 1)
         #expect(viewModel.session?.pullRequest?.number == 42)
-        guard case .created(_, let number, let state) = viewModel.pullRequestForDisplay else {
+        guard case .created(_, let number, let state) = viewModel.clientState.pullRequest else {
             Issue.record("Expected a created pull request")
             return
         }
@@ -98,7 +98,7 @@ struct AgentSessionPullRequestTests {
 
         await viewModel.refreshPullRequestStatus()
 
-        guard case .created(_, _, let state) = viewModel.pullRequestForDisplay else {
+        guard case .created(_, _, let state) = viewModel.clientState.pullRequest else {
             Issue.record("Expected a created pull request")
             return
         }
@@ -128,7 +128,7 @@ struct AgentSessionPullRequestTests {
 
         #expect(await api.pullRequestCallCount == 1)
         #expect(viewModel.pullRequestPollingTask == nil)
-        guard case .created(_, _, let state) = viewModel.pullRequestForDisplay else {
+        guard case .created(_, _, let state) = viewModel.clientState.pullRequest else {
             Issue.record("Expected a created pull request")
             return
         }
@@ -142,6 +142,7 @@ struct AgentSessionPullRequestTests {
         pollInterval: Duration = .seconds(30)
     ) -> AgentSessionViewModel {
         let sessionSummaryStore = SessionSummaryStore()
+        let sessionClientStateStore = SessionClientStateStore()
         let session = makeSession(pushedBranch: pushedBranch, pullRequest: pullRequest)
         return AgentSessionViewModel(
             context: .session(session),
@@ -151,6 +152,7 @@ struct AgentSessionPullRequestTests {
             ) ?? .standard),
             makeSocket: makeSocket,
             sessionMessageStore: SessionMessageStore(),
+            sessionClientStateStore: sessionClientStateStore,
             sessionSummaryStore: sessionSummaryStore,
             transcriptBuilder: StubTranscriptBuilder(),
             sessionsAPI: api,
@@ -165,7 +167,8 @@ struct AgentSessionPullRequestTests {
             ),
             deleteSessionAction: DeleteSessionAction(
                 sessionsAPI: api,
-                sessionSummaryStore: sessionSummaryStore
+                sessionSummaryStore: sessionSummaryStore,
+                sessionClientStateStore: sessionClientStateStore
             ),
             sessionCreatedSubject: PassthroughSubject<String, Never>(),
             pullRequestPollInterval: pollInterval

@@ -13,7 +13,7 @@ public struct SessionClientState: Sendable, Equatable, Codable {
         activeTurnUserMessageId: nil,
         editorURL: nil,
         providerConnection: nil,
-        agentMode: "edit",
+        agentMode: .edit,
         lastError: nil,
         createdAt: ""
     )
@@ -31,7 +31,7 @@ public struct SessionClientState: Sendable, Equatable, Codable {
     public var activeTurnUserMessageId: String?
     public var editorURL: String?
     public var providerConnection: ProviderConnection?
-    public var agentMode: String
+    public var agentMode: AgentMode
     public var lastError: String?
     public var createdAt: String
 
@@ -49,7 +49,7 @@ public struct SessionClientState: Sendable, Equatable, Codable {
         activeTurnUserMessageId: String?,
         editorURL: String?,
         providerConnection: ProviderConnection?,
-        agentMode: String,
+        agentMode: AgentMode,
         lastError: String?,
         createdAt: String
     ) {
@@ -73,6 +73,31 @@ public struct SessionClientState: Sendable, Equatable, Codable {
 }
 
 public extension SessionClientState {
+    /// The operational mode used for agent turns.
+    enum AgentMode: RawRepresentable, Codable, Equatable, Sendable {
+        case edit
+        case plan
+        case unknown(String)
+
+        /// Creates an agent mode from its wire representation.
+        public init(rawValue: String) {
+            switch rawValue {
+            case "edit": self = .edit
+            case "plan": self = .plan
+            default: self = .unknown(rawValue)
+            }
+        }
+
+        /// The agent mode value used on the wire.
+        public var rawValue: String {
+            switch self {
+            case .edit: "edit"
+            case .plan: "plan"
+            case .unknown(let value): value
+            }
+        }
+    }
+
     /// The server-reported readiness of a session.
     enum Status: RawRepresentable, Codable, Equatable, Sendable {
         case preparing

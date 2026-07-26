@@ -65,6 +65,61 @@ func testSessionMessage(
     )
 }
 
+func testSessionClientStateSnapshot(
+    _ id: String,
+    repoFullName: String? = "owner/repo",
+    status: SessionClientState.Status = .ready,
+    sessionSetupRun: SessionClientState.SessionSetupRun? = testSessionSetupRun(),
+    provider: AgentProviderID = .claudeCode,
+    pullRequest: SessionClientState.PullRequest? = .created(
+        url: "https://github.com/owner/repo/pull/1",
+        number: 1,
+        state: "open"
+    ),
+    pushedBranch: String? = "cloude/test",
+    baseBranch: String? = "main",
+    isResponding: Bool = true
+) -> Domain.SessionClientStateSnapshot {
+    Domain.SessionClientStateSnapshot(
+        id: id,
+        repoFullName: repoFullName,
+        status: status,
+        sessionSetupRun: sessionSetupRun,
+        agentSettings: .init(
+            provider: provider,
+            model: "model",
+            effort: "high",
+            maxTokens: 8_192
+        ),
+        pullRequest: pullRequest,
+        pushedBranch: pushedBranch,
+        baseBranch: baseBranch,
+        agentMode: .edit,
+        isResponding: isResponding
+    )
+}
+
+private func testSessionSetupRun() -> SessionClientState.SessionSetupRun {
+    SessionClientState.SessionSetupRun(
+        id: "setup-1",
+        status: .completed,
+        startedAt: "2026-06-11T00:00:00.000Z",
+        completedAt: "2026-06-11T00:01:00.000Z",
+        tasks: [
+            SessionClientState.SessionSetupTask(
+                id: .repository,
+                status: .completed,
+                startedAt: "2026-06-11T00:00:00.000Z",
+                completedAt: "2026-06-11T00:01:00.000Z",
+                error: nil,
+                isBlocking: true,
+                canRetry: false,
+                output: nil
+            )
+        ]
+    )
+}
+
 /// Polls until `condition` returns a value, for asserting on background
 /// persistence that EntityStore kicks off in unstructured Tasks.
 func pollUntil<T: Sendable>(

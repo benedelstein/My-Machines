@@ -5,26 +5,8 @@ import Entities
 import Foundation
 
 extension AgentSessionViewModel {
-    var pushedBranchForDisplay: String? {
-        clientState.pushedBranch ?? session?.pushedBranch
-    }
-
-    var pullRequestForDisplay: SessionClientState.PullRequest? {
-        if let pullRequest = clientState.pullRequest {
-            return pullRequest
-        }
-        guard let pullRequest = session?.pullRequest else {
-            return nil
-        }
-        return .created(
-            url: pullRequest.url,
-            number: pullRequest.number,
-            state: pullRequest.state
-        )
-    }
-
     var isPullRequestCreationInProgress: Bool {
-        if case .creating = pullRequestForDisplay {
+        if case .creating = clientState.pullRequest {
             return true
         }
         return isCreatingPullRequest
@@ -34,14 +16,14 @@ extension AgentSessionViewModel {
         if let pullRequestOperationErrorMessage {
             return pullRequestOperationErrorMessage
         }
-        guard case .failed(let error, let details) = pullRequestForDisplay else {
+        guard case .failed(let error, let details) = clientState.pullRequest else {
             return nil
         }
         return details ?? error
     }
 
     var createdPullRequestURL: URL? {
-        guard case .created(let url, _, _) = pullRequestForDisplay else {
+        guard case .created(let url, _, _) = clientState.pullRequest else {
             return nil
         }
         return URL(string: url)
@@ -134,7 +116,7 @@ extension AgentSessionViewModel {
     }
 
     private var isOpenPullRequest: Bool {
-        guard case .created(_, _, let state) = pullRequestForDisplay else {
+        guard case .created(_, _, let state) = clientState.pullRequest else {
             return false
         }
         return state == "open"
@@ -164,5 +146,6 @@ extension AgentSessionViewModel {
 
         pullRequestOperationErrorMessage = nil
         updatePullRequestPolling()
+        persistClientState()
     }
 }

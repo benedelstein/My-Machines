@@ -34,6 +34,9 @@ protocol AgentSessionDependency: Dependency {
     var sessionSummaryStore: SessionSummaryStore { get }
 
     @MainActor
+    var sessionClientStateStore: SessionClientStateStore { get }
+
+    @MainActor
     var newSessionPreferences: NewSessionPreferences { get }
 }
 
@@ -85,7 +88,8 @@ final class AgentSessionComponent: Component<AgentSessionDependency> {
         shared {
             DeleteSessionAction(
                 sessionsAPI: dependency.sessionsAPI,
-                sessionSummaryStore: dependency.sessionSummaryStore
+                sessionSummaryStore: dependency.sessionSummaryStore,
+                sessionClientStateStore: dependency.sessionClientStateStore
             )
         }
     }
@@ -99,6 +103,7 @@ final class AgentSessionComponent: Component<AgentSessionDependency> {
                 preferences: dependency.newSessionPreferences,
                 makeSocket: dependency.makeSessionSocket(sessionId:),
                 sessionMessageStore: dependency.sessionMessageStore,
+                sessionClientStateStore: dependency.sessionClientStateStore,
                 sessionSummaryStore: dependency.sessionSummaryStore,
                 transcriptBuilder: transcriptBuilder,
                 sessionsAPI: dependency.sessionsAPI,

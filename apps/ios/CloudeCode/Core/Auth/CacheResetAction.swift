@@ -8,6 +8,7 @@ struct CacheResetAction {
     let userStore: UserStore
     let sessionSummaryStore: SessionSummaryStore
     let sessionMessageStore: SessionMessageStore
+    let sessionClientStateStore: SessionClientStateStore
     let modelCatalogStore: ModelCatalogStore
     let repoEnvironmentsStore: RepoEnvironmentsStore
 
@@ -17,6 +18,7 @@ struct CacheResetAction {
         try await sessionSummaryStore.deleteAll()
         try await repoEnvironmentsStore.deleteAll()
         try await sessionMessageStore.deleteAll()
+        try await sessionClientStateStore.deleteAll()
         modelCatalogStore.reset()
         Logger.debug("Reset caches in \(Date().timeIntervalSince(t0) * 1000)ms")
     }
