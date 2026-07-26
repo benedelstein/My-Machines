@@ -1,4 +1,5 @@
-import { SpriteWebsocketSession } from "./SpriteWebsocketSession";
+import type { Logger } from "@repo/shared";
+import { SpriteWebsocketSession } from "./sprite-websocket.session";
 import type {
   AttachSessionOptions,
   ExecResult,
@@ -25,12 +26,14 @@ export interface SpriteInfoResponse {
 export class WorkersSpriteClient {
   private baseUrl: string;
   private apiKey: string;
+  private readonly logger: Logger;
   public readonly name: string;
 
-  constructor(name: string, apiKey: string, baseUrl: string) {
+  constructor(name: string, apiKey: string, baseUrl: string, logger: Logger) {
     this.name = name;
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
+    this.logger = logger;
   }
 
   /**
@@ -92,7 +95,7 @@ export class WorkersSpriteClient {
       command,
       args,
       options,
-    });
+    }, this.logger);
   }
 
   attachSession(
@@ -103,7 +106,7 @@ export class WorkersSpriteClient {
       mode: "attach",
       sessionId,
       options,
-    });
+    }, this.logger);
   }
 
   async setNetworkPolicy(rules: NetworkPolicyRule[]): Promise<void> {

@@ -2,21 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Logger } from "@repo/shared";
-import type { WorkersSpriteClient } from "../../src/shared/integrations/sprites/WorkersSpriteClient";
-import { DEFAULT_NETWORK_POLICY } from "../../src/shared/integrations/sprites/network-policy";
+import type { WorkersSpriteClient } from "@repo/sprites-client";
+import { DEFAULT_NETWORK_POLICY } from "@repo/sprites-client";
 import {
   CLAUDE_CODE_STARTUP_CHECK_ID,
   MIN_CLAUDE_CODE_CLI_VERSION,
   OPENAI_CODEX_INSTALL_SCRIPT_URL,
   ensureSpriteStartupToolchain,
   getProviderStartupToolchainChecks,
-} from "../../src/shared/integrations/sprites/startup-toolchain";
+} from "../../src/shared/integrations/sprite-startup-toolchain";
 import {
   getClaudeStartupToolchainChecks,
-} from "../../src/shared/integrations/sprites/startup-toolchain/providers/claude";
+} from "../../src/shared/integrations/sprite-startup-toolchain/providers/claude";
 import {
   getOpenAICodexStartupToolchainChecks,
-} from "../../src/shared/integrations/sprites/startup-toolchain/providers/openai-codex";
+} from "../../src/shared/integrations/sprite-startup-toolchain/providers/openai-codex";
 
 const MIN_CODEX_CLI_VERSION = "0.144.0";
 

@@ -24,10 +24,11 @@
     "@hono/zod-openapi": "catalog:",
     "@repo/api-contract": "workspace:*",
     "@repo/shared": "workspace:*",
+    "@repo/sprites-client": "workspace:*",
     "@repo/vm-agent": "workspace:*",
     "agents": "catalog:",
     "ai": "catalog:",
-    "hono": "^4.6.0",
+    "hono": "catalog:",
     "jose": "^6.2.3",
     "octokit": "catalog:",
     "zod": "catalog:"
@@ -40,6 +41,6 @@
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "wrangler": "^4.84.1"
+    "wrangler": "catalog:"
   }
 }

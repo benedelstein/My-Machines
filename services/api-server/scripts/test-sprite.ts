@@ -5,7 +5,8 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 import type { Sprite } from "@fly/sprites";
 import { SpritesClient } from "@fly/sprites";
-import { SpritesCoordinator } from "../src/shared/integrations/sprites";
+import { SpriteLifecycleClient } from "@repo/sprites-client";
+import { ConsoleLogger } from "@repo/shared";
 
 const SPRITES_API_KEY = process.env.SPRITES_API_KEY!;
 const SPRITES_API_URL = process.env.SPRITES_API_URL || "https://api.sprites.dev";
@@ -82,8 +83,11 @@ const cloneRepo = async (sprite: Sprite) => {
 async function main() {
   const spriteName = process.argv[2];
 
-  // Our coordinator for sprite lifecycle
-  const coordinator = new SpritesCoordinator({ apiKey: SPRITES_API_KEY });
+  // Our client for sprite lifecycle operations
+  const lifecycleClient = new SpriteLifecycleClient({
+    apiKey: SPRITES_API_KEY,
+    logger: new ConsoleLogger({ format: "pretty" }, "test-sprite.ts"),
+  });
   // Native SDK for WebSocket (since Workers WebSocket doesn't work in Node.js)
   const nativeClient = new SpritesClient(SPRITES_API_KEY, {
     baseURL: SPRITES_API_URL,
@@ -101,7 +105,7 @@ async function main() {
   } else {
     const name = `test-${Date.now()}`;
     console.log(`Creating new sprite: ${name}`);
-    const spriteResponse = await coordinator.createSprite({ name });
+    const spriteResponse = await lifecycleClient.createSprite({ name });
     console.log(`Created sprite: ${spriteResponse.name} (status: ${spriteResponse.status})`);
     nativeSprite = await nativeClient.getSprite(spriteResponse.name);
     finalSpriteName = spriteResponse.name;
@@ -120,7 +124,7 @@ async function main() {
     console.log("Workspace already has repo");
   }
   console.log("\n=== Listing sessions ===");
-  const ourSessions = await coordinator.listSessions(finalSpriteName);
+  const ourSessions = await lifecycleClient.listSessions(finalSpriteName);
   console.log(`Our listSessions: ${JSON.stringify(ourSessions, null, 2)}`);
 
   const result = await nativeSprite.exec("ls");
@@ -131,7 +135,7 @@ async function main() {
   const claudeSession = await connectClaude(nativeSprite);
 
   // List sessions again
-  const sessionsAfter = await coordinator.listSessions(finalSpriteName);
+  const sessionsAfter = await lifecycleClient.listSessions(finalSpriteName);
   console.log(`\nSessions after start: ${JSON.stringify(sessionsAfter, null, 2)}`);
 
   // Interactive mode
@@ -144,7 +148,7 @@ async function main() {
 
     if (createdSprite) {
       console.log(`Deleting sprite ${finalSpriteName}...`);
-      await coordinator.deleteSprite(finalSpriteName);
+      await lifecycleClient.deleteSprite(finalSpriteName);
       console.log("Sprite deleted");
     }
 

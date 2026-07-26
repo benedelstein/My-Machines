@@ -1,5 +1,5 @@
 import { failure, success } from "@repo/shared";
-import type { ExecResult } from "..";
+import type { ExecResult } from "@repo/sprites-client";
 import type { StartupToolchainError } from "./types";
 import { STARTUP_TOOLCHAIN_DOMAIN } from "./types";
 

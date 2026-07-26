@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WorkersSpriteClient } from "../../src/shared/integrations/sprites/WorkersSpriteClient";
+import { ConsoleLogger } from "@repo/shared";
+import { WorkersSpriteClient } from "../src/workers-sprite.client";
+
+const testLogger = new ConsoleLogger({ format: "pretty" }, "workers-sprite-client.test.ts");
 
 const encoder = new TextEncoder();
 
@@ -13,6 +16,7 @@ describe("WorkersSpriteClient", () => {
       "sprite-1",
       "sprites-key",
       "https://api.sprites.test",
+      testLogger,
     );
     let stdoutHandler: ((data: string) => void) | null = null;
     let stderrHandler: ((data: string) => void) | null = null;
@@ -76,6 +80,7 @@ describe("WorkersSpriteClient", () => {
       "sprite-1",
       "sprites-key",
       "https://api.sprites.test",
+      testLogger,
     );
 
     await expect(client.execWs("exit 7")).resolves.toEqual({
@@ -98,6 +103,7 @@ describe("WorkersSpriteClient", () => {
       "sprite-1",
       "sprites-key",
       "https://api.sprites.test",
+      testLogger,
     );
 
     await expect(client.execWs("echo incomplete")).rejects.toThrow(

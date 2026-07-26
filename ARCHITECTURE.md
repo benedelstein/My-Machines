@@ -12,8 +12,10 @@ The VM owns the execution runtime for its workflows, and the Durable Object disp
 
 - **@repo/api-contract** (`packages/api-contract/`) - The client API contract: every exported Zod schema (HTTP request/response, WebSocket messages, Agents SDK ClientState) is transpiled to Swift (`apps/ios/Modules/CoreAPI`) by `packages/api-contract/codegen` and consumed as `z.infer` types by server/web. Server-internal types do not belong here. See `docs/api-type-codegen.md`.
 - **@repo/shared** (`packages/shared/`) - Server-side shared code: vm-agent I/O schemas, provider registry, logging, utils, tool normalization. Re-exports the entire api-contract, so consumers import everything from `@repo/shared`. If a type is part of the client contract put it in api-contract; otherwise put it here.
+- **@repo/sprites-client** (`packages/sprites-client/`) - The only place that speaks the Fly.io Sprites API. Owns the Sprite lifecycle client, the exec WebSocket session, the network egress policy builder, and the Sprites REST connectors client. Sprites-domain types only; callers wrap it in their own services rather than re-deriving its wire shapes.
 - **@repo/vm-agent** (`packages/vm-agent/`) - Runs inside the Sprite VM. Provides a shared AI SDK agent harness with Claude Code and OpenAI Codex providers. The current deployment path uses the webhook entrypoint; the NDJSON entrypoint remains for the legacy stdin/stdout path. Uses Bun runtime.
 - **@repo/api-server** (`services/api-server/`) - Cloudflare Workers API using Hono. `src/runtime/` contains Worker runtime entrypoints such as the `SessionAgentDO` Durable Object, while `src/modules/` contains route, service, repository, and type code by domain.
+- **@repo/connector-provisioner** (`services/connector-provisioner/`) - Cloudflare Worker that mints Sprites Custom API connectors. Sprites has no create API for them, so this Worker drives the authenticated dashboard through Browser Rendering, then scopes and verifies the connector over the Sprites REST API. It holds the dashboard storage state and Sprites API token in its own secrets and is reachable only with its own bearer. See `docs/connector-provisioner.md`.
 - **@repo/web** (`apps/web/`) - Next.js web client.
 - **@repo/discord-bot** (`apps/discord-bot/`) - Cloudflare Worker that adapts the Discord `/cloude` slash command into integration session requests against the API server. See `docs/discord-bot.md`.
 
@@ -37,6 +39,8 @@ The VM owns the execution runtime for its workflows, and the Durable Object disp
 - **Web client to API server** - `apps/web` talks to the API through HTTP routes and WebSocket messages. Shared protocol types come from `@repo/shared`.
 - **API routes to Durable Objects** - Hono routes authenticate, parse, and route requests. Session-agent routes depend on the shared `SessionAgentRpc` protocol and Durable Object binding, not the `SessionAgentDO` class. `SessionAgentDO` coordinates session state and execution from `services/api-server/src/runtime/session-agent.do.ts`.
 - **Durable Object to Sprite VM** - The Durable Object starts VM work and receives VM output through webhook routes. Do not reintroduce long-lived Durable Object ownership of VM stdout as the main execution path.
+- **Sprites API access** - All Sprites API calls go through `@repo/sprites-client`. Services do not hand-roll Sprites HTTP requests or duplicate its wire types.
+- **Connector provisioning** - Dashboard-driven connector creation stays inside `@repo/connector-provisioner`. Only that Worker holds the Sprites dashboard storage state, and the api-server reaches it over HTTP with the provisioner bearer (a Cloudflare service binding once integrated), never by importing it.
 - **Workspace import graph** - Repo-wide package direction is enforced by `scripts/check-workspace-boundaries.ts`. `packages/*` cannot import `apps/*` or `services/*`; `apps/*` cannot import `services/*`; `services/*` cannot import `apps/*`.
 - **API module graph** - API-server module direction is enforced by `services/api-server/scripts/check-module-boundaries.ts` as part of the api-server package lint. Modules can import their own module, `src/shared`, and workspace packages. `src/shared` cannot import modules. Runtime/root API-server code can compose modules and shared code.
 
@@ -45,7 +49,7 @@ See `docs/api-server/structure.md` for the api-server package file map and modul
 ## Cross-Cutting Concerns
 
 - **Validation** - Zod schemas in `packages/shared` define cross-package payloads. Internal services should receive parsed values, not raw JSON or loosely cast inputs.
-- **Logging** - Use the shared `Logger` interface and API-server `createLogger` helper. Keep structured values in `fields` instead of interpolating identifiers into log messages.
+- **Logging** - Use `createLogger` from `@repo/shared`, scoped to the source file name, and call `initializeLogger` once per request so the format follows `ENVIRONMENT` and the level follows `LOG_LEVEL`. Keep structured values in `fields` instead of interpolating identifiers into log messages.
 - **Authentication and repo access** - GitHub App auth, user tokens, provider credentials, and session repo authorization are server-side concerns. Web code should call API surfaces instead of importing auth logic.
 - **Turn execution** - `docs/turn-workflow.md` contains the more detailed turn lifecycle. Keep this file limited to stable ownership and boundary facts.
 

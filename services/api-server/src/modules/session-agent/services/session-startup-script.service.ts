@@ -1,5 +1,5 @@
 import type { Logger, PlainEnvVars } from "@repo/shared";
-import type { WorkersSpriteClient } from "@/shared/integrations/sprites/WorkersSpriteClient";
+import type { WorkersSpriteClient } from "@repo/sprites-client";
 
 const STARTUP_SCRIPT_TIMEOUT_SECONDS = 300;
 const STARTUP_SCRIPT_LOG_LIMIT = 2000;

@@ -12,14 +12,15 @@ import type {
 } from "@repo/shared";
 import { dedent } from "@repo/shared";
 import type { Env } from "@/shared/types";
-import type { SpritesCoordinator } from "@/shared/integrations/sprites/sprites";
-import { WorkersSpriteClient } from "@/shared/integrations/sprites/WorkersSpriteClient";
-import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
 import {
   buildBootstrapNetworkPolicy,
   buildFinalNetworkPolicy,
-} from "@/shared/integrations/sprites/network-policy";
-import { ensureSpriteStartupToolchain } from "@/shared/integrations/sprites/startup-toolchain";
+  WorkersSpriteClient,
+  type SpriteLifecycleClient,
+} from "@repo/sprites-client";
+import { createLogger } from "@/shared/logging";
+import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
+import { ensureSpriteStartupToolchain } from "@/shared/integrations/sprite-startup-toolchain";
 import type { GitHubAppResult } from "@/shared/types/github";
 import type { ServerState } from "../repositories/server-state.repository";
 import { isTerminalSetupTask } from "./session-setup-run.service";
@@ -62,7 +63,7 @@ export interface SessionSetupTaskReporter {
 export interface SessionProvisionServiceDeps {
   logger: Logger;
   env: Env;
-  spritesCoordinator: SpritesCoordinator;
+  spriteLifecycleClient: SpriteLifecycleClient;
 
   getServerState: () => ServerState;
   getClientState: () => ClientState;
@@ -92,7 +93,7 @@ export interface SessionProvisionServiceDeps {
 export class SessionProvisionService {
   private readonly logger: Logger;
   private readonly env: Env;
-  private readonly spritesCoordinator: SpritesCoordinator;
+  private readonly spriteLifecycleClient: SpriteLifecycleClient;
   private readonly getServerState: () => ServerState;
   private readonly getClientState: () => ClientState;
   private readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
@@ -112,7 +113,7 @@ export class SessionProvisionService {
   constructor(deps: SessionProvisionServiceDeps) {
     this.logger = deps.logger.scope("session-provision-service");
     this.env = deps.env;
-    this.spritesCoordinator = deps.spritesCoordinator;
+    this.spriteLifecycleClient = deps.spriteLifecycleClient;
     this.getServerState = deps.getServerState;
     this.getClientState = deps.getClientState;
     this.getEnvironmentSnapshot = deps.getEnvironmentSnapshot;
@@ -230,7 +231,7 @@ export class SessionProvisionService {
       this.logger.debug("creating sprite", {
         fields: { sessionId },
       });
-      const spriteResponse = await this.spritesCoordinator.createSprite({
+      const spriteResponse = await this.spriteLifecycleClient.createSprite({
         name: sessionId,
       });
       this.spriteName = spriteResponse.name;
@@ -239,6 +240,7 @@ export class SessionProvisionService {
         this.spriteName!,
         this.env.SPRITES_API_KEY,
         this.env.SPRITES_API_URL,
+        createLogger("sprite-websocket.session.ts"),
       );
       const workerHostname = new URL(this.env.WORKER_URL).hostname;
       const networkPolicy = buildBootstrapNetworkPolicy({ workerHostname });
@@ -278,6 +280,7 @@ export class SessionProvisionService {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("sprite-websocket.session.ts"),
     );
 
     this.setupOutputCollector?.beginRun();
@@ -356,6 +359,7 @@ export class SessionProvisionService {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("sprite-websocket.session.ts"),
     );
 
     this.logger.info("Ensuring startup toolchain", {
@@ -415,6 +419,7 @@ export class SessionProvisionService {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("sprite-websocket.session.ts"),
     );
 
     const proxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
@@ -521,6 +526,7 @@ export class SessionProvisionService {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("sprite-websocket.session.ts"),
     );
     const workerHostname = new URL(this.env.WORKER_URL).hostname;
 

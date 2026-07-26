@@ -1,0 +1,129 @@
+import { describe, expect, it, vi } from "vitest";
+import { HttpSpriteConnectorsClient } from "../src/sprite-connectors.client";
+
+const connectionPayload = {
+  id: "connection-1",
+  provider: "custom_api",
+  provider_account_name: "cloude-session-abc123",
+  provider_info: { base_api_url: "https://api.example.com" },
+  access_policy: {
+    allow_all: false,
+    sprite_labels: ["session:session-1"],
+  },
+};
+
+function client(fetchImplementation: typeof fetch): HttpSpriteConnectorsClient {
+  return new HttpSpriteConnectorsClient({
+    apiUrl: "https://api.sprites.dev",
+    apiToken: "test-token",
+    fetch: fetchImplementation,
+  });
+}
+
+describe("HttpSpriteConnectorsClient", () => {
+  it("maps the snake_case connection envelope to camelCase", async () => {
+    const result = await client(async () => {
+      return Response.json({ connections: [connectionPayload] });
+    }).listConnections();
+
+    expect(result).toEqual({
+      ok: true,
+      value: [{
+        id: "connection-1",
+        provider: "custom_api",
+        providerAccountName: "cloude-session-abc123",
+        providerInfo: { base_api_url: "https://api.example.com" },
+        accessPolicy: {
+          allowAll: false,
+          spriteLabels: ["session:session-1"],
+        },
+      }],
+    });
+  });
+
+  it("rejects a list response that is not the documented envelope", async () => {
+    const result = await client(async () => {
+      return Response.json([connectionPayload]);
+    }).listConnections();
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "sprites_response_invalid", retryable: false },
+    });
+  });
+
+  it("omits the access policy when Sprites reports none", async () => {
+    const result = await client(async () => {
+      return Response.json({
+        connections: [{ ...connectionPayload, access_policy: {} }],
+      });
+    }).listConnections();
+
+    expect(result).toMatchObject({ ok: true });
+    expect(result.ok && result.value[0]?.accessPolicy).toBeUndefined();
+  });
+
+  it("sends the access policy as snake_case and authenticates the request", async () => {
+    const fetchSpy = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ connection: connectionPayload }),
+    );
+
+    const result = await client(fetchSpy).updateAccessPolicy("connection-1", {
+      allowAll: false,
+      spriteLabels: ["session:session-1"],
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(url).toBe("https://api.sprites.dev/v1/oauth/connections/connection-1");
+    expect(init?.method).toBe("PATCH");
+    expect(init?.headers).toMatchObject({ Authorization: "Bearer test-token" });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      access_policy: {
+        allow_all: false,
+        sprite_labels: ["session:session-1"],
+      },
+    });
+  });
+
+  it("reads a missing connection as null so callers can confirm deletion", async () => {
+    const result = await client(async () => {
+      return new Response(null, { status: 404 });
+    }).getConnection("connection-1");
+
+    expect(result).toEqual({ ok: true, value: null });
+  });
+
+  it("accepts an empty 204 delete response", async () => {
+    const result = await client(async () => {
+      return new Response(null, { status: 204 });
+    }).deleteConnection("connection-1");
+
+    expect(result).toEqual({ ok: true, value: undefined });
+  });
+
+  it.each([
+    [401, "sprites_authentication_failed", false],
+    [403, "sprites_authentication_failed", false],
+    [429, "sprites_rate_limited", true],
+    [500, "sprites_request_failed", true],
+    [400, "sprites_request_failed", false],
+  ])("maps HTTP %i to %s", async (status, code, retryable) => {
+    const result = await client(async () => {
+      return new Response(null, { status });
+    }).listConnections();
+
+    expect(result).toEqual({ ok: false, error: { code, retryable } });
+  });
+
+  it("treats a transport failure as retryable", async () => {
+    const result = await client(async () => {
+      throw new Error("network down");
+    }).listConnections();
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "sprites_request_failed", retryable: true },
+    });
+  });
+});

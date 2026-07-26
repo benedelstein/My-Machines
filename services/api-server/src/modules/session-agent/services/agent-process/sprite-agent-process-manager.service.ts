@@ -16,7 +16,8 @@ import {
   SpritesError,
   WorkersSpriteClient,
   type SpriteWebsocketSession,
-} from "@/shared/integrations/sprites";
+} from "@repo/sprites-client";
+import { createLogger } from "@/shared/logging";
 import VM_AGENT_WEBHOOK_SCRIPT from "@repo/vm-agent/dist/vm-agent-webhook.bundle.js";
 import { AgentAttachmentService } from "../agent-attachment.service";
 import type { SecretRepository } from "../../repositories/secret.repository";
@@ -850,6 +851,7 @@ export class SpriteAgentProcessManager {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
+      createLogger("sprite-websocket.session.ts"),
     );
   }
 }

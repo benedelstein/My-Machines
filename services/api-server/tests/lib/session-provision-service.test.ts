@@ -24,7 +24,8 @@ const mockState = vi.hoisted(() => ({
   getReadOnlyTokenForRepo: vi.fn(),
 }));
 
-vi.mock("@/shared/integrations/sprites/WorkersSpriteClient", () => {
+vi.mock("@repo/sprites-client", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
   class WorkersSpriteClient {
     public name: string;
     constructor(name: string) {
@@ -34,16 +35,14 @@ vi.mock("@/shared/integrations/sprites/WorkersSpriteClient", () => {
     execWs = mockState.execWs;
   }
   return {
+    ...actual,
     WorkersSpriteClient,
+    buildBootstrapNetworkPolicy: () => [{ domain: "bootstrap", action: "allow" }],
+    buildFinalNetworkPolicy: () => [{ domain: "final", action: "allow" }],
   };
 });
 
-vi.mock("@/shared/integrations/sprites/network-policy", () => ({
-  buildBootstrapNetworkPolicy: () => [{ domain: "bootstrap", action: "allow" }],
-  buildFinalNetworkPolicy: () => [{ domain: "final", action: "allow" }],
-}));
-
-vi.mock("@/shared/integrations/sprites/startup-toolchain", () => ({
+vi.mock("@/shared/integrations/sprite-startup-toolchain", () => ({
   ensureSpriteStartupToolchain: mockState.ensureSpriteStartupToolchain,
 }));
 
@@ -188,7 +187,7 @@ function createService(
     Object.assign(serverState, partial);
   });
   const updatePartialState = vi.fn();
-  const spritesCoordinator = {
+  const spriteLifecycleClient = {
     createSprite: vi.fn(async () => {
       mockState.events.push("createSprite");
       return { name: "sprite-1", status: "running" };
@@ -203,7 +202,7 @@ function createService(
       WORKER_URL: "https://worker.test",
       ...envOverrides,
     } as Env,
-    spritesCoordinator: spritesCoordinator as never,
+    spriteLifecycleClient: spriteLifecycleClient as never,
     getServerState: () => serverState,
     getClientState: () => clientState,
     getEnvironmentSnapshot: () => environmentSnapshot,
@@ -218,7 +217,7 @@ function createService(
     setupOutputCollector,
   });
 
-  return { service, updateServerState, spritesCoordinator };
+  return { service, updateServerState, spriteLifecycleClient };
 }
 
 describe("SessionProvisionService startup toolchain", () => {
@@ -591,7 +590,7 @@ describe("SessionProvisionService startup toolchain", () => {
         SPRITES_API_URL: "https://api.sprites.test",
         WORKER_URL: "https://worker.test",
       } as Env,
-      spritesCoordinator: {
+      spriteLifecycleClient: {
         createSprite: vi.fn(async () => {
           mockState.events.push("createSprite");
           return { name: "sprite-1", status: "running" };
@@ -885,7 +884,7 @@ describe("SessionProvisionService startup toolchain", () => {
         SPRITES_API_URL: "https://api.sprites.test",
         WORKER_URL: "https://worker.test",
       } as Env,
-      spritesCoordinator: {
+      spriteLifecycleClient: {
         createSprite: vi.fn(async () => {
           mockState.events.push("createSprite");
           return { name: "sprite-1", status: "running" };

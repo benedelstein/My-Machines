@@ -4,7 +4,7 @@ import {
   buildFinalNetworkPolicy,
   getDefaultNetworkAllowlistDomains,
   getProviderNetworkPolicyRules,
-} from "../../src/shared/integrations/sprites/network-policy";
+} from "../src/network-policy";
 
 describe("Sprite network policies", () => {
   it("builds bootstrap policy from default policy plus worker host", () => {
