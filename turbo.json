@@ -7,7 +7,9 @@
       ],
       "outputs": [
         "dist/**",
-        ".next/**"
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**"
       ]
     },
     "dev": {

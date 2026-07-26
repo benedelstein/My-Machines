@@ -3,11 +3,18 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { Sonner } from "@/components/ui/sonner";
 
-const caprasimo = localFont({
-  src: "./fonts/caprasimo-latin-400-normal.woff2",
-  variable: "--font-caprasimo",
+const dmSerifDisplay = localFont({
+  src: "./fonts/DMSerifDisplay-Regular.ttf",
+  variable: "--font-dm-serif-display",
   display: "swap",
-  preload: false,
+  preload: true,
+});
+
+const schoolbell = localFont({
+  src: "./fonts/Schoolbell-Regular.ttf",
+  variable: "--font-schoolbell",
+  display: "swap",
+  preload: true,
 });
 
 export const metadata: Metadata = {
@@ -15,13 +22,13 @@ export const metadata: Metadata = {
     default: "My Machines",
     template: "%s | My Machines",
   },
-  description: "Develop in the cloud.",
+  description: "Persistent computers for your agent team.",
   openGraph: {
     title: {
       default: "My Machines",
       template: "%s | My Machines",
     },
-    description: "Develop in the cloud.",
+    description: "Persistent computers for your agent team.",
     siteName: "My Machines",
   },
 };
@@ -39,7 +46,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={caprasimo.variable}>
+    <html lang="en" className={`${dmSerifDisplay.variable} ${schoolbell.variable}`}>
       <body className="antialiased">
         {children}
         <Sonner />

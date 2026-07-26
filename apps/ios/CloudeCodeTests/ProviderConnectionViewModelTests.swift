@@ -67,6 +67,55 @@ struct OpenAIProviderConnectionViewModelTests {
         #expect(modelsAPI.callCount == 1)
     }
 
+    @Test func keepsPollingThroughTransientNetworkErrors() async throws {
+        let authAPI = ProviderAuthAPISpy(openAIPollResults: [
+            .failure(URLError(.networkConnectionLost)),
+            .failure(URLError(.cancelled)),
+            .success(.completed)
+        ])
+        let viewModel = makeViewModel(authAPI: authAPI)
+
+        viewModel.load()
+        try await waitUntil { viewModel.authorization != nil }
+        viewModel.didOpenAuthorization()
+        try await waitUntil { viewModel.isConnected }
+
+        #expect(authAPI.openAIPollCount == 3)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test func pollsImmediatelyWhenSceneBecomesActive() async throws {
+        let authAPI = ProviderAuthAPISpy(openAIStatuses: [.completed])
+        // A long interval keeps the initial loop asleep so only the
+        // foreground-triggered immediate poll can complete the connection.
+        let viewModel = makeViewModel(authAPI: authAPI, pollInterval: .seconds(60))
+
+        viewModel.load()
+        try await waitUntil { viewModel.authorization != nil }
+        viewModel.didOpenAuthorization()
+        #expect(authAPI.openAIPollCount == 0)
+
+        viewModel.sceneDidBecomeActive()
+        try await waitUntil { viewModel.isConnected }
+
+        #expect(authAPI.openAIPollCount == 1)
+    }
+
+    @Test func surfacesNonTransientPollErrors() async throws {
+        let authAPI = ProviderAuthAPISpy(openAIPollResults: [
+            .failure(URLError(.badServerResponse))
+        ])
+        let viewModel = makeViewModel(authAPI: authAPI)
+
+        viewModel.load()
+        try await waitUntil { viewModel.authorization != nil }
+        viewModel.didOpenAuthorization()
+        try await waitUntil { viewModel.errorMessage != nil }
+
+        #expect(viewModel.phase == .ready)
+        #expect(!viewModel.isConnected)
+    }
+
     @Test func expiredAuthorizationReturnsToReadyWithError() async throws {
         let authAPI = ProviderAuthAPISpy(openAIStatuses: [.expired])
         let viewModel = makeViewModel(authAPI: authAPI)
@@ -84,14 +133,15 @@ struct OpenAIProviderConnectionViewModelTests {
     private func makeViewModel(
         sessionId: String? = nil,
         authAPI: ProviderAuthAPISpy,
-        modelsAPI: ProviderConnectionModelsAPISpy? = nil
+        modelsAPI: ProviderConnectionModelsAPISpy? = nil,
+        pollInterval: Duration = .milliseconds(1)
     ) -> OpenAIProviderConnectionViewModel {
         let modelsAPI = modelsAPI ?? ProviderConnectionModelsAPISpy()
         return OpenAIProviderConnectionViewModel(
             context: providerContext(providerId: .openaiCodex, sessionId: sessionId),
             api: authAPI,
             modelCatalogStore: ModelCatalogStore(modelsAPI: modelsAPI),
-            pollIntervalOverride: .milliseconds(1)
+            pollIntervalOverride: pollInterval
         )
     }
 }
@@ -130,14 +180,18 @@ private final class ProviderAuthAPISpy: ProviderAuthAPIProviding {
         let sessionId: String?
     }
 
-    private var openAIStatuses: [OpenAIDeviceAuthorizationStatus]
+    private var openAIPollResults: [Result<OpenAIDeviceAuthorizationStatus, any Error>]
     private(set) var claudeExchange: ClaudeExchange?
     private(set) var openAIPollCount = 0
     private(set) var lastOpenAIAttemptId: String?
     private(set) var lastOpenAISessionId: String?
 
     init(openAIStatuses: [OpenAIDeviceAuthorizationStatus] = []) {
-        self.openAIStatuses = openAIStatuses
+        self.openAIPollResults = openAIStatuses.map { .success($0) }
+    }
+
+    init(openAIPollResults: [Result<OpenAIDeviceAuthorizationStatus, any Error>]) {
+        self.openAIPollResults = openAIPollResults
     }
 
     func claudeAuthorization() async throws -> ProviderAuthorization {
@@ -162,7 +216,8 @@ private final class ProviderAuthAPISpy: ProviderAuthAPIProviding {
         openAIPollCount += 1
         lastOpenAIAttemptId = attemptId
         lastOpenAISessionId = sessionId
-        return openAIStatuses.isEmpty ? .pending : openAIStatuses.removeFirst()
+        guard !openAIPollResults.isEmpty else { return .pending }
+        return try openAIPollResults.removeFirst().get()
     }
 
     func disconnectClaude() async throws {}

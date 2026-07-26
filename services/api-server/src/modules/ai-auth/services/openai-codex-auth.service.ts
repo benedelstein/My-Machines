@@ -304,8 +304,10 @@ export class OpenAICodexAuthService {
         await this.providerAuthAttemptRepository.deleteById(attemptId);
         return { status: "expired" };
       }
+      // Transient upstream failures (network errors, 5xx) must not surface as
+      // "expired" — the attempt is still valid and bounded by its own expiresAt.
       this.logger.error("Unexpected error polling device authorization", { error: deviceAuthResult.error });
-      return { status: "expired" };
+      return { status: "pending" };
     }
 
     const tokenResult = await this.postTokenRequest(

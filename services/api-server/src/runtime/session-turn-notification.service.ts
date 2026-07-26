@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 import type { NotificationPublisher } from "@/modules/notifications/services/notification-publisher.service";
-import { extractUiMessageText } from "@/shared/utils/uimessage-utils";
+import { extractFinalUiMessageText } from "@/shared/utils/uimessage-utils";
 
 interface SessionTitleRepository {
   getByIdForUser(
@@ -42,7 +42,7 @@ export class SessionTurnNotificationService {
       messageId: params.messageId,
       sessionTitle,
       repoFullName: params.repoFullName,
-      messagePreview: extractUiMessageText(params.message),
+      messagePreview: extractFinalUiMessageText(params.message),
     });
   }
 }

@@ -1,12 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import { ArrowLeft } from "lucide-react";
+import type { ReactNode } from "react";
+import { BrandWordmark } from "@/components/brand-wordmark";
 import { SiteFooter } from "@/components/site-footer";
-
-const WORDMARK_STROKE: CSSProperties = {
-  WebkitTextStroke: "2px #1f2d3d",
-  paintOrder: "stroke fill",
-};
+import { BrandButton } from "@/components/ui/brand-button";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
@@ -15,40 +12,32 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-background-secondary text-foreground">
-      <header className="border-b border-border bg-white/90 backdrop-blur-sm">
+    <div className="brand-page-background min-h-screen text-white">
+      <header className="border-b border-brand-border bg-brand-navy-deep/80 backdrop-blur-xl">
         <div className="mx-auto flex h-20 max-w-5xl items-center justify-between px-6 md:px-8">
-          <Link
-            href="/"
-            className="font-display text-2xl font-normal leading-none text-white"
-            style={WORDMARK_STROKE}
-          >
-            My Machines
-          </Link>
-          <Link
-            href="/"
-            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
+          <BrandWordmark href="/" className="-ml-3 text-2xl leading-none" />
+          <BrandButton href="/" className="h-10 px-4 text-sm" variant="quiet">
+            <ArrowLeft className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-1" />
             Back to home
-          </Link>
+          </BrandButton>
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-6 py-16 md:px-8 md:py-24">
-        <div className="border-b border-border pb-10">
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-accent">
+        <div className="border-b border-brand-border pb-10">
+          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-brand-lavender">
             Legal
           </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight md:text-5xl">
+          <h1 className="mt-3 font-brand text-4xl font-normal tracking-tight md:text-5xl">
             Privacy Policy
           </h1>
-          <p className="mt-4 text-sm text-muted-foreground">
+          <p className="mt-4 text-sm text-brand-label-muted">
             Effective July 23, 2026
           </p>
         </div>
 
-        <div className="mt-10 rounded-lg border border-border bg-white p-6 shadow-sm md:p-8">
-          <p className="leading-7 text-foreground-secondary">
+        <div className="mt-10 rounded-2xl border border-brand-border bg-brand-surface/70 p-6 shadow-brand backdrop-blur-sm md:p-8">
+          <p className="leading-7 text-white/85">
             This Privacy Policy explains how BZE, LLC (&quot;BZE,&quot;
             &quot;we,&quot; &quot;us,&quot; or &quot;our&quot;) collects, uses, and
             shares information when you use the My Machines website, mobile app,
@@ -137,7 +126,7 @@ export default function PrivacyPage() {
               information. To make a privacy request, email{" "}
               <a
                 href="mailto:info@bze.llc"
-                className="font-medium text-accent underline underline-offset-4"
+                className="font-medium text-brand-lavender underline decoration-brand-lavender/50 underline-offset-4 transition-colors hover:text-white"
               >
                 info@bze.llc
               </a>
@@ -171,7 +160,7 @@ export default function PrivacyPage() {
               For privacy questions or requests, contact BZE, LLC at{" "}
               <a
                 href="mailto:info@bze.llc"
-                className="font-medium text-accent underline underline-offset-4"
+                className="font-medium text-brand-lavender underline decoration-brand-lavender/50 underline-offset-4 transition-colors hover:text-white"
               >
                 info@bze.llc
               </a>
@@ -194,9 +183,11 @@ function PolicySection({
   children: ReactNode;
 }) {
   return (
-    <section className="scroll-mt-24">
-      <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
-      <div className="mt-4 space-y-4 text-base leading-7 text-muted-foreground">
+    <section className="scroll-mt-24 border-b border-brand-border pb-12 last:border-b-0">
+      <h2 className="font-brand text-2xl font-normal tracking-tight text-white">
+        {title}
+      </h2>
+      <div className="mt-4 space-y-4 text-base leading-7 text-brand-label-muted">
         {children}
       </div>
     </section>
@@ -204,5 +195,9 @@ function PolicySection({
 }
 
 function PolicyList({ children }: { children: ReactNode }) {
-  return <ul className="list-disc space-y-3 pl-6 marker:text-accent">{children}</ul>;
+  return (
+    <ul className="list-disc space-y-3 pl-6 marker:text-brand-lavender">
+      {children}
+    </ul>
+  );
 }

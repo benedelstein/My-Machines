@@ -60,7 +60,7 @@ extension PromptComposerView {
 
     struct SendButton: View {
         @Environment(\.theme) private var theme: Theme
-        @Environment(\.lightFeedback) private var lightFeedback: UIImpactFeedbackGenerator
+        @Environment(\.hapticFeedbackPlayer) private var haptics
 
         let isSubmitDisabled: Bool
         let isSubmitting: Bool
@@ -84,7 +84,7 @@ extension PromptComposerView {
 
         var body: some View {
             Button {
-                lightFeedback.impactOccurred()
+                haptics.play(.light)
                 if showsStop {
                     onStop()
                 } else {

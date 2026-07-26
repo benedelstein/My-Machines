@@ -48,9 +48,8 @@ export type ProviderDefinition<
 
 export const CLAUDE_MODEL_DISPLAY_NAMES: Record<ClaudeModel, string> = {
   "claude-fable-5": "Claude Fable 5",
-  "claude-fable-5[1m]": "Claude Fable 5 (1M context)",
+  "claude-opus-5": "Claude Opus 5",
   "claude-opus-4-8": "Claude Opus 4.8",
-  "claude-opus-4-8[1m]": "Claude Opus 4.8 (1M context)",
   "claude-sonnet-4-6": "Claude Sonnet 4.6",
   "claude-haiku-4-5": "Claude Haiku 4.5",
 };

@@ -6,11 +6,11 @@ import UIKit
 /// Native OpenAI Codex device-code connection screen.
 struct OpenAIProviderConnectionView: View {
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.showToast) private var showToast
     @Environment(\.style) private var style
     @Environment(\.theme) private var theme
-    @Environment(\.lightFeedback) var lightFeedback: UIImpactFeedbackGenerator
-    @Environment(\.regularFeedback) var regularFeedback: UIImpactFeedbackGenerator
+    @Environment(\.hapticFeedbackPlayer) var haptics
 
     @State var viewModel: OpenAIProviderConnectionViewModel
     let onConnected: () -> Void
@@ -45,6 +45,10 @@ struct OpenAIProviderConnectionView: View {
         .onChange(of: viewModel.isConnected) { _, isConnected in
             guard isConnected else { return }
             onConnected()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            viewModel.sceneDidBecomeActive()
         }
         .onDisappear {
             openTask?.cancel()
@@ -110,7 +114,7 @@ struct OpenAIProviderConnectionView: View {
 
                 Button {
                     guard let authorization else { return }
-                    lightFeedback.impactOccurred()
+                    haptics.play(.light)
                     copy(authorization, openingChatGPT: false)
                 } label: {
                     Image(systemName: "square.on.square")
@@ -181,7 +185,7 @@ struct OpenAIProviderConnectionView: View {
     private func openChatGPT(_ authorization: OpenAIDeviceAuthorization) {
         guard let url = URL(string: authorization.verificationURL) else { return }
         openTask?.cancel()
-        lightFeedback.impactOccurred()
+        haptics.play(.light)
 
         openTask = Task { @MainActor in
             copy(authorization, openingChatGPT: true)

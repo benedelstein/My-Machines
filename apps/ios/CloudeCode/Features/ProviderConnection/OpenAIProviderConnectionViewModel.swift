@@ -94,8 +94,18 @@ final class OpenAIProviderConnectionViewModel {
     /// Starts polling after the user opens the prepared authorization URL.
     func didOpenAuthorization() {
         guard case .codeReady(let authorization) = phase else { return }
+        errorMessage = nil
         phase = .waiting(authorization)
         beginPolling(authorization)
+    }
+
+    /// Restarts polling with an immediate attempt when the app returns to the
+    /// foreground, where any request in flight during suspension was likely
+    /// killed by the system.
+    func sceneDidBecomeActive() {
+        guard case .waiting(let authorization) = phase else { return }
+        Logger.info("OpenAI device authorization polling resumed on foreground")
+        beginPolling(authorization, pollImmediately: true)
     }
 
     /// Cancels in-flight requests and polling when the sheet disappears.
@@ -106,17 +116,32 @@ final class OpenAIProviderConnectionViewModel {
         pollTask = nil
     }
 
-    private func beginPolling(_ authorization: OpenAIDeviceAuthorization) {
-        guard pollTask == nil else { return }
+    private func beginPolling(_ authorization: OpenAIDeviceAuthorization, pollImmediately: Bool = false) {
+        pollTask?.cancel()
         pollTask = Task { [weak self] in
             guard let self else { return }
-            defer { pollTask = nil }
+            await runPollLoop(authorization, pollImmediately: pollImmediately)
+            // A replaced task is cancelled before the new one is stored; only
+            // the current task may clear the reference.
+            if !Task.isCancelled {
+                pollTask = nil
+            }
+        }
+    }
 
-            do {
-                while !Task.isCancelled {
-                    let interval = pollIntervalOverride
-                        ?? .seconds(max(authorization.intervalSeconds, 1))
+    private func runPollLoop(_ authorization: OpenAIDeviceAuthorization, pollImmediately: Bool) async {
+        let interval = pollIntervalOverride
+            ?? .seconds(max(authorization.intervalSeconds, 1))
+        var shouldSleep = !pollImmediately
+
+        do {
+            while !Task.isCancelled {
+                if shouldSleep {
                     try await Task.sleep(for: interval)
+                }
+                shouldSleep = true
+
+                do {
                     let status = try await api.pollOpenAIDeviceAuthorization(
                         attemptId: authorization.attemptId,
                         sessionId: context.sessionId
@@ -124,14 +149,43 @@ final class OpenAIProviderConnectionViewModel {
                     try Task.checkCancellation()
 
                     guard try await handle(status) else { return }
+                } catch let error where Self.isTransientPollError(error) && !Task.isCancelled {
+                    // Polling spans a trip to ChatGPT, so suspension routinely
+                    // kills a request mid-flight. The attempt stays valid
+                    // server-side; keep waiting instead of surfacing the error.
+                    Logger.info("OpenAI device authorization poll retrying after transient error: \(error.localizedDescription)")
                 }
-            } catch is CancellationError {
-                return
-            } catch {
-                phase = .ready
-                errorMessage = error.localizedDescription
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            if Task.isCancelled { return }
+            Logger.error("OpenAI device authorization poll failed", error)
+            phase = .ready
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private static func isTransientPollError(_ error: any Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .cancelled,
+                 .timedOut,
+                 .networkConnectionLost,
+                 .notConnectedToInternet,
+                 .cannotConnectToHost,
+                 .cannotFindHost,
+                 .dnsLookupFailed,
+                 .dataNotAllowed:
+                return true
+            default:
+                return false
             }
         }
+        if case APIError.httpError(let statusCode, _, _) = error {
+            return statusCode >= 500 || statusCode == 429
+        }
+        return false
     }
 
     private func handle(_ status: OpenAIDeviceAuthorizationStatus) async throws -> Bool {

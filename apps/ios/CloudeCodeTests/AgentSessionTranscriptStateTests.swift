@@ -410,7 +410,8 @@ extension AgentSessionTranscriptStateTests {
         sessionsAPI: any SessionsAPIProviding = StubSessionsAPI(),
         sessionMessageStore: SessionMessageStore? = nil,
         sessionClientStateStore: SessionClientStateStore = SessionClientStateStore(),
-        transcriptBuilder: any AgentSessionTranscriptBuilding = StubTranscriptBuilder()
+        transcriptBuilder: any AgentSessionTranscriptBuilding = StubTranscriptBuilder(),
+        hapticFeedback: any AgentSessionHapticFeedbackProviding = NoopHapticFeedback()
     ) -> AgentSessionViewModel {
         let sessionMessageStore = sessionMessageStore ?? SessionMessageStore()
         let sessionSummaryStore = SessionSummaryStore()
@@ -448,7 +449,8 @@ extension AgentSessionTranscriptStateTests {
                 sessionSummaryStore: sessionSummaryStore,
                 sessionClientStateStore: sessionClientStateStore
             ),
-            sessionCreatedSubject: PassthroughSubject<String, Never>()
+            sessionCreatedSubject: PassthroughSubject<String, Never>(),
+            hapticFeedback: hapticFeedback
         )
     }
 

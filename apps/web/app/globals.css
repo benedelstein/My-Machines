@@ -28,6 +28,14 @@
   --edit: #16a34a;
   --edit-subtle: rgba(22, 163, 74, 0.12);
   --edit-subtle-strong: rgba(22, 163, 74, 0.24);
+  --brand-navy: #08122F;
+  --brand-navy-deep: #040B22;
+  --brand-surface: #101936;
+  --brand-surface-soft: #151F3D;
+  --brand-lavender: #D4A8FF;
+  --brand-label-muted: #AEB8CF;
+  --brand-button-hover: #F8F4FF;
+  --brand-border: rgba(255, 255, 255, 0.12);
 
   /* shadcn aliases */
   --popover: var(--background);
@@ -127,7 +135,9 @@ a {
 }
 
 @theme inline {
-  --font-display: var(--font-caprasimo);
+  --font-display: var(--font-dm-serif-display);
+  --font-brand: var(--font-dm-serif-display);
+  --font-brand-handwriting: var(--font-schoolbell);
 
   /* Custom app colors */
   --color-background: var(--background);
@@ -151,6 +161,15 @@ a {
   --color-edit: var(--edit);
   --color-edit-subtle: var(--edit-subtle);
   --color-edit-subtle-strong: var(--edit-subtle-strong);
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-navy-deep: var(--brand-navy-deep);
+  --color-brand-surface: var(--brand-surface);
+  --color-brand-surface-soft: var(--brand-surface-soft);
+  --color-brand-lavender: var(--brand-lavender);
+  --color-brand-label-muted: var(--brand-label-muted);
+  --color-brand-button-hover: var(--brand-button-hover);
+  --color-brand-border: var(--brand-border);
+  --shadow-brand: 0 18px 50px rgba(4, 11, 34, 0.32);
 
   /* Standard shadcn colors */
   --color-popover: var(--popover);
@@ -183,4 +202,120 @@ a {
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
+}
+
+.brand-page-background {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(212, 168, 255, 0.08), transparent 32rem),
+    linear-gradient(180deg, var(--brand-navy) 0%, var(--brand-navy-deep) 100%);
+}
+
+html:has(.brand-page-background),
+body:has(.brand-page-background) {
+  background: var(--brand-navy-deep);
+}
+
+.brand-hero-kicker,
+.brand-hero-subtitle {
+  opacity: 0;
+  filter: blur(8px);
+  transform: translateY(4px);
+  animation: brand-copy-reveal 250ms ease-out forwards;
+}
+
+.brand-hero-kicker {
+  animation-delay: 100ms;
+}
+
+.brand-hero-subtitle {
+  /* The first extra eye starts at 1150ms; let that motion lead the copy. */
+  animation-delay: 1225ms;
+}
+
+@keyframes brand-copy-reveal {
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+.brand-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.08em;
+  opacity: 0;
+  filter: blur(12px);
+  transform: scale(0.96);
+  transition:
+    opacity 250ms ease-out,
+    filter 250ms ease-out,
+    transform 250ms ease-out,
+    background-color 180ms ease-out;
+}
+
+.brand-wordmark:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.brand-wordmark--visible {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+
+.brand-wordmark-i {
+  position: relative;
+  display: inline-block;
+}
+
+.brand-wordmark-i--extra {
+  width: 0;
+  opacity: 0;
+  transform: scale(0.2);
+  transform-origin: bottom center;
+  transition:
+    width 240ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 150ms ease-out,
+    transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.brand-wordmark-i--visible {
+  width: 0.27em;
+  opacity: 1;
+  transform: scale(1);
+  transition-duration: 420ms;
+}
+
+.brand-wordmark-dot {
+  position: absolute;
+  /* iOS uses 14 / 55 em; compensate for DM Serif's 0.1em CSS inline-box leading. */
+  top: 0.155em;
+  left: 50%;
+  width: 0.182em;
+  height: 0.182em;
+  border-radius: 999px;
+  background: var(--brand-lavender);
+  transform: translateX(-50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-wordmark {
+    opacity: 1;
+    filter: none;
+    transform: none;
+    transition: none;
+  }
+
+  .brand-wordmark-i--extra {
+    display: none;
+  }
+
+  .brand-hero-kicker,
+  .brand-hero-subtitle {
+    opacity: 1;
+    filter: none;
+    transform: none;
+    animation: none;
+  }
 }

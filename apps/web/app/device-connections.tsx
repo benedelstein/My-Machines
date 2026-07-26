@@ -77,7 +77,7 @@ export function DeviceConnections() {
   });
 
   return (
-    <div className="relative" style={{ width: W, height: H }}>
+    <div className="relative max-w-full overflow-hidden" style={{ width: W, height: H }}>
       <svg
         aria-hidden
         className="absolute inset-0"
@@ -89,7 +89,8 @@ export function DeviceConnections() {
           <path
             key={i}
             d={d}
-            stroke="rgb(186, 230, 253)"
+            stroke="var(--brand-lavender)"
+            opacity={0.45}
             strokeWidth={2}
             fill="none"
             strokeLinecap="round"
@@ -109,11 +110,11 @@ export function DeviceConnections() {
         >
           <span
             aria-hidden
-            className="absolute inset-0 animate-ping rounded-full bg-sky-100 opacity-100"
+            className="absolute inset-0 animate-ping rounded-full bg-brand-lavender/20"
             style={{ animationDuration: "2.4s", animationDelay: `${i * 0.7}s` }}
           />
-          <span className="relative flex h-full w-full items-center justify-center rounded-full border border-dark-blue bg-sky-100">
-            <Icon className="h-7 w-7 text-dark-blue" strokeWidth={1.75} />
+          <span className="relative flex h-full w-full items-center justify-center rounded-full border border-brand-border bg-brand-surface">
+            <Icon className="h-7 w-7 text-brand-lavender" strokeWidth={1.75} />
           </span>
         </div>
       ))}

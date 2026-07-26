@@ -7,6 +7,12 @@ import NeedleFoundation
 protocol ApplicationDependency: Dependency {}
 
 final class ApplicationComponent: Component<ApplicationDependency> {
+    @MainActor var hapticFeedbackPlayer: any HapticFeedbackPlaying {
+        shared {
+            SystemHapticFeedbackPlayer()
+        }
+    }
+
     private var apiBaseURL: URL {
         // Injected per scheme via Config/*.xcconfig -> Info.plist.
         guard let string = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String,

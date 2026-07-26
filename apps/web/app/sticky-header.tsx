@@ -1,12 +1,7 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-
-const WORDMARK_STROKE: CSSProperties = {
-  WebkitTextStroke: "2px #1f2d3d",
-  paintOrder: "stroke fill",
-};
 
 export function StickyHeader({ children }: { children: ReactNode }) {
   const [scrolled, setScrolled] = useState(false);
@@ -27,7 +22,7 @@ export function StickyHeader({ children }: { children: ReactNode }) {
   return (
     <header className="fixed inset-x-0 top-0 z-50 h-20">
       <div
-        className={`absolute inset-0 border-b border-black/5 bg-white/85 backdrop-blur-sm transition-opacity duration-300 ${
+        className={`absolute inset-0 border-b border-white/10 bg-brand-navy-deep/80 backdrop-blur-xl transition-opacity duration-300 ${
           scrolled ? "opacity-100" : "opacity-0"
         }`}
       />
@@ -38,12 +33,11 @@ export function StickyHeader({ children }: { children: ReactNode }) {
           aria-label="Scroll to top"
           aria-hidden={!scrolled}
           tabIndex={scrolled ? 0 : -1}
-          className={`font-display text-xl font-normal text-white leading-none transition-all duration-300 motion-reduce:transition-none md:text-2xl ${
+          className={`font-brand text-xl leading-none text-white transition-all duration-300 motion-reduce:transition-none md:text-2xl ${
             scrolled
               ? "translate-y-0 opacity-100"
               : "-translate-y-1 opacity-0 motion-reduce:translate-y-0"
           }`}
-          style={WORDMARK_STROKE}
         >
           My Machines
         </button>

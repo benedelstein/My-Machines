@@ -100,17 +100,85 @@ struct IncrementalMarkdownDocumentTests {
         #expect(String(paragraphs[0].content.characters) == source)
     }
 
-    @Test func tablesAndHTMLRemainAtomicLiterals() {
+    @Test func tablesParseIntoRowsAndHTMLRemainsAnAtomicLiteral() {
         let source = "| A | B |\n| - | - |\n| 1 | 2 |\n\n<section>HTML</section>"
         let snapshot = completed(source)
 
         #expect(snapshot.parts.map(\.source).joined() == source)
         #expect(snapshot.parts.count == 2)
-        guard case .literal = snapshot.parts[0].block.content,
+        guard case .table(let table) = snapshot.parts[0].block.content,
               case .literal = snapshot.parts[1].block.content else {
-            Issue.record("Expected literal fallbacks")
+            Issue.record("Expected a table followed by an HTML literal")
             return
         }
+        #expect(table.header?.cells.map { String($0.content.characters) } == ["A", "B"])
+        #expect(table.rows.map { row in row.cells.map { String($0.content.characters) } } == [["1", "2"]])
+        #expect(table.columnCount == 2)
+    }
+
+    @Test func tableColumnsCarryAlignmentAndCellsCarryInlineStyling() {
+        let source = """
+        | Service | `--http-port` | Reachable |
+        | :--- | :---: | ---: |
+        | **api** | 8080 | the public URL |
+        | worker | — | nothing external |
+        """
+        let snapshot = completed(source)
+
+        guard case .table(let table) = snapshot.parts.first?.block.content else {
+            Issue.record("Expected a table")
+            return
+        }
+        #expect(table.columnAlignments == [.leading, .center, .trailing])
+        #expect(table.alignment(forColumn: 1) == .center)
+        #expect(table.alignment(forColumn: 9) == .leading)
+        #expect(table.rows.count == 2)
+
+        guard let header = table.header else {
+            Issue.record("Expected a table header")
+            return
+        }
+        #expect(header.cells.map { String($0.content.characters) } == ["Service", "--http-port", "Reachable"])
+        #expect(header.cells[1].content.runs.contains { $0.inlinePresentationIntent?.contains(.code) == true })
+        let api = table.rows[0].cells[0].content
+        #expect(api.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+    }
+
+    @Test func undeclaredAlignmentsAndSpanningCellsStayColumnAligned() {
+        let source = """
+        | one | two | three |
+        | --- | --- | ----- |
+        | big      || small |
+        """
+        let snapshot = completed(source)
+
+        guard case .table(let table) = snapshot.parts.first?.block.content else {
+            Issue.record("Expected a table")
+            return
+        }
+        #expect(table.columnAlignments == [nil, nil, nil])
+        // The covered cell is dropped, and its column is accounted for by the spanning cell.
+        #expect(table.rows[0].cells.map(\.columnSpan) == [2, 1])
+        #expect(table.rows[0].cells.map { String($0.content.characters) } == ["big", "small"])
+        #expect(table.columnCount == 3)
+    }
+
+    @Test func streamingTableGrowsRowsAndStaysOnePart() {
+        var document = IncrementalMarkdownDocument()
+        _ = document.update(source: "| A | B |\n| - | - |", isStreaming: true)
+        let partial = document.update(source: "| A | B |\n| - | - |\n| 1 | 2 |", isStreaming: true)
+        let complete = document.update(source: "| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |", isStreaming: false)
+
+        guard case .table(let partialTable) = partial.parts.first?.block.content,
+              case .table(let completeTable) = complete.parts.first?.block.content else {
+            Issue.record("Expected the streaming table to stay a table")
+            return
+        }
+        #expect(partial.parts.count == 1)
+        #expect(complete.parts.count == 1)
+        #expect(partialTable.rows.count == 1)
+        #expect(completeTable.rows.count == 2)
+        #expect(complete.parts[0].stability == .finalized)
     }
 
     @Test func streamingHoldsAdjacentPredecessorUntilBlankLineMakesItStable() {
@@ -396,7 +464,7 @@ struct IncrementalMarkdownDocumentTests {
         var tableDocument = IncrementalMarkdownDocument()
         let table = tableDocument.update(source: "| A |\n| - |", isStreaming: true)
         let tableChanged = tableDocument.update(source: "| A |\n| - |x", isStreaming: true)
-        guard case .literal = table.parts.first?.block.content,
+        guard case .table = table.parts.first?.block.content,
               case .prose = tableChanged.parts.first?.block.content else {
             Issue.record("Expected table candidate to return to prose")
             return

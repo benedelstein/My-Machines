@@ -20,7 +20,7 @@ struct CodePreviewChrome<Content: View>: View {
     @Environment(\.theme) private var theme
     @Environment(\.style) private var style
     @Environment(\.showToast) private var showToast
-    @Environment(\.lightFeedback) private var lightFeedback
+    @Environment(\.hapticFeedbackPlayer) private var haptics
 
     private let text: String
     private let copyAccessibilityLabel: String
@@ -79,7 +79,7 @@ struct CodePreviewChrome<Content: View>: View {
 
     private func copyText() {
         UIPasteboard.general.string = text
-        lightFeedback.impactOccurred()
+        haptics.play(.light)
         showToast?(title: "Copied", icon: Image(systemName: "doc.on.doc"))
     }
 }

@@ -154,6 +154,28 @@ describe("OpenAICodexAuthService", () => {
     expect(deleteSpy).not.toHaveBeenCalled();
   });
 
+  it("keeps the attempt pending when the upstream poll fails transiently", async () => {
+    const { env, service } = createService();
+    const attemptRepository = getAttemptRepository(service);
+    const deleteSpy = vi.spyOn(attemptRepository, "deleteById").mockResolvedValue();
+    vi.spyOn(attemptRepository, "getByIdAndUserId").mockResolvedValue({
+      encryptedContextJson: await encrypt(JSON.stringify({
+        deviceAuthId: "device-auth-123",
+        intervalSeconds: 5,
+        verificationUrl: "https://auth.openai.com/codex/device",
+        userCode: "ABCD-1234",
+      }), env.TOKEN_ENCRYPTION_KEY),
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError("fetch failed"));
+
+    const result = await service.pollDeviceAuthorization("user-1", "attempt-1");
+
+    expect(result).toEqual({ status: "pending" });
+    expect(deleteSpy).not.toHaveBeenCalled();
+  });
+
   it("completes device authorization after exchanging the returned authorization code", async () => {
     const { env, service } = createService();
     const attemptRepository = getAttemptRepository(service);

@@ -759,7 +759,6 @@ export class GitHubAppService {
     owner: string,
     repo: string,
   ): Promise<GitHubAppResult<GitHubInstallationWithRepo>> {
-    const d1 = new Date();
     // Check D1 first
     const installation = await this.installationRepository.findByAccountLogin(owner);
 
@@ -777,11 +776,8 @@ export class GitHubAppService {
           message: `Repository ${owner}/${repo} is not accessible via the GitHub App installation`,
         });
       }
-      this.logger.log("Found installation in D1", { fields: { owner, repo, durationMs: new Date().getTime() - d1.getTime() } });
       return success(installation);
     }
-
-    this.logger.log("Installation repo not found in D1 or not scoped; trying GitHub API", { fields: { owner, repo } });
 
     // Fallback: query GitHub API directly
     try {
@@ -790,7 +786,6 @@ export class GitHubAppService {
         repo,
       });
 
-      this.logger.log("Found installation in GitHub API", { fields: { owner, repo, durationMs: new Date().getTime() - d1.getTime() } });
       return success({
         id: data.id,
         repositorySelection: (data.repository_selection ?? "all") as RepositorySelection,
@@ -839,9 +834,7 @@ export class GitHubAppService {
       const repoData = response.data;
       const owner = repoData.owner.login;
       const repo = repoData.name;
-      const repoFullName = repoData.full_name;
 
-      this.logger.log("Installation repo not found in D1 or not scoped; trying GitHub API", { fields: { repoFullName } });
       return this.findInstallationForRepo(owner, repo);
     } catch (error) {
       if (

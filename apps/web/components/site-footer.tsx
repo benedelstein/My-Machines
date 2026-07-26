@@ -1,25 +1,12 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
-
-const WORDMARK_STROKE: CSSProperties = {
-  WebkitTextStroke: "2px #1f2d3d",
-  paintOrder: "stroke fill",
-};
+import { BrandWordmark } from "@/components/brand-wordmark";
 
 export function SiteFooter() {
   return (
-    <footer className="border-t border-border bg-background-secondary pt-24 pb-32 md:pt-48 md:pb-64">
+    <footer className="border-t border-brand-border bg-brand-navy-deep pb-20 pt-20 text-white md:pb-28 md:pt-28">
       <div className="mx-auto flex max-w-5xl flex-col gap-10 px-6 md:px-8 md:flex-row md:items-start md:justify-between">
         <div>
-          <span
-            className="font-display text-3xl font-normal text-white leading-none"
-            style={WORDMARK_STROKE}
-          >
-            My Machines
-          </span>
-          <p className="mt-4 text-sm text-muted-foreground">
-            "Works on my machines"
-          </p>
+          <BrandWordmark className="-ml-3 text-3xl leading-none" />
         </div>
         <div className="flex gap-16">
           <FooterColumn
@@ -38,7 +25,7 @@ export function SiteFooter() {
           />
         </div>
       </div>
-      <div className="mx-auto mt-12 flex max-w-5xl items-center justify-between px-6 text-xs text-muted-foreground md:px-8">
+      <div className="mx-auto mt-12 flex max-w-5xl items-center justify-between px-6 text-xs text-brand-label-muted md:px-8">
         <span>© {new Date().getFullYear()} BZE, LLC</span>
       </div>
     </footer>
@@ -54,11 +41,11 @@ function FooterColumn({
 }) {
   return (
     <div>
-      <h4 className="text-sm font-semibold text-foreground">{heading}</h4>
-      <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
+      <h4 className="text-sm font-semibold text-white">{heading}</h4>
+      <ul className="mt-4 space-y-2 text-sm text-brand-label-muted">
         {links.map((link) => (
           <li key={link.label}>
-            <Link href={link.href} className="hover:text-foreground">
+            <Link href={link.href} className="transition-colors hover:text-white">
               {link.label}
             </Link>
           </li>

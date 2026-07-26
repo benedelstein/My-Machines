@@ -141,9 +141,8 @@ public enum ClaudeEffort: RawRepresentable, Codable, Equatable, Sendable {
 
 public enum ClaudeModel: RawRepresentable, Codable, Equatable, Sendable {
     case claudeFable5
-    case claudeFable51m
+    case claudeOpus5
     case claudeOpus48
-    case claudeOpus481m
     case claudeSonnet46
     case claudeHaiku45
     /// A value this client version doesn't recognize yet.
@@ -152,9 +151,8 @@ public enum ClaudeModel: RawRepresentable, Codable, Equatable, Sendable {
     public init(rawValue: String) {
         switch rawValue {
         case "claude-fable-5": self = .claudeFable5
-        case "claude-fable-5[1m]": self = .claudeFable51m
+        case "claude-opus-5": self = .claudeOpus5
         case "claude-opus-4-8": self = .claudeOpus48
-        case "claude-opus-4-8[1m]": self = .claudeOpus481m
         case "claude-sonnet-4-6": self = .claudeSonnet46
         case "claude-haiku-4-5": self = .claudeHaiku45
         default: self = .unknown(rawValue)
@@ -164,9 +162,8 @@ public enum ClaudeModel: RawRepresentable, Codable, Equatable, Sendable {
     public var rawValue: String {
         switch self {
         case .claudeFable5: "claude-fable-5"
-        case .claudeFable51m: "claude-fable-5[1m]"
+        case .claudeOpus5: "claude-opus-5"
         case .claudeOpus48: "claude-opus-4-8"
-        case .claudeOpus481m: "claude-opus-4-8[1m]"
         case .claudeSonnet46: "claude-sonnet-4-6"
         case .claudeHaiku45: "claude-haiku-4-5"
         case .unknown(let value): value

@@ -171,10 +171,37 @@ private struct MarkdownDocumentBuilder {
                 code: code.code,
                 language: code.language
             ))), nil)
-        case is Table, is HTMLBlock:
+        case let table as Table:
+            return (MarkdownBlock(id: blockID, content: .table(markdownTable(from: table))), nil)
+        case is HTMLBlock:
             return (MarkdownBlock(id: blockID, content: .literal(source(for: markup))), nil)
         default:
             return (MarkdownBlock(id: blockID, content: .literal(source(for: markup))), nil)
+        }
+    }
+
+    private func markdownTable(from table: Table) -> MarkdownTable {
+        MarkdownTable(
+            columnAlignments: table.columnAlignments.map { columnAlignment(from: $0) },
+            header: table.head.isEmpty ? nil : row(from: table.head),
+            rows: Array(table.body.rows).map { row(from: $0) }
+        )
+    }
+
+    private func row(from container: some TableCellContainer) -> MarkdownTable.Row {
+        // A zero `colspan` marks a cell already covered by a spanning cell in the same row.
+        let cells = Array(container.cells).filter { $0.colspan > 0 }
+        return MarkdownTable.Row(cells: cells.map { cell in
+            MarkdownTable.Cell(content: inlineContent(of: cell), columnSpan: Int(cell.colspan))
+        })
+    }
+
+    private func columnAlignment(from alignment: Table.ColumnAlignment?) -> MarkdownTable.ColumnAlignment? {
+        switch alignment {
+        case .left?: .leading
+        case .center?: .center
+        case .right?: .trailing
+        case nil: nil
         }
     }
 

@@ -240,7 +240,7 @@ export function ComputerCluster() {
   return (
     <div
       ref={containerRef}
-      className="relative h-[260px] w-[360px]"
+      className="relative h-[260px] w-[360px] max-w-full"
       onPointerMove={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         cursorRef.current = { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -257,7 +257,7 @@ export function ComputerCluster() {
             ref={(el) => {
               nodeRefs.current[i] = el;
             }}
-            className="absolute left-0 top-0 flex items-center justify-center rounded-full bg-sky-100"
+            className="absolute left-0 top-0 flex items-center justify-center rounded-full border border-brand-border bg-white/8"
             style={{
               width: size,
               height: size,
@@ -265,7 +265,7 @@ export function ComputerCluster() {
             }}
           >
             <Monitor
-              className="text-dark-blue"
+              className="text-brand-lavender"
               strokeWidth={1.75}
               style={{ width: size * 0.5, height: size * 0.5 }}
             />
