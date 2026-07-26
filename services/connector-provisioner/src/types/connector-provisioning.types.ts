@@ -17,7 +17,6 @@ export type ProvisioningStage =
 export type ConnectorProvisionerErrorCode =
   | DashboardCreateErrorCode
   | SpritesRestErrorCode
-  | "connector_reconciliation_failed"
   | "orphan_reconciliation_required"
   | "policy_verification_failed"
   | "cleanup_failed";

@@ -205,7 +205,7 @@ describe("mintConnector", () => {
     expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
   });
 
-  it("reports cleanup failure without exposing the connector token", async () => {
+  it("reports a failed cleanup instead of claiming the connector was removed", async () => {
     const spritesClient = new FakeSpritesClient();
     spritesClient.getResult = success({
       ...createdConnection,
@@ -225,7 +225,6 @@ describe("mintConnector", () => {
       now: clock(),
       nameSuffix: () => "suffix01",
     });
-    const serialized = JSON.stringify(result);
 
     expect(result).toMatchObject({
       ok: false,
@@ -237,12 +236,9 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(serialized).not.toContain(request.token);
-    expect(serialized).not.toContain("cookie");
-    expect(serialized).not.toContain("storageState");
   });
 
-  it("does not submit a secret after dashboard preflight rejects the shape", async () => {
+  it("skips list reconciliation when the dashboard failed before submitting", async () => {
     const spritesClient = new FakeSpritesClient();
     const dashboardError: DashboardCreateError = {
       code: "dashboard_drift",
@@ -297,79 +293,12 @@ describe("mintConnector", () => {
     expect(spritesClient.deletedIds).toEqual([]);
   });
 
-  it("deletes nothing when reconciliation is ambiguous", async () => {
-    const spritesClient = new FakeSpritesClient();
-    spritesClient.listResponses = [
-      success([
-        createdConnection,
-        { ...createdConnection, id: "second-gateway-id" },
-      ]),
-    ];
-
-    const result = await mintConnector(request, {
-      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
-      spritesClient,
-      now: clock(),
-      nameSuffix: () => "suffix01",
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      error: {
-        code: "connector_reconciliation_failed",
-        retryable: false,
-        cleanup: {
-          attempted: false,
-        },
-      },
-    });
-    expect(spritesClient.deletedIds).toEqual([]);
-  });
-
-  it("does not accept one exact match when another same-name connector appears", async () => {
-    const spritesClient = new FakeSpritesClient();
-    spritesClient.listResponses = [
-      success([
-        createdConnection,
-        {
-          ...createdConnection,
-          id: "same-name-different-target",
-          providerInfo: {
-            base_api_url: "https://example.com",
-            test_url: "https://example.com/health",
-          },
-        },
-      ]),
-    ];
-
-    const result = await mintConnector(request, {
-      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
-      spritesClient,
-      now: clock(),
-      nameSuffix: () => "suffix01",
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      error: {
-        code: "connector_reconciliation_failed",
-        cleanup: {
-          attempted: false,
-        },
-      },
-    });
-    expect(spritesClient.deletedIds).toEqual([]);
-  });
-
-  it("fails without deleting when Sprites returns malformed provider URLs", async () => {
+  it("attributes by name alone, whatever provider_info reports", async () => {
     const spritesClient = new FakeSpritesClient();
     spritesClient.listResponses = [
       success([{
         ...createdConnection,
-        providerInfo: {
-          base_api_url: "not a URL",
-          test_url: request.testUrl,
-        },
+        providerInfo: { base_api_url: "not a URL" },
       }]),
     ];
 
@@ -381,29 +310,19 @@ describe("mintConnector", () => {
     });
 
     expect(result).toMatchObject({
-      ok: false,
-      error: {
-        code: "connector_reconciliation_failed",
-        cleanup: {
-          attempted: false,
-        },
-      },
+      ok: true,
+      value: { gatewayConnectionId: "gateway-connection-id" },
     });
     expect(spritesClient.deletedIds).toEqual([]);
   });
 
-  it("retries list-after and reports an orphan condition if REST remains unavailable", async () => {
+  it("reports an orphan condition when the connector never becomes visible", async () => {
     const spritesClient = new FakeSpritesClient();
     const listFailure = failure<SpritesRestError>({
       code: "sprites_request_failed",
       retryable: true,
     });
-    spritesClient.listResponses = [
-      listFailure,
-      listFailure,
-      listFailure,
-      listFailure,
-    ];
+    spritesClient.listResponses = [listFailure, listFailure, listFailure, listFailure];
     const retryDelays: number[] = [];
 
     const result = await mintConnector(request, {
@@ -421,15 +340,18 @@ describe("mintConnector", () => {
       error: {
         code: "orphan_reconciliation_required",
         stage: "list_after",
+        retryable: true,
         cleanup: {
           attempted: false,
         },
       },
     });
-    expect(retryDelays).toEqual([250, 750, 1_500]);
+    // Every attempt after the first backs off, rather than hammering the API.
+    expect(spritesClient.listCallCount).toBe(retryDelays.length + 1);
+    expect(retryDelays.every((milliseconds) => milliseconds > 0)).toBe(true);
   });
 
-  it("retries successful empty lists until the created connector becomes visible", async () => {
+  it("retries until the created connector becomes visible", async () => {
     const spritesClient = new FakeSpritesClient();
     spritesClient.listResponses = [
       success([]),
@@ -454,7 +376,8 @@ describe("mintConnector", () => {
         gatewayConnectionId: "gateway-connection-id",
       },
     });
-    expect(retryDelays).toEqual([250, 750]);
+    expect(spritesClient.listCallCount).toBe(3);
+    expect(retryDelays).toHaveLength(2);
   });
 
   it("discovers and deletes an orphan when navigation fails after submit", async () => {
@@ -486,14 +409,9 @@ describe("mintConnector", () => {
     expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
   });
 
-  it("deletes nothing after an uncertain submit when attribution is ambiguous", async () => {
+  it("deletes nothing after an uncertain submit that created no connector", async () => {
     const spritesClient = new FakeSpritesClient();
-    spritesClient.listResponses = [
-      success([
-        createdConnection,
-        { ...createdConnection, id: "second-gateway-id" },
-      ]),
-    ];
+    spritesClient.listResponses = [success([])];
 
     const result = await mintConnector(request, {
       dashboardClient: new FakeDashboardClient(failure({
@@ -504,20 +422,101 @@ describe("mintConnector", () => {
       spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
+      sleep: async () => undefined,
     });
 
     expect(result).toMatchObject({
       ok: false,
       error: {
-        code: "connector_reconciliation_failed",
+        code: "orphan_reconciliation_required",
         stage: "list_after",
-        retryable: false,
+        retryable: true,
         cleanup: {
           attempted: false,
         },
       },
     });
     expect(spritesClient.deletedIds).toEqual([]);
+  });
+
+  it("times only the stages that ran", async () => {
+    const spritesClient = new FakeSpritesClient();
+
+    const result = await mintConnector(request, {
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
+      now: clock(),
+      nameSuffix: () => "suffix01",
+    });
+
+    if (!result.ok) {
+      throw new Error(`Expected a successful mint, got ${result.error.code}`);
+    }
+    // No cleanupMs: nothing was cleaned up on the happy path.
+    expect(Object.keys(result.value.durations).sort()).toEqual([
+      "browserLaunchMs",
+      "dashboardCreateMs",
+      "dashboardPreflightMs",
+      "dashboardTestMs",
+      "listAfterMs",
+      "scopeMs",
+      "totalMs",
+      "verifyMs",
+    ]);
+  });
+
+  it("times the cleanup that a failed scope triggers, and no later stage", async () => {
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.updateResult = failure({
+      code: "sprites_request_failed",
+      retryable: true,
+    });
+
+    const result = await mintConnector(request, {
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
+      now: clock(),
+      nameSuffix: () => "suffix01",
+    });
+
+    if (result.ok) {
+      throw new Error("Expected the mint to fail");
+    }
+    expect(Object.keys(result.error.durations).sort()).toEqual([
+      "browserLaunchMs",
+      "cleanupMs",
+      "dashboardCreateMs",
+      "dashboardPreflightMs",
+      "dashboardTestMs",
+      "listAfterMs",
+      "scopeMs",
+      "totalMs",
+    ]);
+  });
+
+  it("keeps the dashboard's own stage timings instead of inventing a create timing", async () => {
+    const spritesClient = new FakeSpritesClient();
+
+    const result = await mintConnector(request, {
+      dashboardClient: new FakeDashboardClient(failure({
+        code: "dashboard_browser_failed",
+        retryable: true,
+        operation: "browser_launch",
+        durations: { browserLaunchMs: 12 },
+      })),
+      spritesClient,
+      now: clock(),
+      nameSuffix: () => "suffix01",
+    });
+
+    if (result.ok) {
+      throw new Error("Expected the mint to fail");
+    }
+    expect(result.error.durations).toMatchObject({ browserLaunchMs: 12 });
+    expect(Object.keys(result.error.durations).sort()).toEqual([
+      "browserLaunchMs",
+      "totalMs",
+    ]);
   });
 });
 

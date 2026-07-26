@@ -1,8 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
+  // Consumers import this package straight from src (see package.json main),
+  // so it only ever typechecks; there is no emit and no dist.
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src",
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types"]
   },

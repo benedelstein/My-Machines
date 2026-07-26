@@ -27,10 +27,12 @@ const ConnectionResponseSchema = z.object({
   connection: ConnectionSchema,
 });
 
-const ConnectionsResponseSchema = z.union([
-  z.object({ connections: z.array(ConnectionSchema) }),
-  z.array(ConnectionSchema),
-]);
+// Sprites wraps single connections in `{ connection }`, and the collection in
+// the matching `{ connections }` envelope. A bare array would fail the parse as
+// `sprites_response_invalid` rather than being silently tolerated.
+const ConnectionsResponseSchema = z.object({
+  connections: z.array(ConnectionSchema),
+});
 
 type Fetch = typeof fetch;
 
@@ -62,8 +64,7 @@ export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
       return failure(invalidResponse());
     }
 
-    const connections = Array.isArray(parsed.data) ? parsed.data : parsed.data.connections;
-    return success(connections.map(mapConnection));
+    return success(parsed.data.connections.map(mapConnection));
   }
 
   async updateAccessPolicy(

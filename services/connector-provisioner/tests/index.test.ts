@@ -138,6 +138,20 @@ describe("connector provisioner HTTP boundary", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("refuses to mint when the dashboard configuration is missing", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    // baseEnvironment can serve deletes but has no dashboard credentials.
+    const response = await handleRequest(mintRequest(), baseEnvironment);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { code: "service_configuration_invalid" },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("returns 404 for unknown routes", async () => {
     const response = await handleRequest(
       new Request("https://provisioner.test/v2/unknown"),
@@ -159,6 +173,23 @@ function mintCapableEnvironment(): Env {
     SPRITES_DASHBOARD_URL: "https://dashboard.sprites.dev",
     SPRITES_ORG_SLUG: "example-org",
   };
+}
+
+function mintRequest(): Request {
+  return new Request("https://provisioner.test/connectors/mint", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer provisioner-secret",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: "connector-test",
+      baseApiUrl: "https://api.example.com",
+      token: "dummy",
+      testUrl: "https://api.example.com/health",
+      spriteLabels: ["session:session-1"],
+    }),
+  });
 }
 
 function deleteRequest(): Request {

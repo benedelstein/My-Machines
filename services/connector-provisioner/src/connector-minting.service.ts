@@ -32,8 +32,40 @@ const NOT_ATTEMPTED: CleanupStatus = Object.freeze({
   succeeded: false,
 });
 
-/** Stage timings collected so far; totalMs is added at each exit point. */
-type PartialDurations = Omit<ConnectorProvisioningDurations, "totalMs">;
+/** Per-stage timings; `totalMs` is stamped when a snapshot is taken. */
+type StageDurations = Omit<ConnectorProvisioningDurations, "totalMs">;
+
+/**
+ * One stopwatch per mint attempt. `time` records a stage as it finishes and
+ * `snapshot` reports the stages that actually ran plus the elapsed total, so
+ * every exit point stays consistent without restating the timing fields.
+ */
+class MintTimings {
+  private readonly stages: StageDurations = {};
+  private readonly startedAt: number;
+
+  constructor(private readonly now: () => number) {
+    this.startedAt = now();
+  }
+
+  async time<T>(stage: keyof StageDurations, operation: () => Promise<T>): Promise<T> {
+    const stageStartedAt = this.now();
+    try {
+      return await operation();
+    } finally {
+      this.stages[stage] = this.now() - stageStartedAt;
+    }
+  }
+
+  /** Adopts stage timings measured elsewhere, e.g. inside the dashboard client. */
+  record(stages: StageDurations | undefined): void {
+    Object.assign(this.stages, stages);
+  }
+
+  snapshot(): ConnectorProvisioningDurations {
+    return { ...this.stages, totalMs: this.now() - this.startedAt };
+  }
+}
 
 export async function mintConnector(
   callerRequest: MintConnectorRequest,
@@ -49,18 +81,15 @@ export async function mintConnector(
     ...callerRequest,
     name: `${callerRequest.name}-${nameSuffix()}`,
   };
-  const startedAt = now();
+  const timings = new MintTimings(now);
 
-  const dashboardStartedAt = now();
   const dashboardResult = await dependencies.dashboardClient.createConnector(request);
-  const dashboardMs = now() - dashboardStartedAt;
+  // The dashboard client measures its own browser stages; a failure reports
+  // whichever of them it reached.
+  timings.record(dashboardResult.ok
+    ? dashboardResult.value.durations
+    : dashboardResult.error.durations);
   if (!dashboardResult.ok) {
-    // Prefer the dashboard client's own stage timings; fall back to the
-    // whole-call stopwatch when it failed before reporting the create step.
-    const dashboardDurations: PartialDurations = {
-      ...dashboardResult.error.durations,
-      dashboardCreateMs: dashboardResult.error.durations?.dashboardCreateMs ?? dashboardMs,
-    };
     if (dashboardResult.error.submitAttempted === true) {
       return failure(await reconcileAfterUncertainSubmit({
         originalCode: dashboardResult.error.code,
@@ -69,9 +98,7 @@ export async function mintConnector(
         request,
         dependencies,
         sleep,
-        dashboardDurations,
-        startedAt,
-        now,
+        timings,
       }));
     }
     return failure(buildError({
@@ -81,125 +108,73 @@ export async function mintConnector(
       dashboardOperation: dashboardResult.error.operation,
       dashboardShape: dashboardResult.error.dashboardShape,
       cleanup: NOT_ATTEMPTED,
-      durations: { ...dashboardDurations, totalMs: now() - startedAt },
+      timings,
     }));
   }
-  const dashboardDurations: PartialDurations = dashboardResult.value.durations;
 
-  const listAfterStartedAt = now();
-  const afterResult = await listConnectionsAfterCreate(
-    dependencies.spritesClient,
+  const createdConnector = await findCreatedConnector(dependencies.spritesClient, {
+    name: request.name,
     sleep,
-    request,
-  );
-  const listAfterMs = now() - listAfterStartedAt;
-  if (!afterResult.ok) {
+    timings,
+  });
+  if (createdConnector === undefined) {
     return failure(buildError({
       code: "orphan_reconciliation_required",
       stage: "list_after",
       retryable: true,
       cleanup: NOT_ATTEMPTED,
-      durations: { ...dashboardDurations, listAfterMs, totalMs: now() - startedAt },
+      timings,
     }));
   }
-
-  const reconciliation = reconcileCreatedConnection(afterResult.value, request);
-  if (reconciliation.connection === undefined) {
-    // An ambiguous match set can include a concurrent mint's live connector;
-    // deleting on ambiguity is worse than leaking a deny-all orphan.
-    return failure(buildError({
-      code: reconciliation.attributableConnectionIds.length === 0
-        ? "orphan_reconciliation_required"
-        : "connector_reconciliation_failed",
-      stage: "list_after",
-      retryable: reconciliation.attributableConnectionIds.length === 0,
-      cleanup: NOT_ATTEMPTED,
-      durations: { ...dashboardDurations, listAfterMs, totalMs: now() - startedAt },
-    }));
-  }
-  const gatewayConnectionId = reconciliation.connection.id;
+  const gatewayConnectionId = createdConnector.id;
 
   const accessPolicy: AccessPolicy = {
     allowAll: false,
     spriteLabels: [...request.spriteLabels],
   };
 
-  const scopeStartedAt = now();
-  const scopeResult = await dependencies.spritesClient.updateAccessPolicy(
-    gatewayConnectionId,
-    accessPolicy,
-  );
-  const scopeMs = now() - scopeStartedAt;
+  const scopeResult = await timings.time("scopeMs", () => {
+    return dependencies.spritesClient.updateAccessPolicy(gatewayConnectionId, accessPolicy);
+  });
   if (!scopeResult.ok) {
-    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, now);
     return failure(buildError({
       code: scopeResult.error.code,
       stage: "scope",
       retryable: scopeResult.error.retryable,
-      cleanup: cleanup.status,
-      durations: {
-        ...dashboardDurations,
-        listAfterMs,
-        scopeMs,
-        cleanupMs: cleanup.cleanupMs,
-        totalMs: now() - startedAt,
-      },
+      cleanup: await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, timings),
+      timings,
     }));
   }
 
-  const verifyStartedAt = now();
-  const verifyResult = await dependencies.spritesClient.getConnection(gatewayConnectionId);
-  const verifyMs = now() - verifyStartedAt;
+  const verifyResult = await timings.time("verifyMs", () => {
+    return dependencies.spritesClient.getConnection(gatewayConnectionId);
+  });
   if (!verifyResult.ok) {
-    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, now);
     return failure(buildError({
       code: verifyResult.error.code,
       stage: "verify",
       retryable: verifyResult.error.retryable,
-      cleanup: cleanup.status,
-      durations: {
-        ...dashboardDurations,
-        listAfterMs,
-        scopeMs,
-        verifyMs,
-        cleanupMs: cleanup.cleanupMs,
-        totalMs: now() - startedAt,
-      },
+      cleanup: await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, timings),
+      timings,
     }));
   }
 
   if (verifyResult.value === null || !policiesMatch(verifyResult.value.accessPolicy, accessPolicy)) {
-    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, now);
     return failure(buildError({
       code: "policy_verification_failed",
       stage: "verify",
       retryable: false,
-      cleanup: cleanup.status,
-      durations: {
-        ...dashboardDurations,
-        listAfterMs,
-        scopeMs,
-        verifyMs,
-        cleanupMs: cleanup.cleanupMs,
-        totalMs: now() - startedAt,
-      },
+      cleanup: await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, timings),
+      timings,
     }));
   }
 
   return success({
     name: request.name,
     gatewayConnectionId,
-    ...(dashboardResult.value.detailId === undefined
-      ? {}
-      : { detailId: dashboardResult.value.detailId }),
+    detailId: dashboardResult.value.detailId,
     accessPolicy,
-    durations: {
-      ...dashboardDurations,
-      listAfterMs,
-      scopeMs,
-      verifyMs,
-      totalMs: now() - startedAt,
-    },
+    durations: timings.snapshot(),
   });
 }
 
@@ -239,52 +214,6 @@ function cleanupError(
   return { code: "cleanup_failed", retryable, cause };
 }
 
-function reconcileCreatedConnection(
-  connections: SpritesConnection[],
-  request: MintConnectorRequest,
-): {
-  connection?: SpritesConnection;
-  attributableConnectionIds: string[];
-} {
-  const attributableConnections = findConnectionsByName(connections, request);
-  const matches = attributableConnections.filter((connection) => {
-    return providerInfoUrlMatches(connection.providerInfo, "base_api_url", request.baseApiUrl)
-      && providerInfoUrlMatches(connection.providerInfo, "test_url", request.testUrl);
-  });
-
-  return {
-    ...(attributableConnections.length === 1 && matches.length === 1
-      ? { connection: matches[0] }
-      : {}),
-    attributableConnectionIds: attributableConnections.map((connection) => connection.id),
-  };
-}
-
-function providerInfoUrlMatches(
-  providerInfo: Record<string, unknown> | undefined,
-  field: string,
-  expected: string,
-): boolean {
-  const actual = providerInfo?.[field];
-  if (typeof actual !== "string") {
-    return false;
-  }
-  const normalizedActual = normalizeUrl(actual);
-  return normalizedActual !== undefined && normalizedActual === normalizeUrl(expected);
-}
-
-function normalizeUrl(value: string): string | undefined {
-  try {
-    const url = new URL(value);
-    if (url.pathname !== "/") {
-      url.pathname = url.pathname.replace(/\/+$/u, "");
-    }
-    return url.toString().replace(/\/$/u, "");
-  } catch {
-    return undefined;
-  }
-}
-
 function policiesMatch(
   actual: AccessPolicy | undefined,
   expected: AccessPolicy,
@@ -306,21 +235,17 @@ function buildError(params: {
   dashboardOperation?: ConnectorProvisionerError["dashboardOperation"];
   dashboardShape?: ConnectorProvisionerError["dashboardShape"];
   cleanup: CleanupStatus;
-  durations: ConnectorProvisioningDurations;
+  timings: MintTimings;
 }): ConnectorProvisionerError {
   return {
     code: params.code,
     stage: params.stage,
     retryable: params.retryable,
-    ...(params.dashboardOperation === undefined
-      ? {}
-      : { dashboardOperation: params.dashboardOperation }),
-    ...(params.dashboardShape === undefined
-      ? {}
-      : { dashboardShape: params.dashboardShape }),
+    dashboardOperation: params.dashboardOperation,
+    dashboardShape: params.dashboardShape,
     message: errorMessage(params.code),
     cleanup: params.cleanup,
-    durations: params.durations,
+    durations: params.timings.snapshot(),
   };
 }
 
@@ -338,8 +263,6 @@ function errorMessage(code: ConnectorProvisionerErrorCode): string {
       return "The remote browser could not be launched or initialized.";
     case "dashboard_navigation_failed":
       return "The remote browser could not load the Sprites dashboard.";
-    case "connector_reconciliation_failed":
-      return "The created connector could not be identified safely.";
     case "orphan_reconciliation_required":
       return "The dashboard submit may have created an untracked connector.";
     case "policy_verification_failed":
@@ -361,46 +284,63 @@ function errorMessage(code: ConnectorProvisionerErrorCode): string {
   }
 }
 
-async function listConnectionsAfterCreate(
-  spritesClient: SpriteConnectorsClient,
-  sleep: (milliseconds: number) => Promise<void>,
-  request: MintConnectorRequest,
-): Promise<Awaited<ReturnType<SpriteConnectorsClient["listConnections"]>>> {
-  const retryDelays = [0, 250, 750, 1_500];
-  let lastResult: Awaited<ReturnType<SpriteConnectorsClient["listConnections"]>> | undefined;
-  for (const retryDelay of retryDelays) {
-    if (retryDelay > 0) {
-      await sleep(retryDelay);
-    }
-    lastResult = await spritesClient.listConnections();
-    if (lastResult.ok && findConnectionsByName(lastResult.value, request).length > 0) {
-      return lastResult;
-    }
-  }
+/** Backoff between list attempts; the dashboard create is not instantly visible. */
+const LIST_AFTER_RETRY_DELAYS_MS = [250, 750, 1_500];
 
-  return lastResult ?? failure({
-    code: "sprites_request_failed",
-    retryable: true,
+/**
+ * Finds this attempt's connector in the Sprites connection list, retrying while
+ * the freshly created connector is still not visible.
+ *
+ * @returns The connector, or `undefined` if it never appeared — which means an
+ *   untracked connector may exist and needs operator reconciliation.
+ */
+async function findCreatedConnector(
+  spritesClient: SpriteConnectorsClient,
+  options: {
+    name: string;
+    sleep: (milliseconds: number) => Promise<void>;
+    timings: MintTimings;
+  },
+): Promise<SpritesConnection | undefined> {
+  const lookup = async (): Promise<SpritesConnection | undefined> => {
+    const listResult = await spritesClient.listConnections();
+    return listResult.ok ? findConnectorByName(listResult.value, options.name) : undefined;
+  };
+
+  return await options.timings.time("listAfterMs", async () => {
+    let connector = await lookup();
+    for (const retryDelay of LIST_AFTER_RETRY_DELAYS_MS) {
+      if (connector !== undefined) {
+        break;
+      }
+      await options.sleep(retryDelay);
+      connector = await lookup();
+    }
+    return connector;
   });
 }
 
 async function cleanupConnector(
   connectionId: string,
   spritesClient: SpriteConnectorsClient,
-  now: () => number,
-): Promise<{ status: CleanupStatus; cleanupMs: number }> {
-  const cleanupStartedAt = now();
-  const result = await deleteConnectorAndVerify(connectionId, spritesClient);
-  return {
-    status: { attempted: true, succeeded: result.ok },
-    cleanupMs: now() - cleanupStartedAt,
-  };
+  timings: MintTimings,
+): Promise<CleanupStatus> {
+  const result = await timings.time("cleanupMs", () => {
+    return deleteConnectorAndVerify(connectionId, spritesClient);
+  });
+  return { attempted: true, succeeded: result.ok };
 }
 
 function defaultNameSuffix(): string {
   return crypto.randomUUID().slice(0, 8);
 }
 
+/**
+ * Handles a dashboard failure that happened after the create was submitted, so
+ * the submit may or may not have produced a connector. Deletes the connector if
+ * this attempt's name is found; otherwise reports that an untracked connector
+ * may exist.
+ */
 async function reconcileAfterUncertainSubmit(params: {
   originalCode: ConnectorProvisionerErrorCode;
   dashboardOperation?: ConnectorProvisionerError["dashboardOperation"];
@@ -408,49 +348,13 @@ async function reconcileAfterUncertainSubmit(params: {
   request: MintConnectorRequest;
   dependencies: MintConnectorDependencies;
   sleep: (milliseconds: number) => Promise<void>;
-  dashboardDurations: PartialDurations;
-  startedAt: number;
-  now: () => number;
+  timings: MintTimings;
 }): Promise<ConnectorProvisionerError> {
-  const { now, startedAt } = params;
-  const listAfterStartedAt = now();
-  const afterResult = await listConnectionsAfterCreate(
-    params.dependencies.spritesClient,
-    params.sleep,
-    params.request,
-  );
-  const listAfterMs = now() - listAfterStartedAt;
-  const durations: PartialDurations = { ...params.dashboardDurations, listAfterMs };
-  if (!afterResult.ok) {
-    return buildError({
-      code: "orphan_reconciliation_required",
-      stage: "list_after",
-      retryable: true,
-      cleanup: NOT_ATTEMPTED,
-      durations: { ...durations, totalMs: now() - startedAt },
-    });
-  }
-
-  const attributable = findConnectionsByName(afterResult.value, params.request);
-  const orphan = attributable.length === 1
-    && attributable[0] !== undefined
-    && providerInfoUrlMatches(attributable[0].providerInfo, "base_api_url", params.request.baseApiUrl)
-    && providerInfoUrlMatches(attributable[0].providerInfo, "test_url", params.request.testUrl)
-    ? attributable[0]
-    : undefined;
-  if (attributable.length > 0 && orphan === undefined) {
-    // Multiple or unprovable matches may belong to a concurrent mint; never
-    // delete what cannot be uniquely attributed to this call.
-    return buildError({
-      code: "connector_reconciliation_failed",
-      stage: "list_after",
-      retryable: false,
-      dashboardOperation: params.dashboardOperation,
-      dashboardShape: params.dashboardShape,
-      cleanup: NOT_ATTEMPTED,
-      durations: { ...durations, totalMs: now() - startedAt },
-    });
-  }
+  const orphan = await findCreatedConnector(params.dependencies.spritesClient, {
+    name: params.request.name,
+    sleep: params.sleep,
+    timings: params.timings,
+  });
   if (orphan === undefined) {
     return buildError({
       code: "orphan_reconciliation_required",
@@ -459,30 +363,35 @@ async function reconcileAfterUncertainSubmit(params: {
       dashboardOperation: params.dashboardOperation,
       dashboardShape: params.dashboardShape,
       cleanup: NOT_ATTEMPTED,
-      durations: { ...durations, totalMs: now() - startedAt },
+      timings: params.timings,
     });
   }
-  const cleanup = await cleanupConnector(orphan.id, params.dependencies.spritesClient, now);
+
   return buildError({
     code: params.originalCode,
     stage: "dashboard_create",
     retryable: false,
     dashboardOperation: params.dashboardOperation,
     dashboardShape: params.dashboardShape,
-    cleanup: cleanup.status,
-    durations: { ...durations, cleanupMs: cleanup.cleanupMs, totalMs: now() - startedAt },
+    cleanup: await cleanupConnector(
+      orphan.id,
+      params.dependencies.spritesClient,
+      params.timings,
+    ),
+    timings: params.timings,
   });
 }
 
-// The per-attempt name suffix is the sole attribution key: only this call's
-// dashboard submit can have created a connector with this exact name, so a
-// unique name match is proof of ownership without diffing list snapshots.
-function findConnectionsByName(
+/**
+ * The per-attempt name suffix is the attribution key: only this call's dashboard
+ * submit can have created a connector with this exact name, so a name match is
+ * proof of ownership — no list diffing, and nothing else to corroborate.
+ */
+function findConnectorByName(
   connections: SpritesConnection[],
-  request: MintConnectorRequest,
-): SpritesConnection[] {
-  return connections.filter((connection) => {
-    return connection.provider === "custom_api"
-      && connection.providerAccountName === request.name;
+  name: string,
+): SpritesConnection | undefined {
+  return connections.find((connection) => {
+    return connection.provider === "custom_api" && connection.providerAccountName === name;
   });
 }
