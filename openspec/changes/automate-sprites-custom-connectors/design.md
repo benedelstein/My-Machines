@@ -284,8 +284,19 @@ in-VM root cannot lift it). Policy = **allow the connector gateway + the class-C
 non-secret allowlist (package managers, distro mirrors, etc.) + `deny-all`.**
 
 - Class-A/B credential hosts are **not** network-allowlisted — they are forced
-  through the proxy → connector. (If they were allowlisted, a root agent could reach
-  them directly after flushing the redirect.)
+  through the proxy → connector. This does **not** protect the credential: a root
+  agent that flushes the redirect and reaches the host directly arrives without one,
+  because injection happens at the gateway after a label check that in-VM root cannot
+  influence. Credential protection is the label check, never the egress policy. Two
+  things the rule does buy:
+  - **Smaller exfiltration surface.** Every allowlisted host is somewhere data can
+    go. Keeping credential hosts off the allowlist keeps the egress set minimal,
+    which is what the policy is actually for.
+  - **Fail-closed routing.** A bypassed proxy or resolver produces a connection
+    failure instead of a silent uncredentialed request that looks like an ordinary
+    upstream 401, so a broken redirect is observable.
+  Both are properties of the egress policy the environment selects. Under `open`
+  network mode they do not hold, which is a consequence the operator opts into.
 - The existing `network-policy.ts` allowlist is the class-C set; extend/trim it, and
   add the gateway. Provisioning needs the apt mirror allowed during toolchain
   install, then tighten.
