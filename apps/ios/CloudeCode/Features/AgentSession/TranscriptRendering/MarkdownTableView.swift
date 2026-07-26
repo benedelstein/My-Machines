@@ -47,12 +47,16 @@ extension MarkdownPartsView {
                 return
             }
             let childProposal = ProposedViewSize(width: min(bounds.width, maximumWidth), height: nil)
-            let (anchor, x): (UnitPoint, CGFloat) = switch alignment {
+            let (anchor, anchorX): (UnitPoint, CGFloat) = switch alignment {
             case .leading: (.topLeading, bounds.minX)
             case .center: (.top, bounds.midX)
             case .trailing: (.topTrailing, bounds.maxX)
             }
-            subview.place(at: CGPoint(x: x, y: bounds.minY), anchor: anchor, proposal: childProposal)
+            subview.place(
+                at: CGPoint(x: anchorX, y: bounds.minY),
+                anchor: anchor,
+                proposal: childProposal
+            )
         }
     }
 
