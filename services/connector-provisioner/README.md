@@ -10,6 +10,30 @@ born only in the dashboard form. Everything after birth — finding the gateway
 id, scoping the connector to Sprite labels, verifying the scope, deleting —
 is ordinary REST.
 
+> **This is a stopgap, and it does not scale.** Delete the browser half of this
+> service the day Sprites exposes `custom_api` connector creation over its API;
+> the REST half (find, scope, verify, delete) is the part worth keeping.
+>
+> Concretely, what makes it temporary:
+>
+> - **Cost per mint.** A headless browser launch, page load, form fill, and
+>   connection test measured ~6.9s end to end, ~1.5s of it just launching the
+>   browser. Every session provision pays that.
+> - **Concurrency.** Mints are bounded by the account's concurrent Browser
+>   Rendering sessions, not by anything about our own capacity. There is no
+>   batching and no meaningful way to make one browser serve many mints.
+> - **It breaks when someone else edits a form.** The dashboard is a Phoenix
+>   LiveView page with no compatibility contract; it already drifted once
+>   between 2026-07-06 and 2026-07-24 (auth-method toggle, renamed events,
+>   renamed submit button). `dashboard-shape.ts` catches drift before any
+>   secret is typed, but catching it means mints stop until someone updates
+>   the selectors.
+> - **It needs a human's cookie.** `SPRITES_DASHBOARD_STORAGE_STATE` is
+>   harvested from a real authenticated dashboard session and expires or gets
+>   revoked on its own schedule, at which point every mint returns
+>   `reauthentication_required` until a person re-mints it. See the revocation
+>   runbook below.
+
 ```mermaid
 flowchart LR
   caller["API Worker<br/>sends provisioner bearer"]
