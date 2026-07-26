@@ -53,8 +53,10 @@ const MintConnectorRequestBaseSchema = z.object({
   headerName: z.literal("Authorization").default("Authorization"),
   headerPrefix: safeHeaderValue.default("Bearer"),
   spriteLabels: z.array(spriteLabel).min(1).max(16),
-  // Paths on the connector base the gateway should allow. Optional until the
-  // api-server integration always pins session-connector paths.
+  // Paths on the connector base the gateway should allow. Required for
+  // session: connectors (enforced below); the wire format was verified
+  // against the live Sprites API on 2026-07-26 (accepted and returned
+  // verbatim on read-back).
   allowedEndpoints: z.array(z.string().min(1).max(256)).min(1).max(32).optional(),
 });
 
@@ -71,15 +73,31 @@ function requireMatchingTestOrigin(
   }
 }
 
-export const MintConnectorRequestSchema = MintConnectorRequestBaseSchema.superRefine(
-  requireMatchingTestOrigin,
-);
+// A session connector's base is our own Worker, so an unpinned connector lets
+// a root-capable Sprite aim the injected session token at any Worker path.
+function requireSessionEndpointPins(
+  value: z.infer<typeof MintConnectorRequestBaseSchema>,
+  context: z.RefinementCtx,
+): void {
+  const isSessionConnector = value.spriteLabels.every((label) => label.startsWith("session:"));
+  if (isSessionConnector && value.allowedEndpoints === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["allowedEndpoints"],
+      message: "Session connectors must pin allowedEndpoints",
+    });
+  }
+}
+
+export const MintConnectorRequestSchema = MintConnectorRequestBaseSchema
+  .superRefine(requireMatchingTestOrigin)
+  .superRefine(requireSessionEndpointPins);
 
 export type MintConnectorRequest = z.infer<typeof MintConnectorRequestSchema>;
 
-export const LiveTestRequestSchema = MintConnectorRequestBaseSchema.superRefine(
-  requireMatchingTestOrigin,
-);
+export const LiveTestRequestSchema = MintConnectorRequestBaseSchema
+  .superRefine(requireMatchingTestOrigin)
+  .superRefine(requireSessionEndpointPins);
 
 export type LiveTestRequest = z.infer<typeof LiveTestRequestSchema>;
 

@@ -7,6 +7,7 @@ const validRequest = {
   token: "dummy",
   testUrl: "https://api.example.com/health",
   spriteLabels: ["session:test-123"],
+  allowedEndpoints: ["/health"],
 };
 
 describe("MintConnectorRequestSchema", () => {
@@ -14,11 +15,16 @@ describe("MintConnectorRequestSchema", () => {
     expect(MintConnectorRequestSchema.safeParse(validRequest).success).toBe(true);
   });
 
-  it("accepts environment labels with pinned endpoints", () => {
+  it("rejects a session connector without pinned endpoints", () => {
+    const { allowedEndpoints: _allowedEndpoints, ...withoutPins } = validRequest;
+    expect(MintConnectorRequestSchema.safeParse(withoutPins).success).toBe(false);
+  });
+
+  it("accepts environment labels without pinned endpoints", () => {
+    const { allowedEndpoints: _allowedEndpoints, ...withoutPins } = validRequest;
     expect(MintConnectorRequestSchema.safeParse({
-      ...validRequest,
+      ...withoutPins,
       spriteLabels: ["env:environment-1"],
-      allowedEndpoints: ["/api/v1/"],
     }).success).toBe(true);
   });
 

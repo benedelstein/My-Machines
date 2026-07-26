@@ -14,6 +14,9 @@ const EnvironmentSchema = z.object({
   CONNECTOR_LIVE_TEST_SPRITE_LABEL: z.string().min(1),
   CONNECTOR_LIVE_TEST_TOKEN: z.string().min(1).optional(),
   CONNECTOR_LIVE_TEST_HEADER_PREFIX: z.string().optional(),
+  // Comma-separated endpoint pins, e.g. "/headers". When set, the live test
+  // also verifies the allowed_endpoints round-trip against the real API.
+  CONNECTOR_LIVE_TEST_ALLOWED_ENDPOINTS: z.string().min(1).optional(),
 });
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +31,16 @@ async function main(): Promise<void> {
   }
 
   const environment = parsedEnvironment.data;
+  // Session connectors must pin endpoints; default to the test URL's path so
+  // the script keeps working without extra configuration.
+  const allowedEndpoints = environment.CONNECTOR_LIVE_TEST_ALLOWED_ENDPOINTS === undefined
+    ? (environment.CONNECTOR_LIVE_TEST_SPRITE_LABEL.startsWith("session:")
+      ? [new URL(environment.CONNECTOR_LIVE_TEST_TEST_URL).pathname]
+      : undefined)
+    : environment.CONNECTOR_LIVE_TEST_ALLOWED_ENDPOINTS
+      .split(",")
+      .map((endpoint) => endpoint.trim())
+      .filter((endpoint) => endpoint.length > 0);
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "connector-provisioner-"));
   const envFile = path.join(temporaryDirectory, ".dev.vars");
   const bearerToken = crypto.randomUUID();
@@ -45,6 +58,9 @@ async function main(): Promise<void> {
   let worker: ChildProcess | undefined;
   try {
     await writeFile(envFile, [
+      // wrangler.jsonc defaults ENVIRONMENT to production, which hides
+      // /connectors/live-test; the local run must identify as development.
+      envLine("ENVIRONMENT", "development"),
       envLine("CONNECTOR_PROVISIONER_BEARER_TOKEN", bearerToken),
       envLine("SPRITES_API_KEY", environment.SPRITES_API_KEY),
       envLine("SPRITES_DASHBOARD_STORAGE_STATE", environment.SPRITES_DASHBOARD_STORAGE_STATE),
@@ -88,6 +104,7 @@ async function main(): Promise<void> {
         headerName: "Authorization",
         headerPrefix: environment.CONNECTOR_LIVE_TEST_HEADER_PREFIX ?? "Bearer",
         spriteLabels: [environment.CONNECTOR_LIVE_TEST_SPRITE_LABEL],
+        ...(allowedEndpoints === undefined ? {} : { allowedEndpoints }),
       }),
     });
     const responseBody: unknown = await response.json();
