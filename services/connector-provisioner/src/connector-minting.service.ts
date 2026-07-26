@@ -29,6 +29,9 @@ const NOT_ATTEMPTED: CleanupStatus = Object.freeze({
   succeeded: false,
 });
 
+/** Stage timings collected so far; totalMs is added at each exit point. */
+type PartialDurations = Omit<ConnectorProvisioningDurations, "totalMs">;
+
 export async function mintConnector(
   callerRequest: MintConnectorRequest,
   dependencies: MintConnectorDependencies,
@@ -44,14 +47,17 @@ export async function mintConnector(
     name: `${callerRequest.name}-${nameSuffix()}`,
   };
   const startedAt = now();
-  const durations: ConnectorProvisioningDurations = { totalMs: 0 };
 
   const dashboardStartedAt = now();
   const dashboardResult = await dependencies.dashboard.createConnector(request);
-  const dashboardDurationMs = now() - dashboardStartedAt;
+  const dashboardMs = now() - dashboardStartedAt;
   if (!dashboardResult.ok) {
-    Object.assign(durations, dashboardResult.error.durations);
-    durations.dashboardCreateMs ??= dashboardDurationMs;
+    // Prefer the dashboard client's own stage timings; fall back to the
+    // whole-call stopwatch when it failed before reporting the create step.
+    const dashboardDurations: PartialDurations = {
+      ...dashboardResult.error.durations,
+      dashboardCreateMs: dashboardResult.error.durations?.dashboardCreateMs ?? dashboardMs,
+    };
     if (dashboardResult.error.submitAttempted === true) {
       return failure(await reconcileAfterUncertainSubmit({
         originalCode: dashboardResult.error.code,
@@ -60,7 +66,7 @@ export async function mintConnector(
         request,
         dependencies,
         sleep,
-        durations,
+        dashboardDurations,
         startedAt,
         now,
       }));
@@ -72,12 +78,10 @@ export async function mintConnector(
       dashboardOperation: dashboardResult.error.operation,
       dashboardShape: dashboardResult.error.dashboardShape,
       cleanup: NOT_ATTEMPTED,
-      durations,
-      startedAt,
-      now,
+      durations: { ...dashboardDurations, totalMs: now() - startedAt },
     }));
   }
-  Object.assign(durations, dashboardResult.value.durations);
+  const dashboardDurations: PartialDurations = dashboardResult.value.durations;
 
   const listAfterStartedAt = now();
   const afterResult = await listConnectionsAfterCreate(
@@ -85,16 +89,14 @@ export async function mintConnector(
     sleep,
     request,
   );
-  durations.listAfterMs = now() - listAfterStartedAt;
+  const listAfterMs = now() - listAfterStartedAt;
   if (!afterResult.ok) {
     return failure(buildError({
       code: "orphan_reconciliation_required",
       stage: "list_after",
       retryable: true,
       cleanup: NOT_ATTEMPTED,
-      durations,
-      startedAt,
-      now,
+      durations: { ...dashboardDurations, listAfterMs, totalMs: now() - startedAt },
     }));
   }
 
@@ -109,9 +111,7 @@ export async function mintConnector(
       stage: "list_after",
       retryable: reconciliation.attributableConnectionIds.length === 0,
       cleanup: NOT_ATTEMPTED,
-      durations,
-      startedAt,
-      now,
+      durations: { ...dashboardDurations, listAfterMs, totalMs: now() - startedAt },
     }));
   }
   const gatewayConnectionId = reconciliation.connection.id;
@@ -126,50 +126,63 @@ export async function mintConnector(
     gatewayConnectionId,
     accessPolicy,
   );
-  durations.scopeMs = now() - scopeStartedAt;
+  const scopeMs = now() - scopeStartedAt;
   if (!scopeResult.ok) {
-    return failure(await buildErrorWithCleanup({
+    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.sprites, now);
+    return failure(buildError({
       code: scopeResult.error.code,
       stage: "scope",
       retryable: scopeResult.error.retryable,
-      gatewayConnectionId,
-      dependencies,
-      durations,
-      startedAt,
-      now,
+      cleanup: cleanup.status,
+      durations: {
+        ...dashboardDurations,
+        listAfterMs,
+        scopeMs,
+        cleanupMs: cleanup.cleanupMs,
+        totalMs: now() - startedAt,
+      },
     }));
   }
 
   const verifyStartedAt = now();
   const verifyResult = await dependencies.sprites.getConnection(gatewayConnectionId);
-  durations.verifyMs = now() - verifyStartedAt;
+  const verifyMs = now() - verifyStartedAt;
   if (!verifyResult.ok) {
-    return failure(await buildErrorWithCleanup({
+    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.sprites, now);
+    return failure(buildError({
       code: verifyResult.error.code,
       stage: "verify",
       retryable: verifyResult.error.retryable,
-      gatewayConnectionId,
-      dependencies,
-      durations,
-      startedAt,
-      now,
+      cleanup: cleanup.status,
+      durations: {
+        ...dashboardDurations,
+        listAfterMs,
+        scopeMs,
+        verifyMs,
+        cleanupMs: cleanup.cleanupMs,
+        totalMs: now() - startedAt,
+      },
     }));
   }
 
   if (verifyResult.value === null || !policiesMatch(verifyResult.value.accessPolicy, accessPolicy)) {
-    return failure(await buildErrorWithCleanup({
+    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.sprites, now);
+    return failure(buildError({
       code: "policy_verification_failed",
       stage: "verify",
       retryable: false,
-      gatewayConnectionId,
-      dependencies,
-      durations,
-      startedAt,
-      now,
+      cleanup: cleanup.status,
+      durations: {
+        ...dashboardDurations,
+        listAfterMs,
+        scopeMs,
+        verifyMs,
+        cleanupMs: cleanup.cleanupMs,
+        totalMs: now() - startedAt,
+      },
     }));
   }
 
-  durations.totalMs = now() - startedAt;
   return success({
     name: request.name,
     gatewayConnectionId,
@@ -177,7 +190,13 @@ export async function mintConnector(
       ? {}
       : { detailId: dashboardResult.value.detailId }),
     accessPolicy,
-    durations,
+    durations: {
+      ...dashboardDurations,
+      listAfterMs,
+      scopeMs,
+      verifyMs,
+      totalMs: now() - startedAt,
+    },
   });
 }
 
@@ -258,34 +277,6 @@ function policiesMatch(
   );
 }
 
-async function buildErrorWithCleanup(params: {
-  code: ConnectorProvisionerErrorCode;
-  stage: ProvisioningStage;
-  retryable: boolean;
-  gatewayConnectionId: string;
-  dependencies: MintConnectorDependencies;
-  durations: ConnectorProvisioningDurations;
-  startedAt: number;
-  now: () => number;
-}): Promise<ConnectorProvisionerError> {
-  const cleanup = await cleanupConnections(
-    [params.gatewayConnectionId],
-    params.dependencies.sprites,
-    params.now,
-    params.durations,
-  );
-
-  return buildError({
-    code: params.code,
-    stage: params.stage,
-    retryable: params.retryable,
-    cleanup,
-    durations: params.durations,
-    startedAt: params.startedAt,
-    now: params.now,
-  });
-}
-
 function buildError(params: {
   code: ConnectorProvisionerErrorCode;
   stage: ProvisioningStage;
@@ -294,10 +285,7 @@ function buildError(params: {
   dashboardShape?: ConnectorProvisionerError["dashboardShape"];
   cleanup: CleanupStatus;
   durations: ConnectorProvisioningDurations;
-  startedAt: number;
-  now: () => number;
 }): ConnectorProvisionerError {
-  params.durations.totalMs = params.now() - params.startedAt;
   return {
     code: params.code,
     stage: params.stage,
@@ -374,24 +362,16 @@ async function listConnectionsAfterCreate(
   });
 }
 
-async function cleanupConnections(
-  connectionIds: string[],
+async function cleanupConnector(
+  connectionId: string,
   sprites: SpritesConnectionsClient,
   now: () => number,
-  durations: ConnectorProvisioningDurations,
-): Promise<CleanupStatus> {
-  if (connectionIds.length === 0) {
-    return NOT_ATTEMPTED;
-  }
-
+): Promise<{ status: CleanupStatus; cleanupMs: number }> {
   const cleanupStartedAt = now();
-  const results = await Promise.all(
-    connectionIds.map((connectionId) => deleteConnectorAndVerify(connectionId, sprites)),
-  );
-  durations.cleanupMs = now() - cleanupStartedAt;
+  const result = await deleteConnectorAndVerify(connectionId, sprites);
   return {
-    attempted: true,
-    succeeded: results.every((result) => result.ok),
+    status: { attempted: true, succeeded: result.ok },
+    cleanupMs: now() - cleanupStartedAt,
   };
 }
 
@@ -410,26 +390,26 @@ async function reconcileAfterUncertainSubmit(params: {
   request: MintConnectorRequest;
   dependencies: MintConnectorDependencies;
   sleep: (milliseconds: number) => Promise<void>;
-  durations: ConnectorProvisioningDurations;
+  dashboardDurations: PartialDurations;
   startedAt: number;
   now: () => number;
 }): Promise<ConnectorProvisionerError> {
-  const listAfterStartedAt = params.now();
+  const { now, startedAt } = params;
+  const listAfterStartedAt = now();
   const afterResult = await listConnectionsAfterCreate(
     params.dependencies.sprites,
     params.sleep,
     params.request,
   );
-  params.durations.listAfterMs = params.now() - listAfterStartedAt;
+  const listAfterMs = now() - listAfterStartedAt;
+  const durations: PartialDurations = { ...params.dashboardDurations, listAfterMs };
   if (!afterResult.ok) {
     return buildError({
       code: "orphan_reconciliation_required",
       stage: "list_after",
       retryable: true,
       cleanup: NOT_ATTEMPTED,
-      durations: params.durations,
-      startedAt: params.startedAt,
-      now: params.now,
+      durations: { ...durations, totalMs: now() - startedAt },
     });
   }
 
@@ -450,29 +430,29 @@ async function reconcileAfterUncertainSubmit(params: {
       dashboardOperation: params.dashboardOperation,
       dashboardShape: params.dashboardShape,
       cleanup: NOT_ATTEMPTED,
-      durations: params.durations,
-      startedAt: params.startedAt,
-      now: params.now,
+      durations: { ...durations, totalMs: now() - startedAt },
     });
   }
-  const cleanup = orphan === undefined
-    ? NOT_ATTEMPTED
-    : await cleanupConnections(
-      [orphan.id],
-      params.dependencies.sprites,
-      params.now,
-      params.durations,
-    );
+  if (orphan === undefined) {
+    return buildError({
+      code: "orphan_reconciliation_required",
+      stage: "list_after",
+      retryable: true,
+      dashboardOperation: params.dashboardOperation,
+      dashboardShape: params.dashboardShape,
+      cleanup: NOT_ATTEMPTED,
+      durations: { ...durations, totalMs: now() - startedAt },
+    });
+  }
+  const cleanup = await cleanupConnector(orphan.id, params.dependencies.sprites, now);
   return buildError({
-    code: orphan === undefined ? "orphan_reconciliation_required" : params.originalCode,
-    stage: orphan === undefined ? "list_after" : "dashboard_create",
-    retryable: orphan === undefined,
+    code: params.originalCode,
+    stage: "dashboard_create",
+    retryable: false,
     dashboardOperation: params.dashboardOperation,
     dashboardShape: params.dashboardShape,
-    cleanup,
-    durations: params.durations,
-    startedAt: params.startedAt,
-    now: params.now,
+    cleanup: cleanup.status,
+    durations: { ...durations, cleanupMs: cleanup.cleanupMs, totalMs: now() - startedAt },
   });
 }
 
