@@ -6,11 +6,14 @@ import type {
 } from "@repo/sprites-client";
 import type {
   CleanupStatus,
+  ConnectorProvisioningDurations,
+  MintConnectorRequest,
+} from "./connectors.schema";
+import type {
+  ConnectorCleanupError,
   ConnectorProvisionerError,
   ConnectorProvisionerErrorCode,
-  ConnectorProvisioningDurations,
   DashboardConnectorClient,
-  MintConnectorRequest,
   MintConnectorResult,
   ProvisioningStage,
 } from "./types";
@@ -200,21 +203,40 @@ export async function mintConnector(
   });
 }
 
+/**
+ * Deletes a connector and confirms it is gone, so a failed delete can never be
+ * mistaken for a clean teardown.
+ *
+ * @param connectionId Gateway connection id to delete.
+ * @param spritesClient Sprites REST client used for the delete and the re-read.
+ * @returns Success once the connector no longer resolves, otherwise a
+ *   `cleanup_failed` error carrying the underlying cause.
+ */
 export async function deleteConnectorAndVerify(
   connectionId: string,
   spritesClient: SpriteConnectorsClient,
-): Promise<Result<void, ConnectorProvisionerErrorCode>> {
+): Promise<Result<void, ConnectorCleanupError>> {
   const deleteResult = await spritesClient.deleteConnection(connectionId);
   if (!deleteResult.ok) {
-    return failure("cleanup_failed");
+    return failure(cleanupError(deleteResult.error.code, deleteResult.error.retryable));
   }
 
   const getResult = await spritesClient.getConnection(connectionId);
-  if (!getResult.ok || getResult.value !== null) {
-    return failure("cleanup_failed");
+  if (!getResult.ok) {
+    return failure(cleanupError(getResult.error.code, getResult.error.retryable));
+  }
+  if (getResult.value !== null) {
+    return failure(cleanupError("connector_still_present", true));
   }
 
   return success(undefined);
+}
+
+function cleanupError(
+  cause: ConnectorCleanupError["cause"],
+  retryable: boolean,
+): ConnectorCleanupError {
+  return { code: "cleanup_failed", retryable, cause };
 }
 
 function reconcileCreatedConnection(

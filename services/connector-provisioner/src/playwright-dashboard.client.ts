@@ -11,12 +11,12 @@ import {
   type DashboardShapeSnapshot,
 } from "./dashboard-shape";
 import { failure, success, type Result } from "@repo/shared";
+import type { MintConnectorRequest } from "./connectors.schema";
 import type {
   DashboardConnectorClient,
   DashboardCreateError,
   DashboardCreateResult,
   DashboardOperation,
-  MintConnectorRequest,
 } from "./types";
 
 const StorageStateSchema = z.object({
@@ -49,11 +49,14 @@ interface PlaywrightDashboardClientOptions {
 
 type StorageState = Exclude<BrowserContextOptions["storageState"], string | undefined>;
 
-class ReauthenticationRequiredError extends Error {
-  constructor() {
-    super("Dashboard session expired during submit");
-  }
-}
+/**
+ * Submit outcome. The dashboard can bounce a mid-submit request to sign-in
+ * instead of creating the connector, which is an expected operational state,
+ * not an exception.
+ */
+type CreateConnectionOutcome =
+  | { status: "created"; detailId?: string }
+  | { status: "reauthentication_required" };
 
 export class PlaywrightDashboardClient implements DashboardConnectorClient {
   private readonly browserBinding: BrowserWorker;
@@ -140,20 +143,9 @@ export class PlaywrightDashboardClient implements DashboardConnectorClient {
       const createStartedAt = this.now();
       operation = "submit";
       submitAttempted = true;
-      const detailId = await createConnection(page);
+      const createOutcome = await createConnection(page);
       durations.dashboardCreateMs = this.now() - createStartedAt;
-
-      return success({
-        ...(detailId === undefined ? {} : { detailId }),
-        durations: {
-          browserLaunchMs: durations.browserLaunchMs ?? 0,
-          dashboardPreflightMs: durations.dashboardPreflightMs ?? 0,
-          dashboardTestMs: durations.dashboardTestMs ?? 0,
-          dashboardCreateMs: durations.dashboardCreateMs ?? 0,
-        },
-      });
-    } catch (error) {
-      if (error instanceof ReauthenticationRequiredError) {
+      if (createOutcome.status === "reauthentication_required") {
         return failure({
           code: "reauthentication_required",
           retryable: false,
@@ -162,6 +154,19 @@ export class PlaywrightDashboardClient implements DashboardConnectorClient {
           durations,
         });
       }
+
+      return success({
+        ...(createOutcome.detailId === undefined ? {} : { detailId: createOutcome.detailId }),
+        durations: {
+          browserLaunchMs: durations.browserLaunchMs ?? 0,
+          dashboardPreflightMs: durations.dashboardPreflightMs ?? 0,
+          dashboardTestMs: durations.dashboardTestMs ?? 0,
+          dashboardCreateMs: durations.dashboardCreateMs ?? 0,
+        },
+      });
+    } catch {
+      // Playwright throws on timeouts and closed pages; those are unexpected
+      // integration failures, mapped to a code by the step they happened in.
       return failure({
         code: dashboardFailureCode(operation),
         retryable: true,
@@ -317,7 +322,7 @@ async function testConnection(page: Page): Promise<boolean> {
   return await createButton.isEnabled();
 }
 
-async function createConnection(page: Page): Promise<string | undefined> {
+async function createConnection(page: Page): Promise<CreateConnectionOutcome> {
   const createUrl = page.url();
   const createButton = page.getByRole("button", {
     name: "Add connector",
@@ -330,12 +335,14 @@ async function createConnection(page: Page): Promise<string | undefined> {
   });
 
   if (isAuthenticationUrl(page.url())) {
-    throw new ReauthenticationRequiredError();
+    return { status: "reauthentication_required" };
   }
 
   const url = new URL(page.url());
   const segments = url.pathname.split("/").filter(Boolean);
   const connectorsIndex = segments.lastIndexOf("connectors");
   const candidate = connectorsIndex === -1 ? undefined : segments[connectorsIndex + 1];
-  return candidate === undefined || candidate === "new" ? undefined : candidate;
+  return candidate === undefined || candidate === "new"
+    ? { status: "created" }
+    : { status: "created", detailId: candidate };
 }

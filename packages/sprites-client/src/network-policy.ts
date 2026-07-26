@@ -1,5 +1,5 @@
 import type { NetworkAccessConfig, ProviderId } from "@repo/shared";
-import type { NetworkPolicyRule } from "./WorkersSpriteClient";
+import type { NetworkPolicyRule } from "./workers-sprite.client";
 
 /** Allow rule helper */
 function allow(domain: string): NetworkPolicyRule {

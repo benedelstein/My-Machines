@@ -1,5 +1,5 @@
 import type { Logger } from "@repo/shared";
-import { SpriteWebsocketSession } from "./SpriteWebsocketSession";
+import { SpriteWebsocketSession } from "./sprite-websocket.session";
 import type {
   AttachSessionOptions,
   ExecResult,

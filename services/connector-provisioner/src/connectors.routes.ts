@@ -1,10 +1,11 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { MiddlewareHandler } from "hono";
-import { ConsoleLogger } from "@repo/shared";
+import { createLogger } from "@repo/shared";
 import type {
   SpritesConnection,
   SpriteConnectorsClient,
 } from "@repo/sprites-client";
+import { hasValidBearer } from "./bearer-token";
 import { deleteConnectorAndVerify, mintConnector } from "./connector-minting.service";
 import {
   deleteConnectorRoute,
@@ -12,8 +13,8 @@ import {
   mintConnectorRoute,
 } from "./connectors.schema";
 import { hasBaseConfiguration, hasMintConfiguration, type Env } from "./env";
-import type { DashboardConnectorClient } from "./types";
-import { durationFields, hasValidBearer } from "./utils";
+import type { ConnectorCleanupError, DashboardConnectorClient } from "./types";
+import { durationFields } from "./utils";
 
 type ConnectorRouteEnv = { Bindings: Env };
 
@@ -22,7 +23,7 @@ export interface ConnectorRouteDeps {
   createDashboardClient(env: Env): DashboardConnectorClient;
 }
 
-const logger = new ConsoleLogger({ format: "pretty" }, "connectors.routes.ts");
+const logger = createLogger("connectors.routes.ts");
 
 export function createConnectorRoutes(dependencies: ConnectorRouteDeps): OpenAPIHono<ConnectorRouteEnv> {
   const routes = new OpenAPIHono<ConnectorRouteEnv>({
@@ -100,10 +101,12 @@ export function createConnectorRoutes(dependencies: ConnectorRouteDeps): OpenAPI
     );
     const cleanupMs = performance.now() - cleanupStartedAt;
     if (!deleteResult.ok) {
+      logCleanupFailure("live-test", mintResult.value.gatewayConnectionId, deleteResult.error);
       return c.json({
         error: {
-          code: deleteResult.error,
+          code: deleteResult.error.code,
           stage: "cleanup",
+          retryable: deleteResult.error.retryable,
           message: "The disposable connector could not be removed.",
           cleanup: {
             attempted: true,
@@ -153,10 +156,13 @@ export function createConnectorRoutes(dependencies: ConnectorRouteDeps): OpenAPI
 
     const deleteResult = await deleteConnectorAndVerify(gatewayConnectionId, spritesClient);
     if (!deleteResult.ok) {
-      logger.error("Connector delete failed", {
-        fields: { gatewayConnectionId, code: deleteResult.error },
-      });
-      return c.json({ error: { code: deleteResult.error } }, 502);
+      logCleanupFailure("delete", gatewayConnectionId, deleteResult.error);
+      return c.json({
+        error: {
+          code: deleteResult.error.code,
+          retryable: deleteResult.error.retryable,
+        },
+      }, 502);
     }
 
     logger.info("Connector deleted", {
@@ -192,6 +198,22 @@ function logMintSuccess(mode: string, value: Extract<MintOutcome, { ok: true }>[
       name: value.name,
       gatewayConnectionId: value.gatewayConnectionId,
       durations: durationFields(value.durations),
+    },
+  });
+}
+
+function logCleanupFailure(
+  mode: string,
+  gatewayConnectionId: string,
+  error: ConnectorCleanupError,
+): void {
+  logger.error("Connector delete failed", {
+    fields: {
+      mode,
+      gatewayConnectionId,
+      code: error.code,
+      cause: error.cause,
+      retryable: error.retryable,
     },
   });
 }

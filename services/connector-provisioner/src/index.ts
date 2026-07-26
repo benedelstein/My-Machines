@@ -1,18 +1,24 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { ConsoleLogger } from "@repo/shared";
+import { initializeLogger, type LogLevel } from "@repo/shared";
 import { HttpSpriteConnectorsClient } from "@repo/sprites-client";
 import { createConnectorRoutes } from "./connectors.routes";
 import type { Env } from "./env";
 import { PlaywrightDashboardClient } from "./playwright-dashboard.client";
-import { createRequestLoggerMiddleware } from "./request-logger.middleware";
+import { requestLoggerMiddleware } from "./request-logger.middleware";
 
 export type { Env } from "./env";
 
-const logger = new ConsoleLogger({ format: "pretty" }, "connector-provisioner");
-
 const app = new OpenAPIHono<{ Bindings: Env }>();
 
-app.use("*", createRequestLoggerMiddleware(logger));
+app.use("*", async (c, next) => {
+  initializeLogger({
+    format: c.env.ENVIRONMENT === "production" ? "json" : "pretty",
+    level: c.env.LOG_LEVEL as LogLevel,
+  });
+  await next();
+});
+
+app.use("*", requestLoggerMiddleware);
 app.use("*", async (c, next) => {
   await next();
   c.res.headers.set("Cache-Control", "no-store");

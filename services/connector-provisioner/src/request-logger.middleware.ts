@@ -1,22 +1,42 @@
 import type { MiddlewareHandler } from "hono";
-import type { LogFields, Logger } from "@repo/shared";
+import { createLogger, type LogFields } from "@repo/shared";
 
-export function createRequestLoggerMiddleware(logger: Logger): MiddlewareHandler {
-  return async (c, next) => {
-    const startedAt = performance.now();
-    await next();
-    const fields: LogFields = {
-      method: c.req.method,
-      path: c.req.path,
-      status: c.res.status,
-      durationMs: Math.round(performance.now() - startedAt),
-    };
-    if (c.res.status >= 500) {
-      logger.error("Request completed", { fields });
-    } else if (c.res.status >= 400) {
-      logger.warn("Request completed", { fields });
-    } else if (c.req.path !== "/health") {
-      logger.info("Request completed", { fields });
-    }
-  };
+const logger = createLogger("request-logger.middleware.ts");
+
+function logRequestLine(fields: LogFields, status: number, path: string): void {
+  if (status >= 500) {
+    logger.error("Request completed", { fields });
+    return;
+  }
+
+  if (status >= 400) {
+    logger.warn("Request completed", { fields });
+    return;
+  }
+
+  // Health checks poll continuously and would drown out real traffic.
+  if (path !== "/health") {
+    logger.info("Request completed", { fields });
+  }
 }
+
+export const requestLoggerMiddleware: MiddlewareHandler = async (c, next) => {
+  const startedAt = performance.now();
+  const method = c.req.method;
+  const path = c.req.path;
+  const buildFields = (status: number): LogFields => ({
+    method,
+    path,
+    status,
+    durationMs: Math.round(performance.now() - startedAt),
+  });
+
+  try {
+    await next();
+  } catch (error) {
+    logRequestLine(buildFields(500), 500, path);
+    throw error;
+  }
+
+  logRequestLine(buildFields(c.res.status), c.res.status, path);
+};

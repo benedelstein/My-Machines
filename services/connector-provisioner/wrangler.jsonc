@@ -11,6 +11,8 @@
     "remote": true
   },
   "vars": {
+    "ENVIRONMENT": "production",
+    "LOG_LEVEL": "info",
     "SPRITES_API_URL": "https://api.sprites.dev",
     "SPRITES_DASHBOARD_URL": "https://fly.io/dashboard"
   },

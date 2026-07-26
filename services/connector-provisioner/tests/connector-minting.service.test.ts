@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mintConnector } from "../src/connector-minting.service";
+import { deleteConnectorAndVerify, mintConnector } from "../src/connector-minting.service";
 import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
@@ -7,11 +7,11 @@ import type {
   SpriteConnectorsClient,
   SpritesRestError,
 } from "@repo/sprites-client";
+import type { MintConnectorRequest } from "../src/connectors.schema";
 import type {
   DashboardConnectorClient,
   DashboardCreateError,
   DashboardCreateResult,
-  MintConnectorRequest,
 } from "../src/types";
 
 const request: MintConnectorRequest = {
@@ -518,5 +518,52 @@ describe("mintConnector", () => {
       },
     });
     expect(spritesClient.deletedIds).toEqual([]);
+  });
+});
+
+describe("deleteConnectorAndVerify", () => {
+  it("succeeds once the connector no longer resolves", async () => {
+    const spritesClient = new FakeSpritesClient();
+
+    const result = await deleteConnectorAndVerify("gateway-connection-id", spritesClient);
+
+    expect(result).toEqual({ ok: true, value: undefined });
+    expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
+  });
+
+  it("keeps the underlying Sprites failure as the cleanup cause", async () => {
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.deleteResult = failure({
+      code: "sprites_rate_limited",
+      retryable: true,
+    });
+
+    const result = await deleteConnectorAndVerify("gateway-connection-id", spritesClient);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "cleanup_failed",
+        retryable: true,
+        cause: "sprites_rate_limited",
+      },
+    });
+  });
+
+  it("fails when the connector is still present after a successful delete", async () => {
+    const spritesClient = new FakeSpritesClient();
+    // Delete reports success but the connector keeps resolving afterwards.
+    spritesClient.getConnection = async () => success(createdConnection);
+
+    const result = await deleteConnectorAndVerify("gateway-connection-id", spritesClient);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "cleanup_failed",
+        retryable: true,
+        cause: "connector_still_present",
+      },
+    });
   });
 });

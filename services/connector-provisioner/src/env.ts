@@ -2,6 +2,8 @@ import type { BrowserWorker } from "@cloudflare/playwright";
 
 export interface Env {
   BROWSER: BrowserWorker;
+  ENVIRONMENT: string;
+  LOG_LEVEL: string;
   CONNECTOR_PROVISIONER_BEARER_TOKEN: string;
   SPRITES_API_KEY: string;
   SPRITES_API_URL: string;

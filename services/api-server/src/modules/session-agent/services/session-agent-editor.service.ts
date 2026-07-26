@@ -46,7 +46,7 @@ export async function handleEditorOpen(context: EditorContext): Promise<EditorOp
     context.spriteName,
     env.SPRITES_API_KEY,
     env.SPRITES_API_URL,
-    createLogger("SpriteWebsocketSession.ts"),
+    createLogger("sprite-websocket.session.ts"),
   );
 
   try {
@@ -150,7 +150,7 @@ export async function handleEditorClose(context: EditorContext): Promise<EditorO
     context.spriteName,
     env.SPRITES_API_KEY,
     env.SPRITES_API_URL,
-    createLogger("SpriteWebsocketSession.ts"),
+    createLogger("sprite-websocket.session.ts"),
   );
 
   try {

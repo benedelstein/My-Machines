@@ -851,7 +851,7 @@ export class SpriteAgentProcessManager {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
-      createLogger("SpriteWebsocketSession.ts"),
+      createLogger("sprite-websocket.session.ts"),
     );
   }
 }

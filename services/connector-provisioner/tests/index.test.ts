@@ -8,6 +8,8 @@ function handleRequest(request: Request, environment: Env): Promise<Response> {
 
 const baseEnvironment: Env = {
   BROWSER: {} as BrowserWorker,
+  ENVIRONMENT: "test",
+  LOG_LEVEL: "error",
   CONNECTOR_PROVISIONER_BEARER_TOKEN: "provisioner-secret",
   SPRITES_API_KEY: "sprites-secret",
   SPRITES_API_URL: "https://api.sprites.dev",

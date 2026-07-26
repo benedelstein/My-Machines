@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConsoleLogger } from "@repo/shared";
-import { WorkersSpriteClient } from "../src/WorkersSpriteClient";
+import { WorkersSpriteClient } from "../src/workers-sprite.client";
 
 const testLogger = new ConsoleLogger({ format: "pretty" }, "workers-sprite-client.test.ts");
 

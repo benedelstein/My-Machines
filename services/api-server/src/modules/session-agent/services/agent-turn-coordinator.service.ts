@@ -394,7 +394,7 @@ export class AgentTurnCoordinator {
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
-      createLogger("SpriteWebsocketSession.ts"),
+      createLogger("sprite-websocket.session.ts"),
     );
     const session = sprite.attachSession(String(agentProcessId), {
       idleTimeoutMs: 3_000,
