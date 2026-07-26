@@ -1,3 +1,4 @@
+import API
 import Entities
 
 extension AgentSessionViewModel {

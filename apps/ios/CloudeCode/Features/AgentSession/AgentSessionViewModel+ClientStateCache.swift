@@ -1,4 +1,5 @@
 import Domain
+import Entities
 
 extension AgentSessionViewModel {
     func loadCachedClientState() async {
