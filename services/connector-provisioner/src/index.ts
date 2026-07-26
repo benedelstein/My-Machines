@@ -1,225 +1,41 @@
-import type { BrowserWorker } from "@cloudflare/playwright";
-import { ConsoleLogger, type LogFields } from "@repo/shared";
-import { HttpSpritesConnectionsClient, type SpritesConnection } from "@repo/sprites-client";
-import { deleteConnectorAndVerify, mintConnector } from "./connector-minting.service";
+import { OpenAPIHono } from "@hono/zod-openapi";
+import { ConsoleLogger } from "@repo/shared";
+import { HttpSpritesConnectionsClient } from "@repo/sprites-client";
+import { createConnectorRoutes } from "./connectors.routes";
+import type { Env } from "./env";
 import { PlaywrightDashboardClient } from "./playwright-dashboard.client";
-import { LiveTestRequestSchema } from "./types";
-import { durationFields, hasValidBearer, jsonResponse, readJson } from "./utils";
+import { createRequestLoggerMiddleware } from "./request-logger.middleware";
+
+export type { Env } from "./env";
 
 const logger = new ConsoleLogger({ format: "pretty" }, "connector-provisioner");
 
-export interface Env {
-  BROWSER: BrowserWorker;
-  CONNECTOR_PROVISIONER_BEARER_TOKEN: string;
-  SPRITES_API_KEY: string;
-  SPRITES_API_URL: string;
-  SPRITES_DASHBOARD_STORAGE_STATE: string;
-  SPRITES_DASHBOARD_URL: string;
-  SPRITES_ORG_SLUG: string;
-}
+const app = new OpenAPIHono<{ Bindings: Env }>();
 
-export async function handleRequest(request: Request, env: Env): Promise<Response> {
-  const startedAt = performance.now();
-  const url = new URL(request.url);
-  const response = await route(request, url, env);
-  const requestFields: LogFields = {
-    method: request.method,
-    path: url.pathname,
-    status: response.status,
-    durationMs: Math.round(performance.now() - startedAt),
-  };
-  if (response.status >= 500) {
-    logger.error("Request completed", { fields: requestFields });
-  } else if (response.status >= 400) {
-    logger.warn("Request completed", { fields: requestFields });
-  } else if (url.pathname !== "/health") {
-    logger.info("Request completed", { fields: requestFields });
-  }
-  return response;
-}
+app.use("*", createRequestLoggerMiddleware(logger));
+app.use("*", async (c, next) => {
+  await next();
+  c.res.headers.set("Cache-Control", "no-store");
+});
 
-async function route(request: Request, url: URL, env: Env): Promise<Response> {
-  if (request.method === "GET" && url.pathname === "/health") {
-    return jsonResponse({ status: "ok" });
-  }
-  const isMint = request.method === "POST" && url.pathname === "/v1/connectors/mint";
-  const isLiveTest = request.method === "POST" && url.pathname === "/v1/connectors/live-test";
-  const deleteConnectionId = getDeleteConnectionId(request.method, url.pathname);
-  if (!isMint && !isLiveTest && deleteConnectionId === undefined) {
-    return jsonResponse({ error: { code: "not_found" } }, 404);
-  }
+app.get("/health", (c) => c.json({ status: "ok" }));
+app.notFound((c) => c.json({ error: { code: "not_found" } }, 404));
 
-  if (!await hasValidBearer(request, env.CONNECTOR_PROVISIONER_BEARER_TOKEN)) {
-    return jsonResponse({ error: { code: "unauthorized" } }, 401);
-  }
-  if (!hasBaseConfiguration(env)) {
-    return jsonResponse({ error: { code: "service_configuration_invalid" } }, 503);
-  }
-
-  const sprites = new HttpSpritesConnectionsClient({
+app.route("/v1/connectors", createConnectorRoutes({
+  createSpritesClient: (env) => new HttpSpritesConnectionsClient({
     apiUrl: env.SPRITES_API_URL,
     apiToken: env.SPRITES_API_KEY,
-  });
-  if (deleteConnectionId !== undefined) {
-    const existing = await sprites.getConnection(deleteConnectionId);
-    if (!existing.ok) {
-      return jsonResponse({ error: { code: existing.error.code } }, 502);
-    }
-    if (existing.value === null) {
-      return jsonResponse({ error: { code: "connector_not_found" } }, 404);
-    }
-    if (!isDeletableSessionConnector(existing.value)) {
-      logger.warn("Connector delete refused", {
-        fields: { gatewayConnectionId: deleteConnectionId },
-      });
-      return jsonResponse({ error: { code: "connector_delete_refused" } }, 403);
-    }
-    const deleteResult = await deleteConnectorAndVerify(deleteConnectionId, sprites);
-    if (!deleteResult.ok) {
-      logger.error("Connector delete failed", {
-        fields: { gatewayConnectionId: deleteConnectionId, code: deleteResult.error },
-      });
-      return jsonResponse({ error: { code: deleteResult.error } }, 502);
-    }
-    logger.info("Connector deleted", {
-      fields: { gatewayConnectionId: deleteConnectionId },
-    });
-    return jsonResponse({ connector: { gatewayConnectionId: deleteConnectionId, deleted: true } });
-  }
-  if (!hasMintConfiguration(env)) {
-    return jsonResponse({ error: { code: "service_configuration_invalid" } }, 503);
-  }
-
-  const requestBody = await readJson(request);
-  const parsedRequest = LiveTestRequestSchema.safeParse(requestBody);
-  if (!parsedRequest.success) {
-    return jsonResponse({ error: { code: "invalid_request" } }, 400);
-  }
-
-  const dashboard = new PlaywrightDashboardClient({
+  }),
+  createDashboardClient: (env) => new PlaywrightDashboardClient({
     browser: env.BROWSER,
     dashboardUrl: env.SPRITES_DASHBOARD_URL,
     orgSlug: env.SPRITES_ORG_SLUG,
     storageState: env.SPRITES_DASHBOARD_STORAGE_STATE,
-  });
+  }),
+}));
 
-  const mode = isMint ? "mint" : "live-test";
-  const mintResult = await mintConnector(
-    parsedRequest.data,
-    { dashboard, sprites },
-  );
-  if (!mintResult.ok) {
-    logger.warn("Connector mint failed", {
-      fields: {
-        mode,
-        code: mintResult.error.code,
-        stage: mintResult.error.stage,
-        retryable: mintResult.error.retryable,
-        ...(mintResult.error.dashboardOperation === undefined
-          ? {}
-          : { dashboardOperation: mintResult.error.dashboardOperation }),
-        durations: durationFields(mintResult.error.durations),
-      },
-    });
-    return jsonResponse({ error: mintResult.error }, 502);
-  }
-  logger.info("Connector minted", {
-    fields: {
-      mode,
-      name: mintResult.value.name,
-      gatewayConnectionId: mintResult.value.gatewayConnectionId,
-      durations: durationFields(mintResult.value.durations),
-    },
-  });
-  if (isMint) {
-    return jsonResponse({
-      connector: {
-        name: mintResult.value.name,
-        gatewayConnectionId: mintResult.value.gatewayConnectionId,
-        ...(mintResult.value.detailId === undefined
-          ? {}
-          : { detailId: mintResult.value.detailId }),
-      },
-      policy: mintResult.value.accessPolicy,
-      durations: mintResult.value.durations,
-    }, 201);
-  }
-
-  const cleanupStartedAt = performance.now();
-  const deleteResult = await deleteConnectorAndVerify(
-    mintResult.value.gatewayConnectionId,
-    sprites,
-  );
-  const cleanupMs = performance.now() - cleanupStartedAt;
-  if (!deleteResult.ok) {
-    return jsonResponse({
-      error: {
-        code: deleteResult.error,
-        stage: "cleanup",
-        message: "The disposable connector could not be removed.",
-        cleanup: {
-          attempted: true,
-          succeeded: false,
-        },
-        durations: {
-          ...mintResult.value.durations,
-          cleanupMs,
-        },
-      },
-    }, 502);
-  }
-
-  return jsonResponse({
-    connector: {
-      name: mintResult.value.name,
-      gatewayConnectionId: mintResult.value.gatewayConnectionId,
-      ...(mintResult.value.detailId === undefined
-        ? {}
-        : { detailId: mintResult.value.detailId }),
-      deleted: true,
-    },
-    policy: mintResult.value.accessPolicy,
-    durations: {
-      ...mintResult.value.durations,
-      cleanupMs,
-    },
-  });
-}
+export { app };
 
 export default {
-  fetch: handleRequest,
+  fetch: app.fetch,
 } satisfies ExportedHandler<Env>;
-
-function hasBaseConfiguration(env: Env): boolean {
-  return [
-    env.CONNECTOR_PROVISIONER_BEARER_TOKEN,
-    env.SPRITES_API_KEY,
-    env.SPRITES_API_URL,
-  ].every((value) => typeof value === "string" && value.length > 0);
-}
-
-function hasMintConfiguration(env: Env): boolean {
-  return [
-    env.SPRITES_DASHBOARD_STORAGE_STATE,
-    env.SPRITES_DASHBOARD_URL,
-    env.SPRITES_ORG_SLUG,
-  ].every((value) => typeof value === "string" && value.length > 0)
-    && typeof env.BROWSER?.fetch === "function";
-}
-
-function isDeletableSessionConnector(connection: SpritesConnection): boolean {
-  const labels = connection.accessPolicy?.spriteLabels ?? [];
-  return connection.provider === "custom_api"
-    && connection.accessPolicy?.allowAll === false
-    && labels.length > 0
-    && labels.every((label) => label.startsWith("session:"));
-}
-
-function getDeleteConnectionId(method: string, pathname: string): string | undefined {
-  if (method !== "DELETE") {
-    return undefined;
-  }
-
-  const match = /^\/v1\/connectors\/([^/]+)$/u.exec(pathname);
-  return match?.[1] === undefined ? undefined : decodeURIComponent(match[1]);
-}

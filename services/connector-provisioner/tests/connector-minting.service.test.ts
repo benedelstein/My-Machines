@@ -66,7 +66,6 @@ class FakeSpritesClient implements SpritesConnectionsClient {
   readonly updatedPolicies: AccessPolicy[] = [];
   listCallCount = 0;
   listResponses: Array<Result<SpritesConnection[], SpritesRestError>> = [
-    success([]),
     success([createdConnection]),
   ];
   updateResult: Result<SpritesConnection, SpritesRestError> = success(createdConnection);
@@ -267,7 +266,7 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.listCallCount).toBe(1);
+    expect(sprites.listCallCount).toBe(0);
   });
 
   it("attributes only its own connector when a concurrent same-name mint is visible", async () => {
@@ -278,7 +277,6 @@ describe("mintConnector", () => {
     };
     const sprites = new FakeSpritesClient();
     sprites.listResponses = [
-      success([]),
       success([concurrentTwin, createdConnection]),
     ];
 
@@ -302,7 +300,6 @@ describe("mintConnector", () => {
   it("deletes nothing when reconciliation is ambiguous", async () => {
     const sprites = new FakeSpritesClient();
     sprites.listResponses = [
-      success([]),
       success([
         createdConnection,
         { ...createdConnection, id: "second-gateway-id" },
@@ -332,7 +329,6 @@ describe("mintConnector", () => {
   it("does not accept one exact match when another same-name connector appears", async () => {
     const sprites = new FakeSpritesClient();
     sprites.listResponses = [
-      success([]),
       success([
         createdConnection,
         {
@@ -368,7 +364,6 @@ describe("mintConnector", () => {
   it("fails without deleting when Sprites returns malformed provider URLs", async () => {
     const sprites = new FakeSpritesClient();
     sprites.listResponses = [
-      success([]),
       success([{
         ...createdConnection,
         providerInfo: {
@@ -404,7 +399,6 @@ describe("mintConnector", () => {
       retryable: true,
     });
     sprites.listResponses = [
-      success([]),
       listFailure,
       listFailure,
       listFailure,
@@ -435,32 +429,9 @@ describe("mintConnector", () => {
     expect(retryDelays).toEqual([250, 750, 1_500]);
   });
 
-  it("rejects a non-unique connector name before browser submission", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.listResponses = [success([createdConnection])];
-    const dashboard = new FakeDashboardClient(success(dashboardSuccess));
-
-    const result = await mintConnector(request, {
-      dashboard,
-      sprites,
-      now: clock(),
-      nameSuffix: () => "suffix01",
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      error: {
-        code: "connector_name_conflict",
-        stage: "list_before",
-      },
-    });
-    expect(dashboard.callCount).toBe(0);
-  });
-
   it("retries successful empty lists until the created connector becomes visible", async () => {
     const sprites = new FakeSpritesClient();
     sprites.listResponses = [
-      success([]),
       success([]),
       success([]),
       success([createdConnection]),
@@ -518,7 +489,6 @@ describe("mintConnector", () => {
   it("deletes nothing after an uncertain submit when attribution is ambiguous", async () => {
     const sprites = new FakeSpritesClient();
     sprites.listResponses = [
-      success([]),
       success([
         createdConnection,
         { ...createdConnection, id: "second-gateway-id" },

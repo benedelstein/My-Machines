@@ -27,6 +27,9 @@ catalogs:
     dotenv:
       specifier: ^17.2.3
       version: 17.2.3
+    hono:
+      specifier: ^4.6.0
+      version: 4.11.4
     octokit:
       specifier: ^4.1.2
       version: 4.1.4
@@ -378,7 +381,7 @@ importers:
         specifier: 'catalog:'
         version: 6.0.59(zod@4.3.6)
       hono:
-        specifier: ^4.6.0
+        specifier: 'catalog:'
         version: 4.11.4
       jose:
         specifier: ^6.2.3
@@ -420,12 +423,18 @@ importers:
       '@cloudflare/playwright':
         specifier: ^1.3.0
         version: 1.3.0
+      '@hono/zod-openapi':
+        specifier: 'catalog:'
+        version: 1.2.2(hono@4.11.4)(zod@4.3.6)
       '@repo/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@repo/sprites-client':
         specifier: workspace:*
         version: link:../../packages/sprites-client
+      hono:
+        specifier: 'catalog:'
+        version: 4.11.4
       zod:
         specifier: 'catalog:'
         version: 4.3.6

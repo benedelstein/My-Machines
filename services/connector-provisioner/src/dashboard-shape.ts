@@ -1,8 +1,5 @@
 import { failure, success, type Result } from "@repo/shared";
-import type {
-  DashboardCreateError,
-  DashboardShapeDiagnostics,
-} from "./types";
+import type { DashboardCreateError, DashboardShapeDiagnostics } from "./types";
 
 export interface DashboardShapeSnapshot extends DashboardShapeDiagnostics {
   currentUrl: string;

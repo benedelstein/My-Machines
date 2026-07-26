@@ -2,6 +2,14 @@ import { z } from "zod";
 import type { Result } from "@repo/shared";
 import type { AccessPolicy, SpritesRestErrorCode } from "@repo/sprites-client";
 
+/**
+ * Wire contract for the connector-provisioner internal service. The
+ * provisioner validates requests and types responses against these schemas.
+ * When another service needs to call these routes, extract this contract into
+ * its own package (the @repo/api-contract pattern) rather than importing this
+ * service; until then it stays provisioner-internal.
+ */
+
 const httpsUrl = z.string().url().superRefine((value, context) => {
   const url = new URL(value);
   if (url.protocol !== "https:") {
@@ -100,16 +108,6 @@ export const LiveTestRequestSchema = MintConnectorRequestBaseSchema.superRefine(
 
 export type LiveTestRequest = z.infer<typeof LiveTestRequestSchema>;
 
-export interface DashboardCreateResult {
-  detailId?: string;
-  durations: {
-    browserLaunchMs: number;
-    dashboardPreflightMs: number;
-    dashboardTestMs: number;
-    dashboardCreateMs: number;
-  };
-}
-
 export type DashboardCreateErrorCode =
   | "reauthentication_required"
   | "dashboard_drift"
@@ -129,13 +127,25 @@ export type DashboardOperation =
   | "connection_test"
   | "submit";
 
-export interface DashboardShapeDiagnostics {
-  hasLiveViewRoot: boolean;
-  authMethodOptions: string[];
-  formChangeEvent: string | null;
-  formSubmitEvent: string | null;
-  fieldNames: string[];
-  testEvent: string | null;
+export const DashboardShapeDiagnosticsSchema = z.object({
+  hasLiveViewRoot: z.boolean(),
+  authMethodOptions: z.array(z.string()),
+  formChangeEvent: z.string().nullable(),
+  formSubmitEvent: z.string().nullable(),
+  fieldNames: z.array(z.string()),
+  testEvent: z.string().nullable(),
+});
+
+export type DashboardShapeDiagnostics = z.infer<typeof DashboardShapeDiagnosticsSchema>;
+
+export interface DashboardCreateResult {
+  detailId?: string;
+  durations: {
+    browserLaunchMs: number;
+    dashboardPreflightMs: number;
+    dashboardTestMs: number;
+    dashboardCreateMs: number;
+  };
 }
 
 export interface DashboardCreateError {
@@ -154,7 +164,6 @@ export interface DashboardConnectorClient {
 }
 
 export type ProvisioningStage =
-  | "list_before"
   | "dashboard_create"
   | "list_after"
   | "scope"
@@ -164,16 +173,31 @@ export type ProvisioningStage =
 export type ConnectorProvisionerErrorCode =
   | DashboardCreateErrorCode
   | SpritesRestErrorCode
-  | "connector_name_conflict"
   | "connector_reconciliation_failed"
   | "orphan_reconciliation_required"
   | "policy_verification_failed"
   | "cleanup_failed";
 
-export interface CleanupStatus {
-  attempted: boolean;
-  succeeded: boolean;
-}
+export const CleanupStatusSchema = z.object({
+  attempted: z.boolean(),
+  succeeded: z.boolean(),
+});
+
+export type CleanupStatus = z.infer<typeof CleanupStatusSchema>;
+
+export const ConnectorProvisioningDurationsSchema = z.object({
+  browserLaunchMs: z.number().optional(),
+  dashboardPreflightMs: z.number().optional(),
+  dashboardTestMs: z.number().optional(),
+  dashboardCreateMs: z.number().optional(),
+  listAfterMs: z.number().optional(),
+  scopeMs: z.number().optional(),
+  verifyMs: z.number().optional(),
+  cleanupMs: z.number().optional(),
+  totalMs: z.number(),
+});
+
+export type ConnectorProvisioningDurations = z.infer<typeof ConnectorProvisioningDurationsSchema>;
 
 export interface ConnectorProvisionerError {
   code: ConnectorProvisionerErrorCode;
@@ -186,19 +210,6 @@ export interface ConnectorProvisionerError {
   durations: ConnectorProvisioningDurations;
 }
 
-export interface ConnectorProvisioningDurations {
-  browserLaunchMs?: number;
-  dashboardPreflightMs?: number;
-  dashboardTestMs?: number;
-  dashboardCreateMs?: number;
-  listBeforeMs?: number;
-  listAfterMs?: number;
-  scopeMs?: number;
-  verifyMs?: number;
-  cleanupMs?: number;
-  totalMs: number;
-}
-
 export interface MintConnectorResult {
   name: string;
   gatewayConnectionId: string;
@@ -207,3 +218,61 @@ export interface MintConnectorResult {
   durations: ConnectorProvisioningDurations;
 }
 
+// Error envelope for every provisioner error response. Only `code` is
+// guaranteed; provisioning failures carry the full ConnectorProvisionerError
+// while boundary rejections (unauthorized, not_found, ...) send just a code.
+export const ConnectorProvisionerErrorResponseSchema = z.object({
+  error: z.object({
+    code: z.string(),
+    stage: z.string().optional(),
+    retryable: z.boolean().optional(),
+    dashboardOperation: z.string().optional(),
+    dashboardShape: DashboardShapeDiagnosticsSchema.optional(),
+    message: z.string().optional(),
+    cleanup: CleanupStatusSchema.optional(),
+    durations: ConnectorProvisioningDurationsSchema.optional(),
+  }),
+});
+
+export type ConnectorProvisionerErrorResponse = z.infer<
+  typeof ConnectorProvisionerErrorResponseSchema
+>;
+
+export const ConnectorAccessPolicySchema = z.object({
+  allowAll: z.boolean(),
+  spriteLabels: z.array(z.string()),
+  namePrefix: z.string().optional(),
+  allowedEndpoints: z.array(z.string()).optional(),
+  blockedEndpoints: z.array(z.string()).optional(),
+});
+
+const MintedConnectorSchema = z.object({
+  name: z.string(),
+  gatewayConnectionId: z.string(),
+  detailId: z.string().optional(),
+});
+
+export const MintConnectorResponseSchema = z.object({
+  connector: MintedConnectorSchema,
+  policy: ConnectorAccessPolicySchema,
+  durations: ConnectorProvisioningDurationsSchema,
+});
+
+export type MintConnectorResponse = z.infer<typeof MintConnectorResponseSchema>;
+
+export const LiveTestConnectorResponseSchema = z.object({
+  connector: MintedConnectorSchema.extend({ deleted: z.literal(true) }),
+  policy: ConnectorAccessPolicySchema,
+  durations: ConnectorProvisioningDurationsSchema,
+});
+
+export type LiveTestConnectorResponse = z.infer<typeof LiveTestConnectorResponseSchema>;
+
+export const DeleteConnectorResponseSchema = z.object({
+  connector: z.object({
+    gatewayConnectionId: z.string(),
+    deleted: z.literal(true),
+  }),
+});
+
+export type DeleteConnectorResponse = z.infer<typeof DeleteConnectorResponseSchema>;

@@ -28,7 +28,7 @@
     "@repo/vm-agent": "workspace:*",
     "agents": "catalog:",
     "ai": "catalog:",
-    "hono": "^4.6.0",
+    "hono": "catalog:",
     "jose": "^6.2.3",
     "octokit": "catalog:",
     "zod": "catalog:"

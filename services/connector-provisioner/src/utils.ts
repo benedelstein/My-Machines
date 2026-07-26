@@ -1,24 +1,6 @@
 import type { LogFields } from "@repo/shared";
 import type { ConnectorProvisioningDurations } from "./types";
 
-export function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Cache-Control": "no-store",
-      "Content-Type": "application/json",
-    },
-  });
-}
-
-export async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return undefined;
-  }
-}
-
 export async function hasValidBearer(request: Request, expectedToken: string): Promise<boolean> {
   const authorization = request.headers.get("Authorization");
   if (

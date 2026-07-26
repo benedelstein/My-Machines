@@ -17,6 +17,7 @@ catalog:
   "@ai-sdk/anthropic": "^3.0.45"
   "octokit": "^4.1.2"
   "@hono/zod-openapi": "^1.2.2"
+  "hono": "^4.6.0"
   "vitest": "^3.1.1"
   "@vitest/coverage-v8": "^3.1.1"
   "@types/node": "^22.0.0"

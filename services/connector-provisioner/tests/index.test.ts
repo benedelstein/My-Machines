@@ -1,6 +1,10 @@
 import type { BrowserWorker } from "@cloudflare/playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { handleRequest, type Env } from "../src/index";
+import { app, type Env } from "../src/index";
+
+function handleRequest(request: Request, environment: Env): Promise<Response> {
+  return Promise.resolve(app.fetch(request, environment));
+}
 
 const baseEnvironment: Env = {
   BROWSER: {} as BrowserWorker,
@@ -108,7 +112,52 @@ describe("connector provisioner HTTP boundary", () => {
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects a mint request with an invalid body", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const response = await handleRequest(
+      new Request("https://provisioner.test/v1/connectors/mint", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer provisioner-secret",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "missing-everything-else" }),
+      }),
+      mintCapableEnvironment(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { code: "invalid_request" },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for unknown routes", async () => {
+    const response = await handleRequest(
+      new Request("https://provisioner.test/v2/unknown"),
+      baseEnvironment,
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { code: "not_found" },
+    });
+  });
 });
+
+function mintCapableEnvironment(): Env {
+  return {
+    ...baseEnvironment,
+    BROWSER: { fetch: () => Promise.resolve(new Response(null)) } as BrowserWorker,
+    SPRITES_DASHBOARD_STORAGE_STATE: "{}",
+    SPRITES_DASHBOARD_URL: "https://dashboard.sprites.dev",
+    SPRITES_ORG_SLUG: "example-org",
+  };
+}
 
 function deleteRequest(): Request {
   return new Request("https://provisioner.test/v1/connectors/gateway-id", {

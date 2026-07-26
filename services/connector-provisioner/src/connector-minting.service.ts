@@ -46,35 +46,6 @@ export async function mintConnector(
   const startedAt = now();
   const durations: ConnectorProvisioningDurations = { totalMs: 0 };
 
-  const listBeforeStartedAt = now();
-  const beforeResult = await dependencies.sprites.listConnections();
-  durations.listBeforeMs = now() - listBeforeStartedAt;
-  if (!beforeResult.ok) {
-    return failure(buildError({
-      code: beforeResult.error.code,
-      stage: "list_before",
-      retryable: beforeResult.error.retryable,
-      cleanup: NOT_ATTEMPTED,
-      durations,
-      startedAt,
-      now,
-    }));
-  }
-  if (beforeResult.value.some((connection) => {
-    return connection.provider === "custom_api"
-      && connection.providerAccountName === request.name;
-  })) {
-    return failure(buildError({
-      code: "connector_name_conflict",
-      stage: "list_before",
-      retryable: false,
-      cleanup: NOT_ATTEMPTED,
-      durations,
-      startedAt,
-      now,
-    }));
-  }
-
   const dashboardStartedAt = now();
   const dashboardResult = await dependencies.dashboard.createConnector(request);
   const dashboardDurationMs = now() - dashboardStartedAt;
@@ -86,7 +57,6 @@ export async function mintConnector(
         originalCode: dashboardResult.error.code,
         dashboardOperation: dashboardResult.error.operation,
         dashboardShape: dashboardResult.error.dashboardShape,
-        before: beforeResult.value,
         request,
         dependencies,
         sleep,
@@ -113,7 +83,6 @@ export async function mintConnector(
   const afterResult = await listConnectionsAfterCreate(
     dependencies.sprites,
     sleep,
-    beforeResult.value,
     request,
   );
   durations.listAfterMs = now() - listAfterStartedAt;
@@ -129,11 +98,7 @@ export async function mintConnector(
     }));
   }
 
-  const reconciliation = reconcileCreatedConnection(
-    beforeResult.value,
-    afterResult.value,
-    request,
-  );
+  const reconciliation = reconcileCreatedConnection(afterResult.value, request);
   if (reconciliation.connection === undefined) {
     // An ambiguous match set can include a concurrent mint's live connector;
     // deleting on ambiguity is worse than leaking a deny-all orphan.
@@ -234,17 +199,15 @@ export async function deleteConnectorAndVerify(
 }
 
 function reconcileCreatedConnection(
-  before: SpritesConnection[],
-  after: SpritesConnection[],
+  connections: SpritesConnection[],
   request: MintConnectorRequest,
 ): {
   connection?: SpritesConnection;
   attributableConnectionIds: string[];
 } {
-  const attributableConnections = findAttributableConnections(before, after, request);
+  const attributableConnections = findConnectionsByName(connections, request);
   const matches = attributableConnections.filter((connection) => {
-    return connection.providerAccountName === request.name
-      && providerInfoUrlMatches(connection.providerInfo, "base_api_url", request.baseApiUrl)
+    return providerInfoUrlMatches(connection.providerInfo, "base_api_url", request.baseApiUrl)
       && providerInfoUrlMatches(connection.providerInfo, "test_url", request.testUrl);
   });
 
@@ -369,8 +332,6 @@ function errorMessage(code: ConnectorProvisionerErrorCode): string {
       return "The created connector could not be identified safely.";
     case "orphan_reconciliation_required":
       return "The dashboard submit may have created an untracked connector.";
-    case "connector_name_conflict":
-      return "A connector already uses this provisioning name.";
     case "policy_verification_failed":
       return "The connector access policy could not be verified.";
     case "sprites_authentication_failed":
@@ -393,7 +354,6 @@ function errorMessage(code: ConnectorProvisionerErrorCode): string {
 async function listConnectionsAfterCreate(
   sprites: SpritesConnectionsClient,
   sleep: (milliseconds: number) => Promise<void>,
-  before: SpritesConnection[],
   request: MintConnectorRequest,
 ): Promise<Awaited<ReturnType<SpritesConnectionsClient["listConnections"]>>> {
   const retryDelays = [0, 250, 750, 1_500];
@@ -403,11 +363,7 @@ async function listConnectionsAfterCreate(
       await sleep(retryDelay);
     }
     lastResult = await sprites.listConnections();
-    if (lastResult.ok && findAttributableConnections(
-      before,
-      lastResult.value,
-      request,
-    ).length > 0) {
+    if (lastResult.ok && findConnectionsByName(lastResult.value, request).length > 0) {
       return lastResult;
     }
   }
@@ -451,7 +407,6 @@ async function reconcileAfterUncertainSubmit(params: {
   originalCode: ConnectorProvisionerErrorCode;
   dashboardOperation?: ConnectorProvisionerError["dashboardOperation"];
   dashboardShape?: ConnectorProvisionerError["dashboardShape"];
-  before: SpritesConnection[];
   request: MintConnectorRequest;
   dependencies: MintConnectorDependencies;
   sleep: (milliseconds: number) => Promise<void>;
@@ -463,7 +418,6 @@ async function reconcileAfterUncertainSubmit(params: {
   const afterResult = await listConnectionsAfterCreate(
     params.dependencies.sprites,
     params.sleep,
-    params.before,
     params.request,
   );
   params.durations.listAfterMs = params.now() - listAfterStartedAt;
@@ -479,11 +433,7 @@ async function reconcileAfterUncertainSubmit(params: {
     });
   }
 
-  const attributable = findAttributableConnections(
-    params.before,
-    afterResult.value,
-    params.request,
-  );
+  const attributable = findConnectionsByName(afterResult.value, params.request);
   const orphan = attributable.length === 1
     && attributable[0] !== undefined
     && providerInfoUrlMatches(attributable[0].providerInfo, "base_api_url", params.request.baseApiUrl)
@@ -526,15 +476,15 @@ async function reconcileAfterUncertainSubmit(params: {
   });
 }
 
-function findAttributableConnections(
-  before: SpritesConnection[],
-  after: SpritesConnection[],
+// The per-attempt name suffix is the sole attribution key: only this call's
+// dashboard submit can have created a connector with this exact name, so a
+// unique name match is proof of ownership without diffing list snapshots.
+function findConnectionsByName(
+  connections: SpritesConnection[],
   request: MintConnectorRequest,
 ): SpritesConnection[] {
-  const existingIds = new Set(before.map((connection) => connection.id));
-  return after.filter((connection) => {
-    return !existingIds.has(connection.id)
-      && connection.provider === "custom_api"
+  return connections.filter((connection) => {
+    return connection.provider === "custom_api"
       && connection.providerAccountName === request.name;
   });
 }
