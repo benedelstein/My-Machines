@@ -123,6 +123,8 @@ extension MarkdownPartsView {
                     codeBlock: codeBlock,
                     isActive: isStreaming && partStability == .active
                 )
+            case .table(let table):
+                TableView(table: table)
             case .literal(let source):
                 Text(verbatim: source)
                     .font(style.responseTextFont)

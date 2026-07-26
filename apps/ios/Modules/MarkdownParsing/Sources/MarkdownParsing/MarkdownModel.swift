@@ -112,6 +112,9 @@ public struct MarkdownBlock: Identifiable, Sendable, Hashable {
         /// A fenced or indented code block.
         case codeBlock(MarkdownCodeBlock)
 
+        /// A GitHub-flavored Markdown table.
+        case table(MarkdownTable)
+
         /// Preserved source for a syntax intentionally rendered literally.
         case literal(String)
 
@@ -169,6 +172,77 @@ public struct MarkdownListItem: Identifiable, Sendable, Hashable {
         self.id = id
         self.checkbox = checkbox
         self.blocks = blocks
+    }
+}
+
+/// Render content for a GitHub-flavored Markdown table.
+public struct MarkdownTable: Sendable, Hashable {
+    /// Horizontal alignment applied to every cell in a column.
+    public enum ColumnAlignment: Sendable, Hashable {
+        /// Cells align to the leading edge.
+        case leading
+
+        /// Cells align to the column center.
+        case center
+
+        /// Cells align to the trailing edge.
+        case trailing
+    }
+
+    /// One table cell and the number of columns it covers.
+    public struct Cell: Sendable, Hashable {
+        /// Inline content ready for SwiftUI `Text`.
+        public let content: AttributedString
+
+        /// The number of columns this cell covers, at least one.
+        public let columnSpan: Int
+
+        init(content: AttributedString, columnSpan: Int) {
+            self.content = content
+            self.columnSpan = max(1, columnSpan)
+        }
+    }
+
+    /// One header or body row.
+    public struct Row: Sendable, Hashable {
+        /// The cells in source order, excluding cells covered by a spanning neighbor.
+        public let cells: [Cell]
+
+        init(cells: [Cell]) {
+            self.cells = cells
+        }
+    }
+
+    /// Per-column alignment in column order; `nil` entries use the default alignment.
+    public let columnAlignments: [ColumnAlignment?]
+
+    /// The header row, or `nil` when the table declares no header cells.
+    public let header: Row?
+
+    /// The body rows.
+    public let rows: [Row]
+
+    init(columnAlignments: [ColumnAlignment?], header: Row?, rows: [Row]) {
+        self.columnAlignments = columnAlignments
+        self.header = header
+        self.rows = rows
+    }
+
+    /// The widest row's total column span.
+    public var columnCount: Int {
+        let allRows = (header.map { [$0] } ?? []) + rows
+        return allRows.map { row in row.cells.reduce(0) { $0 + $1.columnSpan } }.max() ?? 0
+    }
+
+    /// Returns the alignment for a column, defaulting to leading.
+    ///
+    /// - Parameter index: The zero-based column index.
+    /// - Returns: The declared alignment, or leading when the column declares none.
+    public func alignment(forColumn index: Int) -> ColumnAlignment {
+        guard index >= 0, index < columnAlignments.count else {
+            return .leading
+        }
+        return columnAlignments[index] ?? .leading
     }
 }
 
