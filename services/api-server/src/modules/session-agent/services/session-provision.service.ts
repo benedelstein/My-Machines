@@ -16,7 +16,7 @@ import {
   buildBootstrapNetworkPolicy,
   buildFinalNetworkPolicy,
   WorkersSpriteClient,
-  type SpritesCoordinator,
+  type SpriteLifecycleClient,
 } from "@repo/sprites-client";
 import { createLogger } from "@/shared/logging";
 import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
@@ -63,7 +63,7 @@ export interface SessionSetupTaskReporter {
 export interface SessionProvisionServiceDeps {
   logger: Logger;
   env: Env;
-  spritesCoordinator: SpritesCoordinator;
+  spriteLifecycleClient: SpriteLifecycleClient;
 
   getServerState: () => ServerState;
   getClientState: () => ClientState;
@@ -93,7 +93,7 @@ export interface SessionProvisionServiceDeps {
 export class SessionProvisionService {
   private readonly logger: Logger;
   private readonly env: Env;
-  private readonly spritesCoordinator: SpritesCoordinator;
+  private readonly spriteLifecycleClient: SpriteLifecycleClient;
   private readonly getServerState: () => ServerState;
   private readonly getClientState: () => ClientState;
   private readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
@@ -113,7 +113,7 @@ export class SessionProvisionService {
   constructor(deps: SessionProvisionServiceDeps) {
     this.logger = deps.logger.scope("session-provision-service");
     this.env = deps.env;
-    this.spritesCoordinator = deps.spritesCoordinator;
+    this.spriteLifecycleClient = deps.spriteLifecycleClient;
     this.getServerState = deps.getServerState;
     this.getClientState = deps.getClientState;
     this.getEnvironmentSnapshot = deps.getEnvironmentSnapshot;
@@ -231,7 +231,7 @@ export class SessionProvisionService {
       this.logger.debug("creating sprite", {
         fields: { sessionId },
       });
-      const spriteResponse = await this.spritesCoordinator.createSprite({
+      const spriteResponse = await this.spriteLifecycleClient.createSprite({
         name: sessionId,
       });
       this.spriteName = spriteResponse.name;

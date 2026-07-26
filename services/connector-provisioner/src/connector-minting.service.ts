@@ -2,7 +2,7 @@ import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
   SpritesConnection,
-  SpritesConnectionsClient,
+  SpriteConnectorsClient,
 } from "@repo/sprites-client";
 import type {
   CleanupStatus,
@@ -14,11 +14,11 @@ import type {
   MintConnectorResult,
   ProvisioningStage,
 } from "./types";
-import { arraysEqual } from "./utils";
+import { arraysEqual, delay } from "./utils";
 
 interface MintConnectorDependencies {
-  dashboard: DashboardConnectorClient;
-  sprites: SpritesConnectionsClient;
+  dashboardClient: DashboardConnectorClient;
+  spritesClient: SpriteConnectorsClient;
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   nameSuffix?: () => string;
@@ -49,7 +49,7 @@ export async function mintConnector(
   const startedAt = now();
 
   const dashboardStartedAt = now();
-  const dashboardResult = await dependencies.dashboard.createConnector(request);
+  const dashboardResult = await dependencies.dashboardClient.createConnector(request);
   const dashboardMs = now() - dashboardStartedAt;
   if (!dashboardResult.ok) {
     // Prefer the dashboard client's own stage timings; fall back to the
@@ -85,7 +85,7 @@ export async function mintConnector(
 
   const listAfterStartedAt = now();
   const afterResult = await listConnectionsAfterCreate(
-    dependencies.sprites,
+    dependencies.spritesClient,
     sleep,
     request,
   );
@@ -122,13 +122,13 @@ export async function mintConnector(
   };
 
   const scopeStartedAt = now();
-  const scopeResult = await dependencies.sprites.updateAccessPolicy(
+  const scopeResult = await dependencies.spritesClient.updateAccessPolicy(
     gatewayConnectionId,
     accessPolicy,
   );
   const scopeMs = now() - scopeStartedAt;
   if (!scopeResult.ok) {
-    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.sprites, now);
+    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, now);
     return failure(buildError({
       code: scopeResult.error.code,
       stage: "scope",
@@ -145,10 +145,10 @@ export async function mintConnector(
   }
 
   const verifyStartedAt = now();
-  const verifyResult = await dependencies.sprites.getConnection(gatewayConnectionId);
+  const verifyResult = await dependencies.spritesClient.getConnection(gatewayConnectionId);
   const verifyMs = now() - verifyStartedAt;
   if (!verifyResult.ok) {
-    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.sprites, now);
+    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, now);
     return failure(buildError({
       code: verifyResult.error.code,
       stage: "verify",
@@ -166,7 +166,7 @@ export async function mintConnector(
   }
 
   if (verifyResult.value === null || !policiesMatch(verifyResult.value.accessPolicy, accessPolicy)) {
-    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.sprites, now);
+    const cleanup = await cleanupConnector(gatewayConnectionId, dependencies.spritesClient, now);
     return failure(buildError({
       code: "policy_verification_failed",
       stage: "verify",
@@ -202,14 +202,14 @@ export async function mintConnector(
 
 export async function deleteConnectorAndVerify(
   connectionId: string,
-  sprites: SpritesConnectionsClient,
+  spritesClient: SpriteConnectorsClient,
 ): Promise<Result<void, ConnectorProvisionerErrorCode>> {
-  const deleteResult = await sprites.deleteConnection(connectionId);
+  const deleteResult = await spritesClient.deleteConnection(connectionId);
   if (!deleteResult.ok) {
     return failure("cleanup_failed");
   }
 
-  const getResult = await sprites.getConnection(connectionId);
+  const getResult = await spritesClient.getConnection(connectionId);
   if (!getResult.ok || getResult.value !== null) {
     return failure("cleanup_failed");
   }
@@ -340,17 +340,17 @@ function errorMessage(code: ConnectorProvisionerErrorCode): string {
 }
 
 async function listConnectionsAfterCreate(
-  sprites: SpritesConnectionsClient,
+  spritesClient: SpriteConnectorsClient,
   sleep: (milliseconds: number) => Promise<void>,
   request: MintConnectorRequest,
-): Promise<Awaited<ReturnType<SpritesConnectionsClient["listConnections"]>>> {
+): Promise<Awaited<ReturnType<SpriteConnectorsClient["listConnections"]>>> {
   const retryDelays = [0, 250, 750, 1_500];
-  let lastResult: Awaited<ReturnType<SpritesConnectionsClient["listConnections"]>> | undefined;
+  let lastResult: Awaited<ReturnType<SpriteConnectorsClient["listConnections"]>> | undefined;
   for (const retryDelay of retryDelays) {
     if (retryDelay > 0) {
       await sleep(retryDelay);
     }
-    lastResult = await sprites.listConnections();
+    lastResult = await spritesClient.listConnections();
     if (lastResult.ok && findConnectionsByName(lastResult.value, request).length > 0) {
       return lastResult;
     }
@@ -364,19 +364,15 @@ async function listConnectionsAfterCreate(
 
 async function cleanupConnector(
   connectionId: string,
-  sprites: SpritesConnectionsClient,
+  spritesClient: SpriteConnectorsClient,
   now: () => number,
 ): Promise<{ status: CleanupStatus; cleanupMs: number }> {
   const cleanupStartedAt = now();
-  const result = await deleteConnectorAndVerify(connectionId, sprites);
+  const result = await deleteConnectorAndVerify(connectionId, spritesClient);
   return {
     status: { attempted: true, succeeded: result.ok },
     cleanupMs: now() - cleanupStartedAt,
   };
-}
-
-async function delay(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function defaultNameSuffix(): string {
@@ -397,7 +393,7 @@ async function reconcileAfterUncertainSubmit(params: {
   const { now, startedAt } = params;
   const listAfterStartedAt = now();
   const afterResult = await listConnectionsAfterCreate(
-    params.dependencies.sprites,
+    params.dependencies.spritesClient,
     params.sleep,
     params.request,
   );
@@ -444,7 +440,7 @@ async function reconcileAfterUncertainSubmit(params: {
       durations: { ...durations, totalMs: now() - startedAt },
     });
   }
-  const cleanup = await cleanupConnector(orphan.id, params.dependencies.sprites, now);
+  const cleanup = await cleanupConnector(orphan.id, params.dependencies.spritesClient, now);
   return buildError({
     code: params.originalCode,
     stage: "dashboard_create",

@@ -4,7 +4,7 @@ import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
   SpritesConnection,
-  SpritesConnectionsClient,
+  SpriteConnectorsClient,
   SpritesRestError,
 } from "@repo/sprites-client";
 import type {
@@ -61,7 +61,7 @@ class FakeDashboardClient implements DashboardConnectorClient {
   }
 }
 
-class FakeSpritesClient implements SpritesConnectionsClient {
+class FakeSpritesClient implements SpriteConnectorsClient {
   readonly deletedIds: string[] = [];
   readonly updatedPolicies: AccessPolicy[] = [];
   listCallCount = 0;
@@ -120,10 +120,10 @@ function clock(): () => number {
 
 describe("mintConnector", () => {
   it("creates, reconciles, scopes, and verifies a connector", async () => {
-    const sprites = new FakeSpritesClient();
+    const spritesClient = new FakeSpritesClient();
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -139,23 +139,23 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.updatedPolicies).toEqual([{
+    expect(spritesClient.updatedPolicies).toEqual([{
       allowAll: false,
       spriteLabels: ["session:test-123"],
     }]);
-    expect(sprites.deletedIds).toEqual([]);
+    expect(spritesClient.deletedIds).toEqual([]);
   });
 
   it("deletes the partial connector when scope update fails", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.updateResult = failure({
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.updateResult = failure({
       code: "sprites_request_failed",
       retryable: true,
     });
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -171,12 +171,12 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.deletedIds).toEqual(["gateway-connection-id"]);
+    expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
   });
 
   it("fails closed and cleans up when allow_all remains enabled", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.getResult = success({
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.getResult = success({
       ...createdConnection,
       accessPolicy: {
         allowAll: true,
@@ -185,8 +185,8 @@ describe("mintConnector", () => {
     });
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -202,26 +202,26 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.deletedIds).toEqual(["gateway-connection-id"]);
+    expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
   });
 
   it("reports cleanup failure without exposing the connector token", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.getResult = success({
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.getResult = success({
       ...createdConnection,
       accessPolicy: {
         allowAll: true,
         spriteLabels: [...request.spriteLabels],
       },
     });
-    sprites.deleteResult = failure({
+    spritesClient.deleteResult = failure({
       code: "sprites_request_failed",
       retryable: true,
     });
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -243,15 +243,15 @@ describe("mintConnector", () => {
   });
 
   it("does not submit a secret after dashboard preflight rejects the shape", async () => {
-    const sprites = new FakeSpritesClient();
+    const spritesClient = new FakeSpritesClient();
     const dashboardError: DashboardCreateError = {
       code: "dashboard_drift",
       retryable: false,
     };
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(failure(dashboardError)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(failure(dashboardError)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -266,7 +266,7 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.listCallCount).toBe(0);
+    expect(spritesClient.listCallCount).toBe(0);
   });
 
   it("attributes only its own connector when a concurrent same-name mint is visible", async () => {
@@ -275,14 +275,14 @@ describe("mintConnector", () => {
       id: "concurrent-gateway-id",
       providerAccountName: `${request.name}-suffix02`,
     };
-    const sprites = new FakeSpritesClient();
-    sprites.listResponses = [
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.listResponses = [
       success([concurrentTwin, createdConnection]),
     ];
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -294,12 +294,12 @@ describe("mintConnector", () => {
         gatewayConnectionId: "gateway-connection-id",
       },
     });
-    expect(sprites.deletedIds).toEqual([]);
+    expect(spritesClient.deletedIds).toEqual([]);
   });
 
   it("deletes nothing when reconciliation is ambiguous", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.listResponses = [
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.listResponses = [
       success([
         createdConnection,
         { ...createdConnection, id: "second-gateway-id" },
@@ -307,8 +307,8 @@ describe("mintConnector", () => {
     ];
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -323,12 +323,12 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.deletedIds).toEqual([]);
+    expect(spritesClient.deletedIds).toEqual([]);
   });
 
   it("does not accept one exact match when another same-name connector appears", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.listResponses = [
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.listResponses = [
       success([
         createdConnection,
         {
@@ -343,8 +343,8 @@ describe("mintConnector", () => {
     ];
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -358,12 +358,12 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.deletedIds).toEqual([]);
+    expect(spritesClient.deletedIds).toEqual([]);
   });
 
   it("fails without deleting when Sprites returns malformed provider URLs", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.listResponses = [
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.listResponses = [
       success([{
         ...createdConnection,
         providerInfo: {
@@ -374,8 +374,8 @@ describe("mintConnector", () => {
     ];
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -389,16 +389,16 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.deletedIds).toEqual([]);
+    expect(spritesClient.deletedIds).toEqual([]);
   });
 
   it("retries list-after and reports an orphan condition if REST remains unavailable", async () => {
-    const sprites = new FakeSpritesClient();
+    const spritesClient = new FakeSpritesClient();
     const listFailure = failure<SpritesRestError>({
       code: "sprites_request_failed",
       retryable: true,
     });
-    sprites.listResponses = [
+    spritesClient.listResponses = [
       listFailure,
       listFailure,
       listFailure,
@@ -407,8 +407,8 @@ describe("mintConnector", () => {
     const retryDelays: number[] = [];
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
       sleep: async (milliseconds) => {
@@ -430,8 +430,8 @@ describe("mintConnector", () => {
   });
 
   it("retries successful empty lists until the created connector becomes visible", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.listResponses = [
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.listResponses = [
       success([]),
       success([]),
       success([createdConnection]),
@@ -439,8 +439,8 @@ describe("mintConnector", () => {
     const retryDelays: number[] = [];
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(success(dashboardSuccess)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
       sleep: async (milliseconds) => {
@@ -458,7 +458,7 @@ describe("mintConnector", () => {
   });
 
   it("discovers and deletes an orphan when navigation fails after submit", async () => {
-    const sprites = new FakeSpritesClient();
+    const spritesClient = new FakeSpritesClient();
     const dashboardError: DashboardCreateError = {
       code: "dashboard_create_failed",
       retryable: true,
@@ -466,8 +466,8 @@ describe("mintConnector", () => {
     };
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(failure(dashboardError)),
-      sprites,
+      dashboardClient: new FakeDashboardClient(failure(dashboardError)),
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -483,12 +483,12 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.deletedIds).toEqual(["gateway-connection-id"]);
+    expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
   });
 
   it("deletes nothing after an uncertain submit when attribution is ambiguous", async () => {
-    const sprites = new FakeSpritesClient();
-    sprites.listResponses = [
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.listResponses = [
       success([
         createdConnection,
         { ...createdConnection, id: "second-gateway-id" },
@@ -496,12 +496,12 @@ describe("mintConnector", () => {
     ];
 
     const result = await mintConnector(request, {
-      dashboard: new FakeDashboardClient(failure({
+      dashboardClient: new FakeDashboardClient(failure({
         code: "dashboard_create_failed",
         retryable: true,
         submitAttempted: true,
       })),
-      sprites,
+      spritesClient,
       now: clock(),
       nameSuffix: () => "suffix01",
     });
@@ -517,6 +517,6 @@ describe("mintConnector", () => {
         },
       },
     });
-    expect(sprites.deletedIds).toEqual([]);
+    expect(spritesClient.deletedIds).toEqual([]);
   });
 });

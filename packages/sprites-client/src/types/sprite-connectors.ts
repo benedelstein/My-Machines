@@ -27,7 +27,7 @@ export interface SpritesRestError {
   retryable: boolean;
 }
 
-export interface SpritesConnectionsClient {
+export interface SpriteConnectorsClient {
   listConnections(): Promise<Result<SpritesConnection[], SpritesRestError>>;
   updateAccessPolicy(
     connectionId: string,

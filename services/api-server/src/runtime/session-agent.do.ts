@@ -1,4 +1,4 @@
-import { SpritesCoordinator } from "@repo/sprites-client";
+import { SpriteLifecycleClient } from "@repo/sprites-client";
 import {
   type ClientState,
   type Logger,
@@ -80,7 +80,7 @@ interface AgentStateInternalAccess {
 
 export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAgentRpc {
   private readonly logger: Logger;
-  private readonly spritesCoordinator: SpritesCoordinator;
+  private readonly spriteLifecycleClient: SpriteLifecycleClient;
   private readonly messageRepository: MessageRepository;
   private readonly secretRepository: SecretRepository;
   private readonly latestPlanRepository: LatestPlanRepository;
@@ -153,7 +153,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       repository: this.setupOutputRepository,
       broadcastMessage: (msg) => this.broadcastMessage(msg),
     });
-    this.spritesCoordinator = new SpritesCoordinator({
+    this.spriteLifecycleClient = new SpriteLifecycleClient({
       apiKey: this.env.SPRITES_API_KEY,
       logger: createLogger("sprites.ts"),
     });
@@ -299,7 +299,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.provisionService = new SessionProvisionService({
       logger: this.logger,
       env: this.env,
-      spritesCoordinator: this.spritesCoordinator,
+      spriteLifecycleClient: this.spriteLifecycleClient,
       getServerState: () => this.serverState,
       getClientState: () => this.state,
       getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
@@ -819,7 +819,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     // Clean up sprite
     if (this.serverState.spriteName) {
       try {
-        await this.spritesCoordinator.deleteSprite(this.serverState.spriteName);
+        await this.spriteLifecycleClient.deleteSprite(this.serverState.spriteName);
       } catch (error) {
         this.logger.error("Failed to delete sprite", { error });
       }

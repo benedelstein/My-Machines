@@ -1,6 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { ConsoleLogger } from "@repo/shared";
-import { HttpSpritesConnectionsClient } from "@repo/sprites-client";
+import { HttpSpriteConnectorsClient } from "@repo/sprites-client";
 import { createConnectorRoutes } from "./connectors.routes";
 import type { Env } from "./env";
 import { PlaywrightDashboardClient } from "./playwright-dashboard.client";
@@ -21,8 +21,8 @@ app.use("*", async (c, next) => {
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.notFound((c) => c.json({ error: { code: "not_found" } }, 404));
 
-app.route("/v1/connectors", createConnectorRoutes({
-  createSpritesClient: (env) => new HttpSpritesConnectionsClient({
+app.route("/connectors", createConnectorRoutes({
+  createSpritesClient: (env) => new HttpSpriteConnectorsClient({
     apiUrl: env.SPRITES_API_URL,
     apiToken: env.SPRITES_API_KEY,
   }),

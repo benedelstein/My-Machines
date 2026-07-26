@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     const output = captureOutput(worker, sensitiveValues);
     await waitForHealth(workerUrl, worker, output);
 
-    const response = await fetch(`${workerUrl}/v1/connectors/live-test`, {
+    const response = await fetch(`${workerUrl}/connectors/live-test`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${bearerToken}`,

@@ -26,7 +26,7 @@ describe("connector provisioner HTTP boundary", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const response = await handleRequest(
-      new Request("https://provisioner.test/v1/connectors/example", {
+      new Request("https://provisioner.test/connectors/example", {
         method: "DELETE",
       }),
       baseEnvironment,
@@ -118,7 +118,7 @@ describe("connector provisioner HTTP boundary", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const response = await handleRequest(
-      new Request("https://provisioner.test/v1/connectors/mint", {
+      new Request("https://provisioner.test/connectors/mint", {
         method: "POST",
         headers: {
           "Authorization": "Bearer provisioner-secret",
@@ -160,7 +160,7 @@ function mintCapableEnvironment(): Env {
 }
 
 function deleteRequest(): Request {
-  return new Request("https://provisioner.test/v1/connectors/gateway-id", {
+  return new Request("https://provisioner.test/connectors/gateway-id", {
     method: "DELETE",
     headers: {
       Authorization: "Bearer provisioner-secret",

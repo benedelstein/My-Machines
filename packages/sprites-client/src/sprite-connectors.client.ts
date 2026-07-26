@@ -3,9 +3,9 @@ import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
   SpritesConnection,
-  SpritesConnectionsClient,
+  SpriteConnectorsClient,
   SpritesRestError,
-} from "./sprites-connections.types";
+} from "./types";
 
 const AccessPolicySchema = z.object({
   allow_all: z.boolean().optional(),
@@ -34,18 +34,18 @@ const ConnectionsResponseSchema = z.union([
 
 type Fetch = typeof fetch;
 
-interface SpritesConnectionsClientOptions {
+interface HttpSpriteConnectorsClientOptions {
   apiUrl: string;
   apiToken: string;
   fetch?: Fetch;
 }
 
-export class HttpSpritesConnectionsClient implements SpritesConnectionsClient {
+export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
   private readonly apiUrl: string;
   private readonly apiToken: string;
   private readonly request: Fetch;
 
-  constructor(options: SpritesConnectionsClientOptions) {
+  constructor(options: HttpSpriteConnectorsClientOptions) {
     this.apiUrl = options.apiUrl.replace(/\/+$/u, "");
     this.apiToken = options.apiToken;
     this.request = options.fetch ?? fetch.bind(globalThis);

@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from "hono";
 import { ConsoleLogger } from "@repo/shared";
 import type {
   SpritesConnection,
-  SpritesConnectionsClient,
+  SpriteConnectorsClient,
 } from "@repo/sprites-client";
 import { deleteConnectorAndVerify, mintConnector } from "./connector-minting.service";
 import {
@@ -18,14 +18,17 @@ import { durationFields, hasValidBearer } from "./utils";
 type ConnectorRouteEnv = { Bindings: Env };
 
 export interface ConnectorRouteDeps {
-  createSpritesClient(env: Env): SpritesConnectionsClient;
+  createSpritesClient(env: Env): SpriteConnectorsClient;
   createDashboardClient(env: Env): DashboardConnectorClient;
 }
 
 const logger = new ConsoleLogger({ format: "pretty" }, "connectors.routes.ts");
 
-export function createConnectorRoutes(deps: ConnectorRouteDeps): OpenAPIHono<ConnectorRouteEnv> {
+export function createConnectorRoutes(dependencies: ConnectorRouteDeps): OpenAPIHono<ConnectorRouteEnv> {
   const routes = new OpenAPIHono<ConnectorRouteEnv>({
+    // defaultHook runs after every route's zod request validation; on failure
+    // it replaces @hono/zod-openapi's default 400 (which echoes raw zod
+    // issues, including submitted values) with the service's error envelope.
     defaultHook: (result, c) => {
       if (!result.success) {
         return c.json({ error: { code: "invalid_request" } }, 400);
@@ -55,8 +58,8 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): OpenAPIHono<Con
   routes.openapi(mintConnectorRoute, async (c) => {
     const request = c.req.valid("json");
     const mintResult = await mintConnector(request, {
-      dashboard: deps.createDashboardClient(c.env),
-      sprites: deps.createSpritesClient(c.env),
+      dashboardClient: dependencies.createDashboardClient(c.env),
+      spritesClient: dependencies.createSpritesClient(c.env),
     });
     if (!mintResult.ok) {
       logMintFailure("mint", mintResult.error);
@@ -79,10 +82,10 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): OpenAPIHono<Con
 
   routes.openapi(liveTestConnectorRoute, async (c) => {
     const request = c.req.valid("json");
-    const sprites = deps.createSpritesClient(c.env);
+    const spritesClient = dependencies.createSpritesClient(c.env);
     const mintResult = await mintConnector(request, {
-      dashboard: deps.createDashboardClient(c.env),
-      sprites,
+      dashboardClient: dependencies.createDashboardClient(c.env),
+      spritesClient,
     });
     if (!mintResult.ok) {
       logMintFailure("live-test", mintResult.error);
@@ -93,7 +96,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): OpenAPIHono<Con
     const cleanupStartedAt = performance.now();
     const deleteResult = await deleteConnectorAndVerify(
       mintResult.value.gatewayConnectionId,
-      sprites,
+      spritesClient,
     );
     const cleanupMs = performance.now() - cleanupStartedAt;
     if (!deleteResult.ok) {
@@ -133,8 +136,8 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): OpenAPIHono<Con
 
   routes.openapi(deleteConnectorRoute, async (c) => {
     const { gatewayConnectionId } = c.req.valid("param");
-    const sprites = deps.createSpritesClient(c.env);
-    const existing = await sprites.getConnection(gatewayConnectionId);
+    const spritesClient = dependencies.createSpritesClient(c.env);
+    const existing = await spritesClient.getConnection(gatewayConnectionId);
     if (!existing.ok) {
       return c.json({ error: { code: existing.error.code } }, 502);
     }
@@ -148,7 +151,7 @@ export function createConnectorRoutes(deps: ConnectorRouteDeps): OpenAPIHono<Con
       return c.json({ error: { code: "connector_delete_refused" } }, 403);
     }
 
-    const deleteResult = await deleteConnectorAndVerify(gatewayConnectionId, sprites);
+    const deleteResult = await deleteConnectorAndVerify(gatewayConnectionId, spritesClient);
     if (!deleteResult.ok) {
       logger.error("Connector delete failed", {
         fields: { gatewayConnectionId, code: deleteResult.error },

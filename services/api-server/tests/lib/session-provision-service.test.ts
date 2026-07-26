@@ -187,7 +187,7 @@ function createService(
     Object.assign(serverState, partial);
   });
   const updatePartialState = vi.fn();
-  const spritesCoordinator = {
+  const spriteLifecycleClient = {
     createSprite: vi.fn(async () => {
       mockState.events.push("createSprite");
       return { name: "sprite-1", status: "running" };
@@ -202,7 +202,7 @@ function createService(
       WORKER_URL: "https://worker.test",
       ...envOverrides,
     } as Env,
-    spritesCoordinator: spritesCoordinator as never,
+    spriteLifecycleClient: spriteLifecycleClient as never,
     getServerState: () => serverState,
     getClientState: () => clientState,
     getEnvironmentSnapshot: () => environmentSnapshot,
@@ -217,7 +217,7 @@ function createService(
     setupOutputCollector,
   });
 
-  return { service, updateServerState, spritesCoordinator };
+  return { service, updateServerState, spriteLifecycleClient };
 }
 
 describe("SessionProvisionService startup toolchain", () => {
@@ -590,7 +590,7 @@ describe("SessionProvisionService startup toolchain", () => {
         SPRITES_API_URL: "https://api.sprites.test",
         WORKER_URL: "https://worker.test",
       } as Env,
-      spritesCoordinator: {
+      spriteLifecycleClient: {
         createSprite: vi.fn(async () => {
           mockState.events.push("createSprite");
           return { name: "sprite-1", status: "running" };
@@ -884,7 +884,7 @@ describe("SessionProvisionService startup toolchain", () => {
         SPRITES_API_URL: "https://api.sprites.test",
         WORKER_URL: "https://worker.test",
       } as Env,
-      spritesCoordinator: {
+      spriteLifecycleClient: {
         createSprite: vi.fn(async () => {
           mockState.events.push("createSprite");
           return { name: "sprite-1", status: "running" };

@@ -6,7 +6,7 @@ import {
   SessionInfoMessageSchema,
   SpriteServerMessageSchema,
 } from "./types";
-import { ConsoleLogger, type Logger } from "@repo/shared";
+import type { Logger } from "@repo/shared";
 
 type NewExecSessionConfig = {
   mode: "exec";
@@ -80,14 +80,14 @@ export class SpriteWebsocketSession {
     apiKey: string,
     baseUrl: string,
     config: WorkersSessionConfig,
-    logger?: Logger,
+    logger: Logger,
   ) {
     this.spriteName = spriteName;
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.config = config;
     this.ttyMode = config.mode === "exec" ? Boolean(config.options.tty) : false;
-    this.logger = logger ?? new ConsoleLogger({ format: "pretty" }, "SpriteWebsocketSession.ts");
+    this.logger = logger;
   }
 
   async start(): Promise<void> {

@@ -26,10 +26,10 @@ export interface SpriteInfoResponse {
 export class WorkersSpriteClient {
   private baseUrl: string;
   private apiKey: string;
-  private readonly logger?: Logger;
+  private readonly logger: Logger;
   public readonly name: string;
 
-  constructor(name: string, apiKey: string, baseUrl: string, logger?: Logger) {
+  constructor(name: string, apiKey: string, baseUrl: string, logger: Logger) {
     this.name = name;
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;

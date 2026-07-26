@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { HttpSpritesConnectionsClient } from "../src/sprites-connections.client";
+import { HttpSpriteConnectorsClient } from "../src/sprite-connectors.client";
 
-describe("HttpSpritesConnectionsClient", () => {
+describe("HttpSpriteConnectorsClient", () => {
   it("accepts connections with an empty access policy", async () => {
-    const client = new HttpSpritesConnectionsClient({
+    const client = new HttpSpriteConnectorsClient({
       apiUrl: "https://api.sprites.dev",
       apiToken: "test-token",
       fetch: async () => {

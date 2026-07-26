@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const environment = parsedEnvironment.data;
 
   const response = await fetch(
-    `${environment.CONNECTOR_PROVISIONER_DEPLOYED_URL}/v1/connectors/live-test`,
+    `${environment.CONNECTOR_PROVISIONER_DEPLOYED_URL}/connectors/live-test`,
     {
       method: "POST",
       headers: {

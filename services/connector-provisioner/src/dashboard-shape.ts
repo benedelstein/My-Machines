@@ -16,6 +16,14 @@ const REQUIRED_FIELD_NAMES = [
   "test_url",
 ] as const;
 
+/**
+ * Preflight gate that runs before any secret is typed into the dashboard.
+ * Verifies the connector form in `snapshot` still looks the way automation
+ * expects: signed-in (else `reauthentication_required`), and with the exact
+ * LiveView fields, events, and auth-method options the fill/submit code
+ * targets (else `dashboard_drift` with the observed shape attached).
+ * Returns a success Result when the form is safe to fill.
+ */
 export function validateDashboardShape(
   snapshot: DashboardShapeSnapshot,
 ): Result<void, DashboardCreateError> {
