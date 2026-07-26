@@ -102,6 +102,81 @@ describe("connector provisioner HTTP boundary", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("deletes an env-labelled connector only when scope=environment is explicit", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(sessionConnectorResponse({ sprite_labels: ["env:environment-1"] }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const response = await handleRequest(
+      new Request("https://provisioner.test/connectors/gateway-id?scope=environment", {
+        method: "DELETE",
+        headers: { Authorization: "Bearer provisioner-secret" },
+      }),
+      baseEnvironment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      connector: { gatewayConnectionId: "gateway-id", deleted: true },
+    });
+  });
+
+  it("refuses scope=environment for a session-labelled connector", async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce(sessionConnectorResponse());
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const response = await handleRequest(
+      new Request("https://provisioner.test/connectors/gateway-id?scope=environment", {
+        method: "DELETE",
+        headers: { Authorization: "Bearer provisioner-secret" },
+      }),
+      baseEnvironment,
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts any token from a comma-separated bearer list", async () => {
+    const fetchSpy = vi.fn().mockResolvedValueOnce(new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const response = await handleRequest(deleteRequest(), {
+      ...baseEnvironment,
+      CONNECTOR_PROVISIONER_BEARER_TOKEN: "retired-secret,provisioner-secret",
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { code: "connector_not_found" },
+    });
+  });
+
+  it("hides live-test in production", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const response = await handleRequest(
+      new Request("https://provisioner.test/connectors/live-test", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer provisioner-secret",
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      }),
+      { ...mintCapableEnvironment(), ENVIRONMENT: "production" },
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { code: "not_found" },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("returns 404 when the connector to delete does not exist", async () => {
     const fetchSpy = vi.fn().mockResolvedValueOnce(new Response(null, { status: 404 }));
     vi.stubGlobal("fetch", fetchSpy);

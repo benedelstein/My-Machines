@@ -54,6 +54,14 @@ export function createConnectorRoutes(dependencies: ConnectorRouteDeps): OpenAPI
     await next();
   };
   routes.use("/mint", requireMintConfiguration);
+  // live-test mints a real connector in the real org with a caller-supplied
+  // token; it exists for pre-integration validation only, never in production.
+  routes.use("/live-test", async (c, next) => {
+    if (c.env.ENVIRONMENT === "production") {
+      return c.json({ error: { code: "not_found" } }, 404);
+    }
+    await next();
+  });
   routes.use("/live-test", requireMintConfiguration);
 
   routes.openapi(mintConnectorRoute, async (c) => {
@@ -139,6 +147,7 @@ export function createConnectorRoutes(dependencies: ConnectorRouteDeps): OpenAPI
 
   routes.openapi(deleteConnectorRoute, async (c) => {
     const { gatewayConnectionId } = c.req.valid("param");
+    const { scope } = c.req.valid("query");
     const spritesClient = dependencies.createSpritesClient(c.env);
     const existing = await spritesClient.getConnection(gatewayConnectionId);
     if (!existing.ok) {
@@ -147,9 +156,9 @@ export function createConnectorRoutes(dependencies: ConnectorRouteDeps): OpenAPI
     if (existing.value === null) {
       return c.json({ error: { code: "connector_not_found" } }, 404);
     }
-    if (!isDeletableSessionConnector(existing.value)) {
+    if (!isDeletableConnector(existing.value, scope)) {
       logger.warn("Connector delete refused", {
-        fields: { gatewayConnectionId },
+        fields: { gatewayConnectionId, scope },
       });
       return c.json({ error: { code: "connector_delete_refused" } }, 403);
     }
@@ -218,10 +227,18 @@ function logCleanupFailure(
   });
 }
 
-function isDeletableSessionConnector(connection: SpritesConnection): boolean {
+// Session connectors delete by default; environment connectors hold real,
+// long-lived user credentials, so deleting one requires the caller to say
+// scope=environment explicitly. A connector whose labels match neither class
+// is never deletable through this API.
+function isDeletableConnector(
+  connection: SpritesConnection,
+  scope: "session" | "environment",
+): boolean {
+  const requiredPrefix = scope === "session" ? "session:" : "env:";
   const labels = connection.accessPolicy?.spriteLabels ?? [];
   return connection.provider === "custom_api"
     && connection.accessPolicy?.allowAll === false
     && labels.length > 0
-    && labels.every((label) => label.startsWith("session:"));
+    && labels.every((label) => label.startsWith(requiredPrefix));
 }

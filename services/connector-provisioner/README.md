@@ -49,13 +49,39 @@ token.
 The test requires Cloudflare Wrangler authentication and a Browser Run-enabled
 Cloudflare account. It does not deploy the Worker or persist the supplied secrets.
 
-If the storage state exceeds 5 KB, do not trim cookies blindly. The production
-follow-up should encrypt the state and load it from KV, which is also the storage
-pattern in [Cloudflare's Browser Run example](https://developers.cloudflare.com/browser-run/playwright/#storage-state).
+If the storage state exceeds 5 KB, do not trim cookies blindly. Only at that
+point move the state to KV — KV storage adds surface without reducing risk
+compared to a Worker secret. If the stored state is encrypted, keep the
+encryption key as a Worker secret, never in KV next to the ciphertext.
+[Cloudflare's Browser Run example](https://developers.cloudflare.com/browser-run/playwright/#storage-state)
+shows the KV pattern.
 
 ## Deployment boundary
 
 For a deployed spike, set all four provisioner secrets listed in `wrangler.jsonc`
-with `wrangler secret put`, then deploy this package. The public workers.dev route
-remains bearer-protected for the spike. Before session integration, disable that
-route and bind the API Worker to this Worker with a Cloudflare service binding.
+with `wrangler secret put`, then deploy this package. The public workers.dev
+route is disabled (`workers_dev: false` in `wrangler.jsonc`); the Worker is
+reachable only through `wrangler dev` locally or, at session integration, a
+Cloudflare service binding from the API Worker. Every route additionally
+requires the provisioner bearer, and `/connectors/live-test` refuses to run
+when `ENVIRONMENT` is `production`.
+
+## Credential revocation runbook
+
+If the dashboard storage state (or the machine it was minted on) may be
+compromised:
+
+1. Revoke the Fly.io session: sign out all sessions for the dashboard user
+   (or change that user's password), which invalidates the stored cookies.
+2. Mint fresh storage state from a clean session and rotate it with
+   `wrangler secret put SPRITES_DASHBOARD_STORAGE_STATE`.
+3. Rotate `CONNECTOR_PROVISIONER_BEARER_TOKEN`. The value accepts a
+   comma-separated list, so add the new token alongside the old one, move
+   callers over, then remove the old token.
+4. Audit the org's connectors in the Sprites dashboard and delete any
+   `custom_api` connector you do not recognize.
+5. Rotate `SPRITES_API_KEY` if it may have leaked with the same machine.
+
+Operationally, treat repeated `reauthentication_required` responses as a
+signal worth alerting on: an expired cookie and a revoked-because-stolen
+cookie look identical from this service.

@@ -20,6 +20,9 @@
 - [ ] 1.2 Run in a dedicated private Cloudflare Worker via Browser Rendering (`@cloudflare/playwright`, dashboard `storageState`); call it from the api-server through a service binding when integrated; Fly.io Machine fallback; instrument latency.
 - [x] 1.3 Preflight dashboard shape/drift check before entering any secret; provisioner-only auth with reauth-required status; redact tokens/cookies/CSRF/storageState.
 - [ ] 1.4 REST scope-update + delete + reconciliation; re-assert `allow_all==false` on tracked connectors. Reconciliation must also re-verify the external deny-all-on-create invariant the orphan-leak safety argument depends on (2026-07-25 review). Verify whether `GET /v1/oauth/connections` paginates; with unique per-attempt names, replace list-diff attribution with definitive lookup-by-name that pages until found.
+- [ ] 1.5 Verify label immutability from a root shell inside a Sprite before session integration (2026-07-26 review): (a) no in-VM metadata path can set the Sprite's own labels, (b) `PATCH`ing its own labels against `api.sprites.dev` fails with every credential present in the VM, (c) creating a new Sprite with an arbitrary label fails without an off-VM credential. Land the sprite-labeling code and the label enforcement in the same change, not sequentially.
+- [ ] 1.6 Endpoint pinning: the provisioner accepts `allowedEndpoints` and verifies it on read-back (2026-07-26). Verify the `allowed_endpoints` wire format/semantics against the live Sprites API, then make pinning mandatory for `session:` connectors when the api-server integration lands (the caller knows the real endpoint list).
+- [ ] 1.7 Before session integration: front the provisioner with the api-server service binding (removes the bearer from the network path) and add rate limiting on `/mint` (remote-browser spend + real credential creation must not be unbounded under a leaked bearer).
 
 ## 2. Data model (D1) — cross-cutting
 

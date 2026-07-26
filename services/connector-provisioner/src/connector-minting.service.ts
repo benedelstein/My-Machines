@@ -131,6 +131,9 @@ export async function mintConnector(
   const accessPolicy: AccessPolicy = {
     allowAll: false,
     spriteLabels: [...request.spriteLabels],
+    ...(request.allowedEndpoints === undefined
+      ? {}
+      : { allowedEndpoints: [...request.allowedEndpoints] }),
   };
 
   const scopeResult = await timings.time("scopeMs", () => {
@@ -225,7 +228,15 @@ function policiesMatch(
   return arraysEqual(
     [...actual.spriteLabels].sort(),
     [...expected.spriteLabels].sort(),
-  );
+  )
+    && arraysEqual(
+      [...(actual.allowedEndpoints ?? [])].sort(),
+      [...(expected.allowedEndpoints ?? [])].sort(),
+    )
+    && arraysEqual(
+      [...(actual.blockedEndpoints ?? [])].sort(),
+      [...(expected.blockedEndpoints ?? [])].sort(),
+    );
 }
 
 function buildError(params: {

@@ -1,8 +1,7 @@
 import { z } from "zod";
 
 const EnvironmentSchema = z.object({
-  CONNECTOR_PROVISIONER_DEPLOYED_URL: z.string().url()
-    .default("https://my-machines-connector-provisioner.bedelstein12.workers.dev"),
+  CONNECTOR_PROVISIONER_DEPLOYED_URL: z.string().url(),
   CONNECTOR_PROVISIONER_DEPLOYED_BEARER_TOKEN: z.string().min(1),
   CONNECTOR_LIVE_TEST_BASE_API_URL: z.string().url(),
   CONNECTOR_LIVE_TEST_TEST_URL: z.string().url(),

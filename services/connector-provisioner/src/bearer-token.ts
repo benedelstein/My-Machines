@@ -1,17 +1,22 @@
 /**
- * Checks the request's Authorization header against the expected bearer token
- * using a constant-time comparison, so response timing does not leak how much
- * of the token matched.
+ * Checks the request's Authorization header against the expected bearer
+ * token(s) using a constant-time comparison, so response timing does not leak
+ * how much of a token matched.
  *
  * @param request Incoming request, read for its `Authorization` header.
- * @param expectedToken Provisioner bearer from the environment.
- * @returns True only when a `Bearer` header carries exactly the expected token.
+ * @param expectedTokens Provisioner bearer from the environment. May hold a
+ *   comma-separated list so rotation can overlap old and new tokens instead of
+ *   cutting over with a 401 window.
+ * @returns True only when a `Bearer` header carries exactly one of the
+ *   expected tokens.
  */
-export async function hasValidBearer(request: Request, expectedToken: string): Promise<boolean> {
+export async function hasValidBearer(request: Request, expectedTokens: string): Promise<boolean> {
   const authorization = request.headers.get("Authorization");
+  const candidates = typeof expectedTokens === "string"
+    ? expectedTokens.split(",").map((token) => token.trim()).filter((token) => token.length > 0)
+    : [];
   if (
-    typeof expectedToken !== "string"
-    || expectedToken.length === 0
+    candidates.length === 0
     || authorization === null
     || !authorization.startsWith("Bearer ")
   ) {
@@ -19,11 +24,11 @@ export async function hasValidBearer(request: Request, expectedToken: string): P
   }
 
   const providedToken = authorization.slice("Bearer ".length);
-  const [providedDigest, expectedDigest] = await Promise.all([
-    digest(providedToken),
-    digest(expectedToken),
-  ]);
-  return constantTimeEquals(providedDigest, expectedDigest);
+  const providedDigest = await digest(providedToken);
+  const comparisons = await Promise.all(candidates.map(async (candidate) => {
+    return constantTimeEquals(providedDigest, await digest(candidate));
+  }));
+  return comparisons.some(Boolean);
 }
 
 // Hashing first gives both sides a fixed length, so the XOR loop below always

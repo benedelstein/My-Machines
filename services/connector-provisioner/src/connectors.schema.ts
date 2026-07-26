@@ -35,6 +35,15 @@ const safeHeaderValue = z.string().max(128).refine((value) => !/[\r\n]/u.test(va
   message: "Header values cannot contain newlines",
 });
 
+// The label value IS the capability: the gateway grants the connector to any
+// Sprite carrying a matching label, so every label must declare its class
+// (session:/env:) and a non-trivial identifier. Callers must derive the id
+// from high-entropy material, not a guessable or reusable public id.
+const spriteLabel = z.string().max(63).regex(
+  /^(session|env):[A-Za-z0-9][A-Za-z0-9_-]{7,}$/u,
+  "Labels must be session:<id> or env:<id> with an id of at least 8 characters",
+);
+
 const MintConnectorRequestBaseSchema = z.object({
   // Leaves room for the provisioner's "-<8 char>" uniqueness suffix.
   name: z.string().min(1).max(100).refine((value) => !/[\r\n]/u.test(value)),
@@ -43,7 +52,10 @@ const MintConnectorRequestBaseSchema = z.object({
   testUrl: httpsUrl,
   headerName: z.literal("Authorization").default("Authorization"),
   headerPrefix: safeHeaderValue.default("Bearer"),
-  spriteLabels: z.array(z.string().min(1).max(63)).min(1).max(16),
+  spriteLabels: z.array(spriteLabel).min(1).max(16),
+  // Paths on the connector base the gateway should allow. Optional until the
+  // api-server integration always pins session-connector paths.
+  allowedEndpoints: z.array(z.string().min(1).max(256)).min(1).max(32).optional(),
 });
 
 function requireMatchingTestOrigin(
@@ -212,6 +224,11 @@ export const deleteConnectorRoute = createRoute({
   path: "/{gatewayConnectionId}",
   request: {
     params: z.object({ gatewayConnectionId: z.string().min(1) }),
+    // Deleting an environment connector revokes a long-lived user credential,
+    // so it must be requested explicitly instead of hiding behind the default.
+    query: z.object({
+      scope: z.enum(["session", "environment"]).default("session"),
+    }),
   },
   responses: {
     200: {

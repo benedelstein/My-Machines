@@ -146,6 +146,63 @@ describe("mintConnector", () => {
     expect(spritesClient.deletedIds).toEqual([]);
   });
 
+  it("pins allowedEndpoints in the scoped policy and verifies the read-back", async () => {
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.getResult = success({
+      ...createdConnection,
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: [...request.spriteLabels],
+        allowedEndpoints: ["/internal/session/test-123/"],
+      },
+    });
+
+    const result = await mintConnector({
+      ...request,
+      allowedEndpoints: ["/internal/session/test-123/"],
+    }, {
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
+      now: clock(),
+      nameSuffix: () => "suffix01",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(spritesClient.updatedPolicies).toEqual([{
+      allowAll: false,
+      spriteLabels: ["session:test-123"],
+      allowedEndpoints: ["/internal/session/test-123/"],
+    }]);
+    expect(spritesClient.deletedIds).toEqual([]);
+  });
+
+  it("fails closed when a requested endpoint pin is missing on read-back", async () => {
+    const spritesClient = new FakeSpritesClient();
+
+    const result = await mintConnector({
+      ...request,
+      allowedEndpoints: ["/internal/session/test-123/"],
+    }, {
+      dashboardClient: new FakeDashboardClient(success(dashboardSuccess)),
+      spritesClient,
+      now: clock(),
+      nameSuffix: () => "suffix01",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "policy_verification_failed",
+        stage: "verify",
+        cleanup: {
+          attempted: true,
+          succeeded: true,
+        },
+      },
+    });
+    expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
+  });
+
   it("deletes the partial connector when scope update fails", async () => {
     const spritesClient = new FakeSpritesClient();
     spritesClient.updateResult = failure({

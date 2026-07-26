@@ -67,7 +67,13 @@ export class PlaywrightDashboardClient implements DashboardConnectorClient {
 
   constructor(options: PlaywrightDashboardClientOptions) {
     this.browserBinding = options.browser;
-    this.dashboardUrl = options.dashboardUrl.replace(/\/+$/u, "");
+    const dashboardUrl = options.dashboardUrl.replace(/\/+$/u, "");
+    // The storage state is a full Fly.io account session; fail closed rather
+    // than let a bad config point an authenticated browser at another origin.
+    if (new URL(dashboardUrl).origin !== "https://fly.io") {
+      throw new Error("dashboardUrl must be on the https://fly.io origin");
+    }
+    this.dashboardUrl = dashboardUrl;
     this.orgSlug = options.orgSlug;
     this.storageState = options.storageState;
     this.now = options.now ?? performance.now.bind(performance);
@@ -94,7 +100,7 @@ export class PlaywrightDashboardClient implements DashboardConnectorClient {
     const durations: Partial<DashboardCreateResult["durations"]> = {};
     try {
       const browserStartedAt = this.now();
-      browser = await launch(this.browserBinding, { keep_alive: 60_000 });
+      browser = await launch(this.browserBinding);
       durations.browserLaunchMs = this.now() - browserStartedAt;
 
       operation = "context_create";

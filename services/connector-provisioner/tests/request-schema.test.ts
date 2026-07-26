@@ -6,12 +6,32 @@ const validRequest = {
   baseApiUrl: "https://api.example.com",
   token: "dummy",
   testUrl: "https://api.example.com/health",
-  spriteLabels: ["session:test"],
+  spriteLabels: ["session:test-123"],
 };
 
 describe("MintConnectorRequestSchema", () => {
   it("accepts a same-origin HTTPS connector", () => {
     expect(MintConnectorRequestSchema.safeParse(validRequest).success).toBe(true);
+  });
+
+  it("accepts environment labels with pinned endpoints", () => {
+    expect(MintConnectorRequestSchema.safeParse({
+      ...validRequest,
+      spriteLabels: ["env:environment-1"],
+      allowedEndpoints: ["/api/v1/"],
+    }).success).toBe(true);
+  });
+
+  it.each([
+    ["an unprefixed label", "test-12345678"],
+    ["an unknown class prefix", "team:test-12345678"],
+    ["a short identifier", "session:short"],
+    ["an empty identifier", "session:"],
+  ])("rejects %s", (_description, label) => {
+    expect(MintConnectorRequestSchema.safeParse({
+      ...validRequest,
+      spriteLabels: [label],
+    }).success).toBe(false);
   });
 
   it("rejects credentials embedded in connector URLs", () => {
