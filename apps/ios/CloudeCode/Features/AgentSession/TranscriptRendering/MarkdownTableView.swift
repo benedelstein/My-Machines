@@ -8,6 +8,54 @@ extension MarkdownPartsView {
         let cell: MarkdownTable.Cell
     }
 
+    /// Caps the width proposed to a table cell so long content wraps and reports its wrapped height.
+    ///
+    /// `frame(maxWidth:)` clamps a cell's reported size but forwards the horizontal scroll view's
+    /// unspecified width proposal to the text untouched, so long cells measured at their ideal size
+    /// report a single-line height while rendering wrapped — overlapping the rows below.
+    struct WidthCappedCellLayout: Layout {
+        let maximumWidth: CGFloat
+        let alignment: MarkdownTable.ColumnAlignment
+
+        func sizeThatFits(
+            proposal: ProposedViewSize,
+            subviews: Subviews,
+            cache: inout ()
+        ) -> CGSize {
+            guard let subview = subviews.first else {
+                return .zero
+            }
+            let cappedWidth = min(proposal.width ?? maximumWidth, maximumWidth)
+            let idealSize = subview.sizeThatFits(.unspecified)
+            guard idealSize.width > cappedWidth else {
+                return idealSize
+            }
+            let wrappedSize = subview.sizeThatFits(ProposedViewSize(width: cappedWidth, height: nil))
+
+            // Report the full capped width, not the wrapped text's extent, so the resolved column
+            // never proposes a narrower width that would re-wrap the text taller than measured.
+            return CGSize(width: cappedWidth, height: wrappedSize.height)
+        }
+
+        func placeSubviews(
+            in bounds: CGRect,
+            proposal: ProposedViewSize,
+            subviews: Subviews,
+            cache: inout ()
+        ) {
+            guard let subview = subviews.first else {
+                return
+            }
+            let childProposal = ProposedViewSize(width: min(bounds.width, maximumWidth), height: nil)
+            let (anchor, x): (UnitPoint, CGFloat) = switch alignment {
+            case .leading: (.topLeading, bounds.minX)
+            case .center: (.top, bounds.midX)
+            case .trailing: (.topTrailing, bounds.maxX)
+            }
+            subview.place(at: CGPoint(x: x, y: bounds.minY), anchor: anchor, proposal: childProposal)
+        }
+    }
+
     /// Renders a GitHub-flavored Markdown table as a horizontally scrollable grid.
     struct TableView: View {
         @Environment(\.theme) private var theme
@@ -69,14 +117,14 @@ extension MarkdownPartsView {
             definesColumnAlignment: Bool
         ) -> some View {
             let alignment = table.alignment(forColumn: column)
-            let content = Text(cell.content)
-                .font(style.responseTextFont)
-                .fontWeight(isHeader ? .semibold : nil)
-                .foregroundStyle(isHeader ? theme.secondaryLabelColor : theme.labelColor)
-                .multilineTextAlignment(textAlignment(for: alignment))
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: Self.maximumCellWidth, alignment: frameAlignment(for: alignment))
-                .gridCellColumns(cell.columnSpan)
+            let content = WidthCappedCellLayout(maximumWidth: Self.maximumCellWidth, alignment: alignment) {
+                Text(cell.content)
+                    .font(style.responseTextFont)
+                    .fontWeight(isHeader ? .semibold : nil)
+                    .foregroundStyle(isHeader ? theme.secondaryLabelColor : theme.labelColor)
+                    .multilineTextAlignment(textAlignment(for: alignment))
+            }
+            .gridCellColumns(cell.columnSpan)
 
             // A column takes its alignment from a single non-spanning cell in one row.
             if definesColumnAlignment, cell.columnSpan == 1 {
@@ -98,14 +146,6 @@ extension MarkdownPartsView {
         }
 
         private func textAlignment(for alignment: MarkdownTable.ColumnAlignment) -> TextAlignment {
-            switch alignment {
-            case .leading: .leading
-            case .center: .center
-            case .trailing: .trailing
-            }
-        }
-
-        private func frameAlignment(for alignment: MarkdownTable.ColumnAlignment) -> Alignment {
             switch alignment {
             case .leading: .leading
             case .center: .center
