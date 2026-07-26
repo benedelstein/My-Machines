@@ -4,6 +4,42 @@ Dedicated Cloudflare Worker that creates Sprites Custom API connectors through t
 authenticated Phoenix LiveView dashboard, then discovers, scopes, and verifies them
 through the supported Sprites REST API.
 
+The browser step exists because it has to: the Sprites REST API can create
+connections only for its preset providers, so a `custom_api` connector can be
+born only in the dashboard form. Everything after birth — finding the gateway
+id, scoping the connector to Sprite labels, verifying the scope, deleting —
+is ordinary REST.
+
+```mermaid
+flowchart LR
+  caller["API Worker<br/>sends provisioner bearer"]
+
+  subgraph provisioner["connector-provisioner Worker"]
+    routes["connectors.routes.ts<br/>bearer + request schema"]
+    mint["connector-minting.service.ts<br/>orders the stages, times each one,<br/>deletes on any failure"]
+    dashboardClient["playwright-dashboard.client.ts<br/>drives a headless browser"]
+    shape["dashboard-shape.ts<br/>drift gate: read the form's shape<br/>BEFORE typing the token"]
+    restClient["@repo/sprites-client<br/>Sprites REST client"]
+
+    routes --> mint
+    mint -->|"1. create"| dashboardClient
+    dashboardClient --> shape
+    mint -->|"2. find → 3. scope → 4. verify"| restClient
+  end
+
+  dashboard["fly.io dashboard<br/>Phoenix LiveView connector form"]
+  spritesApi["Sprites REST API<br/>/v1/oauth/connections"]
+
+  caller --> routes
+  dashboardClient -->|"Browser Rendering + storageState cookies:<br/>fill fields, click Test connection, click Add connector,<br/>then read the new connector id back out of the URL"| dashboard
+  restClient -->|"GET list, PATCH access_policy,<br/>GET verify, DELETE"| spritesApi
+```
+
+The browser is write-only as far as trust goes: the id it reads out of the
+redirect URL is a convenience, and the authoritative gateway id comes from the
+REST list, matched on the per-attempt unique name. A connector that cannot be
+found, scoped, and verified over REST is deleted rather than returned.
+
 The Worker keeps dashboard storage state and the Sprites API token in
 provisioner-only secrets. Every operation requires a separate provisioner bearer:
 
