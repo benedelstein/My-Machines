@@ -1,4 +1,5 @@
 import Domain
+import Foundation
 import SwiftData
 
 /// SwiftData persistence row for one curated session client-state snapshot.
