@@ -1,9 +1,10 @@
 /**
- * Detects hostnames that must never be reachable through a minted connector.
+ * Best-effort syntactic rejection for obviously internal connector targets.
  *
- * Blocks literal internal addresses only; the dashboard's "Test connection"
- * executes from Fly's backend, so DNS names resolving to private ranges
- * cannot be checked here.
+ * This is not the connector's SSRF boundary. It blocks common literal internal
+ * addresses and suffixes only; it does not resolve DNS, defend against rebinding,
+ * or control redirect-time credential forwarding. The dashboard's "Test
+ * connection" executes from Fly's backend and proves reachability, not safety.
  *
  * @param hostname Hostname from a parsed URL, with IPv6 literals still bracketed.
  * @returns True when the hostname is loopback, link-local, or private.

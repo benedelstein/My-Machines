@@ -99,7 +99,8 @@ upstream hostname, mint an environment-scoped Sprites connector that custodies t
 value, route the Sprite's egress to that upstream through the connector via the
 transparent proxy, and MUST store only credential metadata (never plaintext) in D1.
 Non-header authentication and multiple credentials for one environment/hostname are
-out of scope for v1.
+out of scope for v1. Endpoint restrictions for class-B connectors are OPTIONAL: a
+user MAY authorize the full configured upstream origin or choose narrower paths.
 
 #### Scenario: User adds a secret and the agent uses it
 
@@ -114,6 +115,67 @@ out of scope for v1.
 - **THEN** its value is custodied by Sprites in the connector and D1 stores only
   metadata (environment, name, upstream hostname, header configuration, connector
   ids, scope), never the plaintext value
+
+#### Scenario: User authorizes the whole upstream origin
+
+- **WHEN** an environment credential is defined without endpoint restrictions
+- **THEN** the class-B connector may forward any path on its configured upstream
+  origin
+- **AND** it cannot forward to a different origin with the injected credential
+
+### Requirement: Class-B connector lifecycle is reconciled and fail-closed
+
+The system SHALL store the gateway connection id and lifecycle status with each
+environment credential's non-secret metadata. Create SHALL expose only a verified
+active connector. Delete SHALL remove the connector from active lookup before
+external revocation and SHALL retain a pending-revocation record until deletion or
+verified deny-all is confirmed. Editing the credential value, upstream origin, or
+header configuration SHALL create and verify a replacement, atomically swap the
+active metadata, and revoke the old connector; it SHALL NOT assume that a
+Sprites-custodied value can be updated in place.
+
+#### Scenario: Replacement fails before activation
+
+- **WHEN** a replacement connector cannot be created, scoped, verified, or persisted
+- **THEN** the old connector remains authoritative
+- **AND** the partial replacement is deleted or retained for reconciliation
+
+#### Scenario: Replacement activates while a Sprite has a stale route
+
+- **WHEN** D1 points to the verified replacement but an existing Sprite still routes
+  to the revoked connector id
+- **THEN** that Sprite's request fails closed until its non-secret routing entry is
+  refreshed or its agent process is restarted
+- **AND** the old credential is not kept active solely for continuity
+
+#### Scenario: Environment is deleted
+
+- **WHEN** an environment is deleted
+- **THEN** every owned class-B connector is removed from active lookup and externally
+  revoked
+- **AND** partial failures remain pending and are retried by reconciliation
+
+### Requirement: User-defined connector targets are public HTTPS origins
+
+The system SHALL reject URL userinfo, non-HTTPS origins, literal loopback,
+link-local, private, and reserved addresses, and a test URL on another origin.
+Before enabling user-defined class-B connectors, the system MUST also verify that
+the Sprites connector service prevents DNS names from resolving or rebinding to
+prohibited address ranges and prevents credential forwarding across redirects. If
+the platform does not enforce those properties, the control plane SHALL enforce
+resolved-address and redirect policy itself. A successful dashboard connection test
+MUST NOT be treated as proof that the target is safe.
+
+#### Scenario: Public hostname resolves to an internal address
+
+- **WHEN** a user supplies a syntactically public hostname that resolves to a
+  loopback, link-local, private, metadata, or otherwise reserved destination
+- **THEN** connector creation is rejected before the credential can be sent there
+
+#### Scenario: Credential-bearing upstream redirects to another origin
+
+- **WHEN** the configured upstream responds with a redirect to a different origin
+- **THEN** the connector does not forward the injected credential to that origin
 
 ### Requirement: Credential connectors are scoped to entitled Sprites
 
@@ -142,18 +204,63 @@ create or teardown.
 - **THEN** the system deletes its class-A connector and Sprite
 - **AND** does not remove or add anything in a class-B connector policy
 
+### Requirement: Repository and environment revocation are independent
+
+The system SHALL preserve the existing repository-access guard after the connector
+cutover. The gateway-injected session credential SHALL authenticate the calling
+session but SHALL NOT replace the per-request repository authorization check for Git
+or pull-request operations. Repository access blocking SHALL reject new turns,
+subsequent Git operations, and pull-request operations and SHALL stop the active
+agent turn, but SHALL NOT by itself delete the Sprite, revoke the session token,
+remove `session:` or `env:` labels, or revoke user-owned environment connectors.
+
+Deleting an environment or environment credential SHALL independently make every
+affected class-B connector unusable. The system MUST confirm connector deletion or
+a deny-all policy before considering revocation complete and SHALL retain
+non-secret metadata in a pending-revocation state for reconciliation after a
+partial external teardown failure.
+
+#### Scenario: Repository access is removed during a session
+
+- **WHEN** repository access is blocked because user access changes, a repository is
+  removed from the GitHub App installation, or the installation is
+  suspended/deleted
+- **THEN** new turns and every subsequent Git or pull-request operation are rejected
+- **AND** the active turn and tracked agent process are stopped
+- **AND** the existing checkout, Sprite, labels, session connector/token, and
+  environment connectors remain available for access recovery
+
+#### Scenario: Environment credential is deleted
+
+- **WHEN** the user deletes an environment credential
+- **THEN** the system stops resolving it for new sessions
+- **AND** deletes its class-B connector or applies and verifies a deny-all policy
+- **AND** existing labelled Sprites can no longer use that credential
+- **AND** unrelated session and environment connectors remain unchanged
+
+#### Scenario: Environment connector revocation partially fails
+
+- **WHEN** external class-B connector teardown cannot be confirmed
+- **THEN** the system does not report credential revocation as complete
+- **AND** retains only the non-secret metadata needed to retry
+- **AND** reconciliation continues until the connector is confirmed unusable
+
 ### Requirement: Transparent Sprite-side egress proxy
 
-The system SHALL run a Sprite-local transparent proxy that captures class-A/B HTTPS
+The system SHALL run a Sprite-local transparent proxy that captures class-B HTTPS
 through destination-targeted iptables/nft redirection, MITM-terminates it with a
 Sprite-trusted local CA, strips the configured client credential header, and
 rewrites requests to the single connector gateway URL assigned to that hostname,
-failing closed for unrouted destinations. Class-C and gateway traffic SHALL not
-enter the proxy.
+failing closed for unrouted destinations. Class-A traffic SHALL NOT enter the
+proxy: every class-A client (webhook base, post-clone git remote, provider CLI
+base URL) is explicitly configured to the connector gateway URL. Class-C and
+gateway traffic SHALL not enter the proxy. The proxy, CA, resolver, and redirect
+rules SHALL be installed only for sessions whose environment defines at least one
+class-B credential.
 
 #### Scenario: Outbound HTTPS with no proxy configuration
 
-- **WHEN** a Sprite process resolves a class-A/B hostname and makes an HTTPS request
+- **WHEN** a Sprite process resolves a class-B hostname and makes an HTTPS request
   with no proxy environment set
 - **THEN** the local resolver returns the reserved dummy destination
 - **AND** nft/iptables redirects that destination's TCP/443 traffic to the local
@@ -180,25 +287,36 @@ enter the proxy.
 - **THEN** v1 rejects or documents the request as unsupported rather than silently
   bypassing connector enforcement
 
-### Requirement: Network egress lockdown is the hard boundary
+### Requirement: Network egress policy preserves the user's selected mode
 
-The system SHALL apply a Sprites network egress policy that restricts the Sprite to
-reaching only the connector gateway (and any provisioning-time exceptions), enforced
-outside the VM so in-Sprite root cannot lift it. Security MUST NOT depend on the
-in-Sprite transparent proxy.
+The system SHALL preserve the environment's existing `open`, `default`, `custom`,
+or `locked` network semantics while making the connector gateway reachable.
+Restricted modes SHALL retain their external deny boundary; `open` SHALL remain
+allow-all. Protected credential custody and caller-identity binding MUST NOT depend
+on direct upstream egress being denied or on the in-Sprite transparent proxy.
 
 #### Scenario: Root agent attempts direct egress
 
-- **WHEN** a process with root in the Sprite removes the local redirect rules and
-  connects directly to a non-gateway upstream
-- **THEN** the network egress policy blocks the connection, and the process obtains
-  no protected runtime credential (the initial clone token is no longer present)
+- **WHEN** a process with root in a Sprite using a restricted network mode removes
+  the local redirect rules and connects directly to a destination outside that
+  mode's allow rules
+- **THEN** the network egress policy blocks the connection
+- **AND** regardless of whether a destination is direct-allowed, the process obtains
+  no connector-custodied credential
+
+#### Scenario: User selects open networking
+
+- **WHEN** the environment's network mode is `open`
+- **THEN** direct outbound connections remain allowed
+- **AND** direct calls to a connector's upstream receive no connector credential
+- **AND** the connector still checks Sprite identity before injecting its credential
 
 #### Scenario: Lockdown applied before the agent runs
 
 - **WHEN** a session is provisioned
-- **THEN** the egress policy is tightened to gateway-only before the session agent
-  starts (after any provisioning-time toolchain install)
+- **THEN** the selected final environment policy plus connector-gateway reachability
+  is applied before the session agent starts (after any provisioning-time toolchain
+  install)
 
 ### Requirement: Redirection toolchain is present or the session fails closed
 
@@ -239,7 +357,9 @@ existing Durable Object session token (currently stored as `webhook_token`). The
 Worker SHALL resolve the Durable Object from each allowlisted route's `:sessionId`,
 and the Durable Object SHALL validate the injected token from its SQLite. The same
 connector and token SHALL authorize webhook, post-clone git, and provider inference
-paths; no provider-specific connector SHALL be created.
+paths; no provider-specific connector SHALL be created. The class-A connector SHALL
+set `allowed_endpoints` to the exact session webhook, git, provider-inference, and
+health paths. It MUST NOT authorize unrelated Worker paths.
 
 #### Scenario: Injected secret identifies the session
 
@@ -252,6 +372,12 @@ paths; no provider-specific connector SHALL be created.
 - **THEN** the Worker resolves the Durable Object from `:sessionId`
 - **AND** the Durable Object validates the token from its SQLite
 - **AND** no generic `/webhook` or D1 secret-to-session mapping is required
+
+#### Scenario: Session connector is aimed at another Worker path
+
+- **WHEN** the authorized Sprite calls a Worker path outside the class-A
+  connector's endpoint allowlist
+- **THEN** the gateway rejects it before injecting the session token
 
 ### Requirement: Webhook impersonation prevention
 
@@ -338,12 +464,14 @@ tokens, or session payloads to clients, Sprite runtimes, logs, or D1.
 
 ### Requirement: Synchronous fail-closed provisioning
 
-The system SHALL mint and scope the connector and install the egress proxy, CA,
-redirect rules, and routing table synchronously as part of session provisioning, and
-MUST fail session creation closed if any step does not complete.
+The system SHALL mint and scope the connector, configure class-A clients directly
+against the gateway, and — when the environment defines class-B credentials —
+install the egress proxy, CA, redirect rules, and routing table, all synchronously
+as part of session provisioning, and MUST fail session creation closed if any step
+does not complete.
 
 #### Scenario: A provisioning step fails
 
 - **WHEN** any connector or proxy provisioning step fails during session creation
 - **THEN** the session does not start and no Sprite runs with a secret in the clear
-  or an unsecured egress path
+  or a partially configured protected route

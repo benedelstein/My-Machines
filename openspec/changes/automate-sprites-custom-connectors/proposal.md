@@ -39,15 +39,20 @@ API, so automating that dashboard flow is part of the work.
   Sprites-custodied secret, scoped by an immutable environment label). Provider
   OAuth remains in D1 and is selected from the authenticated session's user, not
   from a second connector.
-- **Transparent Sprite-side egress proxy:** local MITM + per-Sprite CA + local
-  resolver + destination-targeted iptables/nft REDIRECT, with one connector route
-  per class-A/B protected hostname and fail-closed default. Configurable provider
-  CLIs use the class-A connector gateway directly with a session/provider path
-  prefix. Class-C and gateway traffic never enter the proxy. Toolchain installed at
+- **Transparent Sprite-side egress proxy (class B only):** local MITM + per-Sprite
+  CA + local resolver + destination-targeted iptables/nft REDIRECT, with one
+  connector route per class-B protected hostname and fail-closed default. Every
+  class-A client is explicitly configured to the gateway URL (vm-agent webhook
+  base, post-clone git remote, provider CLI base URL) and never enters the proxy;
+  the data plane is installed only for environments with class-B credentials.
+  Class-C and gateway traffic never enter the proxy. Toolchain installed at
   provisioning via `sudo apt-get` (base image is fixed).
-- **Network egress policy as the hard boundary:** gateway + non-secret allowlist +
-  deny-all, enforced outside the VM at L3/L4 (verified). Class-A/B credential hosts
-  are forced through the proxy, not allowlisted.
+- **Network egress policy remains user-selected:** add the connector gateway without
+  changing the environment's existing `open`, `default`, `custom`, or `locked`
+  semantics. Restricted modes retain their external L3/L4 deny boundary; `open`
+  deliberately permits direct egress. Connector security does not depend on direct
+  egress being denied: bypassing the proxy reaches an upstream without the
+  Sprites-custodied credential.
 - **`mintConnector` primitive** (browser create + REST scope/verify/delete) via
   Cloudflare Browser Rendering (Fly.io Machine fallback if latency demands).
 - **Worker cutovers:** webhook and git endpoints stop accepting Sprite-held bearers
@@ -67,7 +72,13 @@ API, so automating that dashboard flow is part of the work.
   `provider-proxying.md`.
 - **Environment header credentials:** D1 metadata, one connector per environment and
   hostname, routing, and fixed `env:<environmentId>` scoping. Sprites custodies the
-  values; we never store plaintext.
+  values; we never store plaintext. Create, replacement, deletion, partial-failure
+  reconciliation, and stale active-session routes have explicit fail-closed
+  behavior.
+- **Independent authorization lifecycles:** losing repository access continues to
+  block turns, Git operations, and pull requests without deleting the Sprite or
+  revoking the user's environment authority. Deleting an environment or one of its
+  credentials revokes the corresponding class-B connectors independently.
 - **Synchronous, fail-closed provisioning**, with teardown that deletes the
   per-session connector/secret and never edits shared class-B policies.
 
@@ -91,9 +102,11 @@ model, connector abstraction, and proxy — none redesigned later.
 
 ## Impact
 
-- New Sprite-side data plane: nft/iptables toolchain (installed at provisioning),
-  per-Sprite CA across trust stores, local resolver, transparent proxy + routing
-  table + dummy-destination redirect rules.
+- New Sprite-side data plane, installed only for environments with class-B
+  credentials: nft/iptables toolchain (installed at provisioning), per-Sprite CA
+  across trust stores, local resolver, transparent proxy + routing table +
+  dummy-destination redirect rules. Class-A flows (webhook, git, provider CLIs)
+  use direct gateway configuration and never depend on it.
 - New `mintConnector` via Cloudflare Browser Rendering, run synchronously during
   provisioning.
 - Existing Worker `/internal/session/:sessionId/chunks`,
