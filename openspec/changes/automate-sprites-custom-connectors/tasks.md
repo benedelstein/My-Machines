@@ -1,7 +1,7 @@
 ## 0. Discovery (verified / to verify)
 
-- [x] 0.1 Dashboard create flow, selectors, test-gates-create, two id spaces, deny-all default (spike 2026-07-06).
-- [x] 0.2 REST `PATCH`/`PUT /v1/oauth/connections/{id}` sets `access_policy`; REST create only for preset providers.
+- [x] 0.1 Historical dashboard create flow and deny-all default (spike 2026-07-06; superseded by REST creation).
+- [x] 0.2 REST `POST /v1/oauth/connections/custom_api` creates Custom API connectors with a final `access_policy` and returns the authoritative gateway connection id (Fly support + live verification 2026-07-26).
 - [x] 0.3 Gateway does NOT forward a verifiable Sprite identity upstream → per-session internal connector.
 - [x] 0.4 Transparent egress proxy works (MITM, auth stripping, gateway rewrite/injection, REDIRECT captures curl/Node/Python).
 - [x] 0.5 Sprite has passwordless sudo; `sudo apt-get install -y nftables iptables` works; NAT REDIRECT diverts live connections; `cap_net_admin`+`cap_sys_admin`.
@@ -12,23 +12,24 @@
 - [x] 0.10a Claude: user-owned refreshable OAuth remains in encrypted D1; live test proved Claude Code 2.1.207 interactive and non-interactive inference works with `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` while the Worker refreshes/injects OAuth downstream. A fake OAuth file does not bypass interactive login, and the Worker must add `oauth-2025-04-20` in gateway mode (`test:live:claude-oauth-control-plane-proxy`, 2026-07-23; see `provider-proxying.md`).
 - [x] 0.10b Codex: Codex 0.144.3 completed `gpt-5.4` inference from a fresh Sprite through `webhooks.bze.llc` using a custom Responses provider and short-lived Cloude bearer. A native reqwest proxy validated the bearer, injected D1 OAuth + `ChatGPT-Account-ID`, stripped tunnel/proxy headers, and streamed the response. A manual follow-up launched the normal interactive TUI without `auth.json`. The same fresh request through local workerd received a ChatGPT-edge HTML `403`, while Node's ordinary native `fetch` succeeded. A same-machine transport probe isolated unavoidable `CF-Worker` metadata and a different TLS fingerprint as concrete differences, but the exact WAF rule is not observable (`test:live:codex-oauth-control-plane-proxy`, 2026-07-23).
 - [x] 0.11 REST connection endpoints take the **gateway connection id**; delete is `DELETE /v1/oauth/connections/{id}` (proven by the passing disposable live test, 2026-07-24).
-- [x] 0.12 End-to-end disposable mint on Browser Rendering: **6.9s total** (launch 1.5s, preflight 2.0s, connection test 0.6s, create 0.9s, REST scope+verify+cleanup ~1.2s) — comfortably inside VM-boot overlap; wire the actual overlap in section 6. Note: the dashboard form drifted between 2026-07-06 and 2026-07-24 (`auth_method` hidden input → `set_custom_api_auth_method` toggle buttons; events renamed `validate_custom_api`/`submit_custom_api`; submit button "Create Connection" → "Add connector"). The drift gate caught it before any secret entry; shape contract updated.
+- [x] 0.12 End-to-end disposable REST mint: create returned `201` with label + `/headers` policy; a matching labelled Sprite received the injected credential; `/get` returned `403`; connector and Sprite cleanup both succeeded (2026-07-26).
 
 ## 1. Connector provisioning (`mintConnector`) — cross-cutting
 
-- [x] 1.1 `mintConnector({...}) -> {gatewayConnectionId, detailId?}`: browser create → REST list + lookup-by-unique-name for the authoritative gateway id → REST scope → REST verify (`allow_all==false`) → delete-on-failure. (List-before diffing removed 2026-07-25; the per-attempt unique name is the attribution key.)
-- [ ] 1.2 Run in a dedicated private Cloudflare Worker via Browser Rendering (`@cloudflare/playwright`, dashboard `storageState`); call it from the api-server through a service binding when integrated; Fly.io Machine fallback; instrument latency.
-- [x] 1.3 Preflight dashboard shape/drift check before entering any secret; provisioner-only auth with reauth-required status; redact tokens/cookies/CSRF/storageState.
-- [ ] 1.4 REST scope-update + delete + reconciliation; re-assert `allow_all==false` on tracked connectors. Reconciliation must also re-verify the external deny-all-on-create invariant the orphan-leak safety argument depends on (2026-07-25 review). Verify whether `GET /v1/oauth/connections` paginates; with unique per-attempt names, replace list-diff attribution with definitive lookup-by-name that pages until found.
+- [x] 1.1 `mintConnector({...}) -> {gatewayConnectionId}`: REST create with the final deny-all label/path policy → REST verify by returned id → delete-on-failure. The per-attempt unique name remains the attribution key for uncertain-response reconciliation.
+- [x] 1.2 Run in the API-server shared connector integration, with `@repo/sprites-client` owning the REST wire contract; remove the separate Worker, bearer, and service binding.
+- [x] 1.3 Reuse the API server's existing Sprites API token; redact it and submitted connector credentials from responses and logs.
+- [x] 1.4 REST create-with-final-policy + verify + delete; reconcile a retryable uncertain create response only by its unique per-attempt name and delete a match.
+- [x] 1.4a `GET /v1/oauth/connections` returned only the `connections` collection with no cursor, continuation token, or pagination metadata; uncertain-response reconciliation uses that complete envelope (live verification 2026-07-26).
 - [x] 1.5 Verify label immutability from a root shell inside a Sprite (2026-07-26, disposable `hostile-root-test-7f3a9c`): no injected control-plane credential; root CLI label mutation failed with no organization configured; direct management `PUT`/`PATCH` and child-Sprite creation returned 401; the internal API exposed no label mutation path; external read-back preserved `security-test:baseline-7f3a9c`; Sprite deleted.
 - [ ] 1.5a Land Sprite labeling and connector label enforcement in the same integration change, not sequentially.
-- [ ] 1.6 Endpoint pinning: the provisioner accepts `allowedEndpoints`, verifies it on read-back, and requires it for class-A `session:` connectors only (2026-07-26). Class-B environment connectors may intentionally authorize their full upstream origin. Wire format verified against the live Sprites API the same day: `allowed_endpoints: ["/headers"]` accepted on PATCH and returned verbatim on GET (disposable live test, 14.2s total). Remaining: verify the gateway actually blocks an off-pin Worker path from a labelled Sprite once labeling lands (needs an in-VM test; pairs with 1.5a).
-- [ ] 1.7 Before session integration: front the provisioner with the api-server service binding (removes the bearer from the network path) and add rate limiting on `/mint` (remote-browser spend + real credential creation must not be unbounded under a leaked bearer).
+- [x] 1.6 Endpoint pinning: `mintConnector` accepts `allowedEndpoints`, includes it in REST creation, verifies it on read-back, and requires it for class-A `session:` connectors only. A matching labelled disposable Sprite succeeded on `/headers` and received `403` on off-pin `/get` (2026-07-26).
+- [x] 1.7 Remove the separate connector-provisioner HTTP service. Connector lifecycle is now an in-process API-server operation, so there is no independently exposed `/mint` bearer to rate-limit.
 
 ## 2. Data model (D1) — cross-cutting
 
-- [ ] 2.1 `session_connectors` (internal): session_id, gateway conn id, detail id, policy summary, status, timestamps. Keep the webhook token in DO SQLite, not D1.
-- [ ] 2.2 `environment_connectors` (class B, metadata only — Sprites custodies value): id, environment_id, name, upstream origin, header name/prefix, conn id + detail id, label `env:<environmentId>`, lifecycle status, timestamps; unique per environment + hostname. Statuses cover provisioning, active, replacement-pending, pending-revocation, and error so the deletion id is never lost.
+- [ ] 2.1 `session_connectors` (internal): session_id, gateway conn id, policy summary, status, timestamps. Keep the webhook token in DO SQLite, not D1.
+- [ ] 2.2 `environment_connectors` (class B, metadata only — Sprites custodies value): id, environment_id, name, upstream origin, header name/prefix, gateway conn id, label `env:<environmentId>`, lifecycle status, timestamps; unique per environment + hostname. Statuses cover provisioning, active, replacement-pending, pending-revocation, and error so the deletion id is never lost.
 - [ ] 2.3 Query environment connector metadata before Sprite creation to build labels and the routing table; never store plaintext or session membership.
 - [ ] 2.4 Zod schemas/types for session connectors, environment connectors, access-policy scopes, and provisioning states.
 
@@ -39,7 +40,7 @@
 
 ## S1. Connector spine + webhook
 
-- [ ] S1.1 Create the Sprite with `session:<sessionId>` and `env:<environmentId>` labels, then mint the internal connector (base = Worker, token = existing DO webhook token, policy = session label); store connector metadata in D1 and fail closed. The provisioner enforces per-attempt name uniqueness (appends a random suffix), making name attribution definitive across concurrent duplicate mints; store the returned `name` alongside the ids (2026-07-25).
+- [ ] S1.1 Create the Sprite with `session:<sessionId>` and `env:<environmentId>` labels, then mint the internal connector (base = Worker, token = existing DO webhook token, policy = session label); store connector metadata in D1 and fail closed. `mintConnector` enforces per-attempt name uniqueness (appends a random suffix), making name attribution definitive across concurrent duplicate mints; store the returned `name` alongside the ids (2026-07-25).
 - [ ] S1.2 Preserve `/internal/session/:sessionId/chunks` and `/events`; the route resolves the DO and the DO validates the gateway-injected token from SQLite. Add a connector health `test_url` without introducing a generic `/webhook` or D1 secret mapping.
 - [ ] S1.3 Give the VM the connector gateway base instead of `DO_WEBHOOK_TOKEN`; cut over behind a flag and retire Sprite-held webhook-token delivery once proven.
 - [ ] S1.4 Teardown deletes the internal connector and DO webhook token. It does not edit class-B policies.
@@ -72,8 +73,8 @@
 
 ## S5. Environment header credentials
 
-- [ ] S5.0 Live-test the dashboard's `Custom header` mode and record selectors/wire shape before accepting arbitrary header names. Until it passes, the implemented provisioner contract remains `Authorization` only.
-- [ ] S5.0a Verify Sprites rejects connector targets that resolve/rebind to loopback, link-local, private, metadata, or reserved ranges and never forwards an injected credential across an origin-changing redirect. If not, implement resolved-address and redirect enforcement before exposing user-defined origins; dashboard test success alone is not the safety check.
+- [ ] S5.0 Obtain and live-test the REST field for custom header names before accepting arbitrary header names. Until it passes, the implemented connector contract remains `Authorization` only.
+- [ ] S5.0a Verify Sprites rejects connector targets that resolve/rebind to loopback, link-local, private, metadata, or reserved ranges and never forwards an injected credential across an origin-changing redirect. If not, implement resolved-address and redirect enforcement before exposing user-defined origins; connection-test success alone is not the safety check.
 - [ ] S5.1 Definition UI/API: an environment declares one header credential (name, value, public HTTPS upstream origin, header name/prefix) per hostname, with optional endpoint restrictions.
 - [ ] S5.2 Mint a class-B connector for the environment + hostname (value → Sprites custody; store metadata only in D1) with immutable `sprite_labels: [env:<environmentId>]`.
 - [ ] S5.3 At provisioning, put `env:<environmentId>` on the Sprite and add the environment's connector hosts to the routing table. Never edit or de-scope the connector policy per session.
@@ -87,7 +88,7 @@
 
 ## 7. Tests And Validation
 
-- [x] 7.1 Provisioner tests: shape/success detection, scope-verify, redaction, fail-closed on allow-all/verify failure.
+- [x] 7.1 API-server connector tests: REST request shape, create/verify success, uncertain-response reconciliation, validation, and fail-closed cleanup on policy mismatch.
 - [ ] 7.2 D1 tests: session/environment connector metadata lifecycle, environment+hostname uniqueness, immutable class-B policy, create cleanup, replacement ordering, active-session stale-route behavior, environment/credential revocation with partial-failure reconciliation, status transitions, and no provider-specific connector lifecycle.
 - [ ] 7.3 Data-plane tests: routing table, configured-header stripping, CA trust, dummy resolver, targeted redirect, class-C/gateway bypass, fail-closed default.
 - [ ] 7.4 Identity tests: off-Sprite replay rejected (webhook/post-clone git/environment credential); another Sprite denied.

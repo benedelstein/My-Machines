@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MintConnectorRequestSchema } from "../src/connectors.schema";
+import { MintConnectorRequestSchema } from "../../src/shared/integrations/sprite-connectors/connector-provisioning.schema";
 
 const validRequest = {
   name: "connector-test",

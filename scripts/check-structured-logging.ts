@@ -17,7 +17,6 @@ const sourceRoots = [
   "packages/sprites-client/src",
   "packages/vm-agent/src",
   "services/api-server/src",
-  "services/connector-provisioner/src",
 ];
 
 const ignoredDirectories = new Set([

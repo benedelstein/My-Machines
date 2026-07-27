@@ -224,12 +224,13 @@ the secret:
 ### Class-B create, replace, and delete
 
 `environment_connectors` stores the environment id, upstream origin, header
-configuration, gateway connection id, dashboard detail id, immutable environment
-label, status, and timestamps. It never stores the credential value.
+configuration, gateway connection id, immutable environment label, status, and
+timestamps. It never stores the credential value.
 
-- **Create:** mint deny-all, scope to `env:<environmentId>`, verify the read-back,
-  then insert the active D1 row. If persistence fails, delete the newly minted
-  connector. Sessions resolve only verified `active` rows.
+- **Create:** mint with `allow_all: false` and the immutable
+  `env:<environmentId>` policy, verify the read-back, then insert the active D1
+  row. If persistence fails, delete the newly minted connector. Sessions resolve
+  only verified `active` rows.
 - **Delete:** atomically remove the row from active lookup and mark it
   `pending_revocation`, then delete the stored gateway connection id. Delete the D1
   row only after external deletion is confirmed. Reconciliation retries any partial
@@ -304,8 +305,9 @@ Mechanism:
   Sprites also supports API-managed label updates after creation, but that is a
   recovery/fallback operation and must finish before connector use or agent start.
 - Class-A connector creation happens **after** the labelled Sprite exists. The new
-  connector defaults to deny-all, is scoped to `session:<sessionId>`, verified, and
-  only then made available to the Sprite.
+  connector is created with `allow_all: false`, the `session:<sessionId>` label,
+  and its endpoint restrictions; that final policy is verified before the
+  connector is made available to the Sprite.
 
 Because the connector policy is set once and never touched per session, there is **no
 per-session policy churn and therefore no concurrency race** between concurrent
@@ -403,35 +405,36 @@ or `locked` semantics:
 
 ## Connector provisioning (`mintConnector`)
 
-Sprites has **no REST create** for Custom API connectors (Fly confirmed;
-`/api_key` only takes preset `provider`+`api_key`), so creation is browser-driven.
+Fly exposed `POST /v1/oauth/connections/custom_api` and confirmed the request shape
+through support. The endpoint was verified live on 2026-07-26: it returned `201`
+with the authoritative gateway connection id and persisted the supplied label and
+endpoint policy. A labelled disposable Sprite then received the injected credential
+through `/headers`, while an off-allowlist `/get` request returned `403`.
 One primitive:
 
 ```text
 mintConnector({ baseApiUrl, token, headerName='Authorization',
                 headerPrefix='Bearer', testUrl, scope, allowedEndpoints? })
-  -> { gatewayConnectionId, detailId? }
+  -> { gatewayConnectionId }
 ```
 
-- **Create (browser)** — proven by the 2026-07-06 spike: form `custom-api-form`,
-  test (`test_custom_api`) gates create (`HTTP 200 — Connection OK` state), create
-  completes through the dashboard. Treat the dashboard redirect/detail id as
-  optional diagnostics, not as the REST identity contract. Give every attempt a
-  unique generated name, then page through REST connections until exactly one
-  `custom_api` connection matches that name, base URL, and test URL; its
-  `connections[].id` is the authoritative gateway id for policy and deletion.
-- **Scope + verify (REST)** — create defaults to **deny-all** (verified), so a new
-  connector is inert until scoped. `PATCH /v1/oauth/connections/{id}` access policy;
-  GET to confirm. `allowed_endpoints` is mandatory for class-A Worker connectors and
-  optional for class-B external-origin connectors.
-- **Fail closed** — on any failure, REST-delete the partial connector and throw.
-- **Host:** a dedicated private Cloudflare Worker using **Browser Rendering**
-  (`@cloudflare/playwright`, dashboard `storageState` injected per run; verified paid
-  limits 120 concurrent / 1-create-per-sec / 60s idle→10min keep_alive). The
-  api-server calls it through a service binding when session integration lands.
-  Keeping dashboard cookies and browser failures out of the main Worker is an
-  explicit trust and failure boundary. **Switch to a Fly.io Machine if measured
-  mint latency is too high** — instrument from day one.
+- **Create with final policy (REST)** — give every attempt a unique generated name
+  and POST the credential with `allow_all: false`, the immutable Sprite labels, and
+  endpoint restrictions. The response's `connection.id` is authoritative for
+  gateway use, verification, and deletion. `allowed_endpoints` is mandatory for
+  class-A Worker connectors and optional for class-B external-origin connectors.
+- **Verify (REST)** — GET the returned id and confirm `custom_api`, the unique name,
+  `allow_all: false`, labels, and endpoint restrictions before returning it.
+- **Fail closed** — on any verification failure, REST-delete the connector. If a
+  retryable create loses its response, reconcile only by the per-attempt unique name
+  and delete a match; otherwise return `orphan_reconciliation_required`. The live
+  `GET /v1/oauth/connections` envelope contained only the complete `connections`
+  collection, with no cursor or pagination metadata (verified 2026-07-26).
+- **Host:** the API-server shared connector integration. The API server already
+  holds `SPRITES_API_KEY` for Sprite lifecycle operations, so a second Worker,
+  bearer, and service binding add deployment and network boundaries without
+  reducing credential authority. `@repo/sprites-client` remains the only owner of
+  the Sprites REST wire contract.
 
 Who mints what: the **internal connector** is minted after its labelled Sprite is
 created and deleted with the session. **Class-B connectors** are minted once per
@@ -495,11 +498,11 @@ path until the connector path is proven, then remove it.
 ## Data model (D1)
 
 - `session_connectors` — internal connectors: `session_id`, gateway connection id,
-  dashboard detail id, policy summary, status, timestamps. The webhook token remains
+  policy summary, status, timestamps. The webhook token remains
   in Durable Object SQLite, not D1.
 - `environment_connectors` — class-B metadata (NOT plaintext; Sprites custodies the
   value): `id`, `environment_id`, name, upstream hostname, header name/prefix,
-  connector gateway id + detail id, environment label (`env:<environmentId>`),
+  connector gateway id, environment label (`env:<environmentId>`),
   status, and timestamps. Unique on `(environment_id, upstream_hostname)` for v1.
   The status model includes provisioning, active, replacement-pending,
   pending-revocation, and error so external connector operations can be reconciled
@@ -687,7 +690,7 @@ way, a direct request does not receive the connector credential.
 The whole concept ships across stages that share one data model, one connector
 abstraction, and one proxy — so no stage requires redesigning another.
 
-- **S1 — connector spine + webhook.** `mintConnector` (Browser Rendering) + internal
+- **S1 — connector spine + webhook.** REST-backed `mintConnector` + internal
   per-session connector + `session_connectors` D1 + webhook cutover. Proves
   identity-bound class-A end to end.
 - **S2 — post-clone git cutover.** Move fetch/push onto the internal connector;
@@ -718,8 +721,8 @@ abstraction, and one proxy — so no stage requires redesigning another.
 
 ## Risks / Open questions
 
-- **Per-session internal mint latency** — browser mint on the session critical path;
-  minimize + overlap with VM boot; measure; Browser Rendering vs Fly by the number.
+- **Per-session internal mint latency** — REST mint remains on the session critical
+  path; minimize, overlap with VM boot, and measure.
 - **Trust-store gaps** — enumerate the runtimes the agent uses that bypass the system
   CA; document handling; rely on the network policy as backstop.
 - **Codex native egress lifecycle** — base inference is confirmed through native
@@ -733,15 +736,14 @@ abstraction, and one proxy — so no stage requires redesigning another.
   refreshes are read/refresh/upsert without serialization or optimistic versioning.
   Fix and test this in the AI-auth area before enabling the higher-frequency S4
   inference proxy; it is not part of connector provisioning.
-- **Custom-header dashboard mode** — the provisioner currently automates only the
-  dashboard's ordinary `Header` mode and therefore only `Authorization`. Before S5,
-  live-test the dashboard's `Custom header` mode, record its selectors/wire shape,
-  and generalize the request schema. Until that passes, the implemented contract is
-  `Authorization` only, not an arbitrary header name.
+- **Custom-header REST shape** — the verified REST request uses ordinary header mode
+  and therefore only `Authorization`. Before S5, obtain and live-test the API field
+  for a custom header name and generalize the request schema. Until that passes, the
+  implemented contract is `Authorization` only, not an arbitrary header name.
 - **Custom connector target/SSRF boundary** — the current URL validator is an early
   syntactic guard: HTTPS, no userinfo, same-origin test URL, and rejection of common
   literal loopback/private/link-local addresses and internal suffixes. A successful
-  dashboard test proves reachability, not safety; it does not prove protection
+  connection test proves reachability, not safety; it does not prove protection
   against a public hostname resolving to an internal address, DNS rebinding, or
   credential-bearing redirects. Before S5 accepts user-selected origins, obtain and
   verify Sprites' target/redirect protections with disposable tests. If Sprites does
@@ -762,8 +764,9 @@ abstraction, and one proxy — so no stage requires redesigning another.
   such exfiltration guarantee.
 - Sprite can install nft/iptables? **Yes** — passwordless sudo; install at
   provisioning (base image fixed).
-- Custom API connector REST create? **No** — dashboard-only; REST does
-  scope/verify/delete (`PATCH/GET/DELETE /v1/oauth/connections/{id}`).
+- Custom API connector REST create? **Yes (live tested 2026-07-26)** —
+  `POST /v1/oauth/connections/custom_api` accepts the credential and final access
+  policy, and returns the authoritative gateway connection id.
 - Create default access? **Deny-all** — scope is a grant.
 - How are connectors scoped to Sprites? **Labels only** — the access policy has no
   Sprite-id field (`sprite_labels`/`name_prefix` only), and in-VM root cannot change
@@ -782,7 +785,8 @@ abstraction, and one proxy — so no stage requires redesigning another.
   returned for class-B hosts is redirected; every class-A client (webhook, git,
   provider CLIs) is configured directly to the gateway, and class-C/gateway
   destinations are never intercepted.
-- Can a Worker drive a browser? **Yes** — Cloudflare Browser Rendering (Fly fallback).
+- Does connector provisioning require a browser? **No** — the REST endpoint covers
+  the required Custom API connector shape.
 - Async provisioning? **No** — synchronous, fail-closed.
 - User secrets / transparent proxy in scope? **Yes, both** — part of the coherent
   whole; sequenced in Staging, not deferred in concept.

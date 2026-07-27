@@ -13,7 +13,6 @@ const sourceRoots = [
   "packages/sprites-client",
   "packages/vm-agent",
   "services/api-server",
-  "services/connector-provisioner",
   "scripts",
 ];
 

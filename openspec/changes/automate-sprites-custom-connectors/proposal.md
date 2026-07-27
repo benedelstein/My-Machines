@@ -25,8 +25,10 @@ share one mechanism:
    routes unmodified egress to one connector per environment and hostname, which
    injects a configured header secret without the agent holding it.
 
-Sprites exposes connector creation only through the dashboard, not the public REST
-API, so automating that dashboard flow is part of the work.
+Sprites exposes Custom API connector creation through
+`POST /v1/oauth/connections/custom_api`. The endpoint was confirmed by Fly support
+and verified live on 2026-07-26 with label and endpoint policies, gateway credential
+injection, and off-allowlist denial.
 
 ## What Changes
 
@@ -53,8 +55,9 @@ API, so automating that dashboard flow is part of the work.
   deliberately permits direct egress. Connector security does not depend on direct
   egress being denied: bypassing the proxy reaches an upstream without the
   Sprites-custodied credential.
-- **`mintConnector` primitive** (browser create + REST scope/verify/delete) via
-  Cloudflare Browser Rendering (Fly.io Machine fallback if latency demands).
+- **`mintConnector` primitive** (REST create with final policy +
+  verify/reconcile/delete) in the API server, with the raw Sprites wire contract
+  isolated in `@repo/sprites-client`.
 - **Worker cutovers:** webhook and git endpoints stop accepting Sprite-held bearers
   and require the gateway-injected credential; retire the old bearers behind flags.
 - **Provider inference proxy:** provider inference is routed through the existing
@@ -107,8 +110,7 @@ model, connector abstraction, and proxy — none redesigned later.
   across trust stores, local resolver, transparent proxy + routing table +
   dummy-destination redirect rules. Class-A flows (webhook, git, provider CLIs)
   use direct gateway configuration and never depend on it.
-- New `mintConnector` via Cloudflare Browser Rendering, run synchronously during
-  provisioning.
+- New REST-backed `mintConnector`, run synchronously during provisioning.
 - Existing Worker `/internal/session/:sessionId/chunks`,
   `/internal/session/:sessionId/events`, and git-proxy routes receive the
   gateway-injected per-session token; the Durable Object remains webhook authority.
