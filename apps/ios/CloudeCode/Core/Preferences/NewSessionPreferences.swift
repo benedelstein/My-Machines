@@ -1,4 +1,3 @@
-import CoreAPI
 import Foundation
 
 /// Persists the user's last valid model and repository choices for new sessions.
@@ -15,11 +14,13 @@ final class NewSessionPreferences {
         let effortDisplayName: String?
     }
 
-    struct LastSelectedRepo: Codable, Equatable {
+    struct RepoSnapshot: Codable, Equatable {
         let id: Int
         let fullName: String
         let defaultBranch: String
     }
+
+    private static let maxRecentRepos = 3
 
     private let userDefaults: UserDefaults
 
@@ -39,20 +40,19 @@ final class NewSessionPreferences {
         }
     }
 
-    var lastSelectedRepo: LastSelectedRepo? {
-        get {
-            userDefaults.codableValue(LastSelectedRepo.self, forKey: Constants.UserDefaults.lastSelectedNewSessionRepo)
-        }
-        set {
-            userDefaults.setCodableValue(newValue, forKey: Constants.UserDefaults.lastSelectedNewSessionRepo)
-        }
+    /// Repos most recently used to create sessions, newest first. The first
+    /// entry doubles as the repo preselected in a new session draft.
+    var recentRepos: [RepoSnapshot] {
+        userDefaults.codableValue([RepoSnapshot].self, forKey: Constants.UserDefaults.recentNewSessionRepos) ?? []
     }
 
-    func persistRepo(_ repo: Repo) {
-        lastSelectedRepo = LastSelectedRepo(
-            id: repo.id,
-            fullName: repo.fullName,
-            defaultBranch: repo.defaultBranch
+    /// Moves a repo to the front of the recents list after a session is created.
+    func recordRecentRepo(_ repo: RepoSnapshot) {
+        var recents = recentRepos.filter { $0.id != repo.id }
+        recents.insert(repo, at: 0)
+        userDefaults.setCodableValue(
+            Array(recents.prefix(Self.maxRecentRepos)),
+            forKey: Constants.UserDefaults.recentNewSessionRepos
         )
     }
 

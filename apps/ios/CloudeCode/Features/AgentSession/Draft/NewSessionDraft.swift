@@ -95,7 +95,9 @@ final class NewSessionDraft {
         self.environmentsStore = environmentsStore
         self.preferences = preferences
         self.githubInstallationStore = githubInstallationStore
-        repoSelection = preferences.lastSelectedRepo.map {
+        // The draft preselects the repo the last session was created with;
+        // selections that never produced a session are not restored.
+        repoSelection = preferences.recentRepos.first.map {
             RepoSelection(
                 repo: SelectedRepo(
                     id: $0.id,
@@ -178,25 +180,42 @@ final class NewSessionDraft {
         return branches
     }
 
+    /// Repos most recently used to create sessions, newest first.
+    var recentRepos: [NewSessionPreferences.RepoSnapshot] {
+        preferences.recentRepos
+    }
+
     /// Selects a repository and branch, resetting to the repository default when no branch is supplied.
     func selectRepo(_ repo: Repo, branch: String? = nil) {
-        // Re-selecting the same repo (e.g. refreshing a restored selection)
-        // keeps its resolved environment. A different repo seeds its persisted
-        // selection immediately so a cache-first load cannot briefly submit
-        // with no environment while the network refresh is still in flight.
-        let environmentId = repoSelection?.repo.id == repo.id
-            ? repoSelection?.environmentId
-            : preferences.lastEnvironmentId(repoId: repo.id)
-        repoSelection = RepoSelection(
-            repo: SelectedRepo(
+        selectRepo(
+            NewSessionPreferences.RepoSnapshot(
                 id: repo.id,
                 fullName: repo.fullName,
                 defaultBranch: repo.defaultBranch
             ),
-            branch: branch ?? repo.defaultBranch,
+            branch: branch
+        )
+    }
+
+    /// Selects a repository from a persisted snapshot (e.g. the recents list),
+    /// which may not be present in the loaded repo listing.
+    func selectRepo(_ snapshot: NewSessionPreferences.RepoSnapshot, branch: String? = nil) {
+        // Re-selecting the same repo (e.g. refreshing a restored selection)
+        // keeps its resolved environment. A different repo seeds its persisted
+        // selection immediately so a cache-first load cannot briefly submit
+        // with no environment while the network refresh is still in flight.
+        let environmentId = repoSelection?.repo.id == snapshot.id
+            ? repoSelection?.environmentId
+            : preferences.lastEnvironmentId(repoId: snapshot.id)
+        repoSelection = RepoSelection(
+            repo: SelectedRepo(
+                id: snapshot.id,
+                fullName: snapshot.fullName,
+                defaultBranch: snapshot.defaultBranch
+            ),
+            branch: branch ?? snapshot.defaultBranch,
             environmentId: environmentId
         )
-        preferences.persistRepo(repo)
     }
 
     /// Selects a branch for the current repository.
@@ -257,7 +276,13 @@ final class NewSessionDraft {
             branch: branch,
             initialMessage: initialMessage
         )
-        return try await sessionsAPI.createSession(request)
+        let response = try await sessionsAPI.createSession(request)
+        preferences.recordRecentRepo(NewSessionPreferences.RepoSnapshot(
+            id: repoSelection.repo.id,
+            fullName: repoSelection.repo.fullName,
+            defaultBranch: repoSelection.repo.defaultBranch
+        ))
+        return response
     }
 
     /// Mirrors web: keep the persisted last-used environment when it still
