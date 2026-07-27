@@ -18,18 +18,31 @@ const schoolbell = localFont({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.mymachines.dev"),
   title: {
     default: "My Machines",
     template: "%s | My Machines",
   },
-  description: "Persistent computers for your agent team.",
+  description: "Infinite, on-demand computers for all your work.",
   openGraph: {
     title: {
       default: "My Machines",
       template: "%s | My Machines",
     },
-    description: "Persistent computers for your agent team.",
+    description: "Infinite, on-demand computers for all your work.",
+    images: [
+      {
+        url: "/opengraph.png",
+        width: 1200,
+        height: 630,
+        alt: "Works on My Machines",
+      },
+    ],
     siteName: "My Machines",
+  },
+  twitter: {
+    card: "summary_large_image",
+    images: ["/opengraph.png"],
   },
 };
 

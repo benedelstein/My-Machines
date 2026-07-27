@@ -97,7 +97,7 @@ export function SplashPageClient({ hasSessionCookie }: SplashPageClientProps) {
               className="text-[2.55rem] leading-none sm:text-6xl md:text-7xl"
             />
             <p className="brand-hero-subtitle mt-5 max-w-xl text-pretty text-base text-brand-label-muted md:text-lg">
-              Infinite, on-demand computers for all your development work.
+              Infinite, on-demand computers for all your work.
             </p>
           </div>
           <div className="flex w-full justify-center pb-4">{renderPrimaryCTA("lg")}</div>
