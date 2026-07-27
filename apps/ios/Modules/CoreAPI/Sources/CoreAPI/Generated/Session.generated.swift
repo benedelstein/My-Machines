@@ -367,6 +367,38 @@ public enum SessionAccessBlockReason: RawRepresentable, Codable, Equatable, Send
     }
 }
 
+public struct SessionConnectorSetupTask: Codable, Equatable, Sendable {
+    public var status: SessionSetupTaskStatus
+    public var startedAt: String?
+    public var completedAt: String?
+    public var error: String?
+    public let id = "session_connector"
+    public let isBlocking = true
+    public let canRetry = true
+
+    public init(
+        status: SessionSetupTaskStatus,
+        startedAt: String? = nil,
+        completedAt: String? = nil,
+        error: String? = nil
+    ) {
+        self.status = status
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.error = error
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case startedAt
+        case completedAt
+        case error
+        case id
+        case isBlocking
+        case canRetry
+    }
+}
+
 public struct SessionPlanMetadata: Codable, Equatable, Sendable {
     public var lastUpdated: String
 
@@ -427,6 +459,7 @@ public enum SessionSetupRunStatus: RawRepresentable, Codable, Equatable, Sendabl
 
 public enum SessionSetupTask: Codable, Equatable, Sendable {
     case cloudContainer(CloudContainerSetupTask)
+    case sessionConnector(SessionConnectorSetupTask)
     case repository(RepositorySetupTask)
     case setupScript(StartupScriptSetupTask)
     case networkPolicy(NetworkPolicySetupTask)
@@ -442,6 +475,8 @@ public enum SessionSetupTask: Codable, Equatable, Sendable {
         switch try container.decode(String.self, forKey: .discriminator) {
         case "cloud_container":
             self = .cloudContainer(try CloudContainerSetupTask(from: decoder))
+        case "session_connector":
+            self = .sessionConnector(try SessionConnectorSetupTask(from: decoder))
         case "repository":
             self = .repository(try RepositorySetupTask(from: decoder))
         case "setup_script":
@@ -456,6 +491,8 @@ public enum SessionSetupTask: Codable, Equatable, Sendable {
     public func encode(to encoder: any Encoder) throws {
         switch self {
         case .cloudContainer(let payload):
+            try payload.encode(to: encoder)
+        case .sessionConnector(let payload):
             try payload.encode(to: encoder)
         case .repository(let payload):
             try payload.encode(to: encoder)

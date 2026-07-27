@@ -31,6 +31,62 @@ id and cleanup cause so the caller can reconcile the orphan.
 Session-scoped connectors must specify `allowedEndpoints`; environment-scoped
 connectors may authorize the full configured origin.
 
+## Per-session connectors
+
+Each session mints one internal connector during provisioning, as the blocking
+`session_connector` setup task between `cloud_container` and `repository`:
+
+- The Sprite is created with `session:<sessionId>` labels, plus
+  `env:<environmentId>` when the session came from an environment. Labels are
+  platform metadata that in-VM root cannot change, so they are the connector's
+  access-policy scope. `SessionConnectorService` re-reads the Sprite and repairs
+  missing labels before minting, and fails closed if they do not persist.
+- The connector's base URL is `WORKER_URL`, its `test_url` is `WORKER_URL/health`
+  (same origin, unauthenticated), and its injected credential is the Durable
+  Object's existing `webhook_token`. The token is never handed to the Sprite.
+- `allowedEndpoints` pins the session's own paths only: the two webhook routes,
+  its git-proxy prefix, and `/health`.
+- Non-secret metadata lands in the D1 `session_connectors` table; the gateway
+  connection id is also checkpointed in `ServerState.sessionConnectorId`. If the
+  D1 write fails, the connector is deleted before the failure surfaces.
+- Teardown marks the row `pending_revocation`, deletes and verifies the
+  connector, then removes the row. A failed delete keeps the row so the
+  connection id survives for reconciliation.
+
+The gateway base a Sprite calls is
+`https://api.sprites.dev/v1/gateway/custom_api/<connectionId>`, built by
+`buildConnectorGatewayUrl`. Restricted network modes add that hostname through
+`connectorGatewayHostname`; `open` mode is unchanged.
+
+## Rollout flags
+
+All three default to off. Either cutover implies minting.
+
+| Variable | Effect |
+| --- | --- |
+| `SESSION_CONNECTORS_ENABLED` | Mint a per-session connector during provisioning. |
+| `SESSION_CONNECTOR_WEBHOOK_CUTOVER` | The VM gets the gateway base and `DO_WEBHOOK_AUTH=gateway` instead of `DO_WEBHOOK_TOKEN`, and posts webhooks with no Authorization header. |
+| `SESSION_CONNECTOR_GIT_CUTOVER` | Post-clone git remotes point at the gateway, no bearer is written into git config, and the git proxy accepts only the gateway-injected session token. |
+
+**The flags only affect sessions created after they are enabled.** A session
+whose setup run already finished is never reopened, so it never mints a
+connector and keeps its original credential paths — including the Sprite-held
+`DO_WEBHOOK_TOKEN` — for the rest of its life. That fallback is logged at error
+level (`"Webhook cutover enabled but session has no connector"`) so a session
+still running the pre-cutover posture is visible rather than silent. Webhook
+delivery deliberately does not fail closed here: the alternative is a session
+that cannot report agent output at all.
+
+The git cutover is decided per session from the persisted
+`gitConfiguredViaConnector` checkpoint rather than the live flag, so enabling or
+rolling back the flag cannot change how an existing session's git requests are
+authenticated. During provisioning it fails the repository setup task closed
+rather than configuring a remote it cannot authenticate. The initial clone
+always stays on the direct GitHub path with its short-lived read-only token.
+
+Retiring the legacy Sprite-held paths is a follow-up: it is only safe once no
+pre-cutover sessions remain.
+
 ## Live test
 
 From the repository root, load the API server environment and run:

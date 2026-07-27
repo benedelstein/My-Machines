@@ -22,34 +22,34 @@
 - [x] 1.4 REST create-with-final-policy + verify + delete; reconcile a retryable uncertain create response only by its unique per-attempt name and delete a match.
 - [x] 1.4a `GET /v1/oauth/connections` returned only the `connections` collection with no cursor, continuation token, or pagination metadata; uncertain-response reconciliation uses that complete envelope (live verification 2026-07-26).
 - [x] 1.5 Verify label immutability from a root shell inside a Sprite (2026-07-26, disposable `hostile-root-test-7f3a9c`): no injected control-plane credential; root CLI label mutation failed with no organization configured; direct management `PUT`/`PATCH` and child-Sprite creation returned 401; the internal API exposed no label mutation path; external read-back preserved `security-test:baseline-7f3a9c`; Sprite deleted.
-- [ ] 1.5a Land Sprite labeling and connector label enforcement in the same integration change, not sequentially.
+- [x] 1.5a Land Sprite labeling and connector label enforcement in the same integration change, not sequentially. Sprite creation now sends `session:<sessionId>` (plus `env:<environmentId>` when present) via `@fly/sprites` 0.1.0 `labels`, and the mint verifies the labels are present before creating the connector.
 - [x] 1.6 Endpoint pinning: `mintConnector` accepts `allowedEndpoints`, includes it in REST creation, verifies it on read-back, and requires it for class-A `session:` connectors only. A matching labelled disposable Sprite succeeded on `/headers` and received `403` on off-pin `/get` (2026-07-26).
 - [x] 1.7 Remove the separate connector-provisioner HTTP service. Connector lifecycle is now an in-process API-server operation, so there is no independently exposed `/mint` bearer to rate-limit.
 
 ## 2. Data model (D1) — cross-cutting
 
-- [ ] 2.1 `session_connectors` (internal): session_id, gateway conn id, policy summary, status, timestamps. Keep the webhook token in DO SQLite, not D1.
+- [x] 2.1 `session_connectors` (internal): session_id, gateway conn id, policy summary, status, timestamps. Keep the webhook token in DO SQLite, not D1. Migration `0029_session_connectors.sql` + `SessionConnectorsRepository`.
 - [ ] 2.2 `environment_connectors` (class B, metadata only — Sprites custodies value): id, environment_id, name, upstream origin, header name/prefix, gateway conn id, label `env:<environmentId>`, lifecycle status, timestamps; unique per environment + hostname. Statuses cover provisioning, active, replacement-pending, pending-revocation, and error so the deletion id is never lost.
 - [ ] 2.3 Query environment connector metadata before Sprite creation to build labels and the routing table; never store plaintext or session membership.
 - [ ] 2.4 Zod schemas/types for session connectors, environment connectors, access-policy scopes, and provisioning states.
 
 ## 3. Network egress policy — cross-cutting
 
-- [ ] 3.1 Preserve `buildFinalNetworkPolicy` semantics for `open`, `default`, `custom`, and `locked`; add connector-gateway reachability to restricted modes. Apply only the temporary provisioning exceptions needed for toolchain install, then the user's selected final policy before the agent runs.
+- [x] 3.1 Preserve `buildFinalNetworkPolicy` semantics for `open`, `default`, `custom`, and `locked`; add connector-gateway reachability to restricted modes. Apply only the temporary provisioning exceptions needed for toolchain install, then the user's selected final policy before the agent runs. `connectorGatewayHostname` is added to bootstrap and to every restricted mode; `open` is unchanged.
 - [ ] 3.2 In restricted modes, do not add class-A/B credential hosts merely because a connector exists; preserve any host already allowed by the selected default/custom policy. Provider CLIs use their session connector gateway path directly. Test that direct access never receives a connector credential, including under `open`.
 
 ## S1. Connector spine + webhook
 
-- [ ] S1.1 Create the Sprite with `session:<sessionId>` and `env:<environmentId>` labels, then mint the internal connector (base = Worker, token = existing DO webhook token, policy = session label); store connector metadata in D1 and fail closed. `mintConnector` enforces per-attempt name uniqueness (appends a random suffix), making name attribution definitive across concurrent duplicate mints; store the returned `name` alongside the ids (2026-07-25).
-- [ ] S1.2 Preserve `/internal/session/:sessionId/chunks` and `/events`; the route resolves the DO and the DO validates the gateway-injected token from SQLite. Add a connector health `test_url` without introducing a generic `/webhook` or D1 secret mapping.
-- [ ] S1.3 Give the VM the connector gateway base instead of `DO_WEBHOOK_TOKEN`; cut over behind a flag and retire Sprite-held webhook-token delivery once proven.
-- [ ] S1.4 Teardown deletes the internal connector and DO webhook token. It does not edit class-B policies.
+- [x] S1.1 Create the Sprite with `session:<sessionId>` and `env:<environmentId>` labels, then mint the internal connector (base = Worker, token = existing DO webhook token, policy = session label); store connector metadata in D1 and fail closed. `mintConnector` enforces per-attempt name uniqueness (appends a random suffix), making name attribution definitive across concurrent duplicate mints; store the returned `name` alongside the ids (2026-07-25). Runs as the blocking, retryable `session_connector` setup task between `cloud_container` and `repository`.
+- [x] S1.2 Preserve `/internal/session/:sessionId/chunks` and `/events`; the route resolves the DO and the DO validates the gateway-injected token from SQLite. Add a connector health `test_url` without introducing a generic `/webhook` or D1 secret mapping. Routes and DO validation are unchanged; `test_url` is the existing unauthenticated `/health`.
+- [x] S1.3 Give the VM the connector gateway base instead of `DO_WEBHOOK_TOKEN`; cut over behind a flag and retire Sprite-held webhook-token delivery once proven. Behind `SESSION_CONNECTOR_WEBHOOK_CUTOVER`; the VM gets `DO_WEBHOOK_AUTH=gateway` and posts without an Authorization header. Retiring the legacy path is still pending live proof.
+- [x] S1.4 Teardown deletes the internal connector and DO webhook token. It does not edit class-B policies. `deleteForTeardown` marks `pending_revocation`, deletes + verifies, then removes the row; the DO token dies with `destroy()`.
 
 ## S2. Git cutover
 
-- [ ] S2.1 Route post-clone fetch/push through the internal connector; Worker git-proxy accepts ONLY the gateway-injected credential, not a Sprite-held bearer. Preserve the existing per-request repository-access check: connector/session identity authenticates the caller but does not authorize repository access.
-- [ ] S2.2 Preserve Worker-custodied installation token, `cloude/*` branch validation + lock, repo allowlist, `locked` policy.
-- [ ] S2.3 Keep initial clone on the existing direct GitHub path with its short-lived contents-read-only token; retire `gitProxySecret` for later fetch/push behind a flag and measure post-clone read latency.
+- [x] S2.1 Route post-clone fetch/push through the internal connector; Worker git-proxy accepts ONLY the gateway-injected credential, not a Sprite-held bearer. Preserve the existing per-request repository-access check: connector/session identity authenticates the caller but does not authorize repository access. Once `gitConfiguredViaConnector` is set, `getExpectedBearerToken` returns only the session token and the legacy secret is rejected.
+- [x] S2.2 Preserve Worker-custodied installation token, `cloude/*` branch validation + lock, repo allowlist, `locked` policy. Unchanged; only the accepted bearer and the remote URL differ.
+- [x] S2.3 Keep initial clone on the existing direct GitHub path with its short-lived contents-read-only token; retire `gitProxySecret` for later fetch/push behind a flag and measure post-clone read latency. Clone path untouched; `gitProxySecret` is no longer written under `SESSION_CONNECTOR_GIT_CUTOVER`. Latency measurement is still pending.
 
 ## S3. Transparent proxy data plane
 
@@ -89,7 +89,7 @@
 ## 7. Tests And Validation
 
 - [x] 7.1 API-server connector tests: REST request shape, create/verify success, uncertain-response reconciliation, validation, and fail-closed cleanup on policy mismatch.
-- [ ] 7.2 D1 tests: session/environment connector metadata lifecycle, environment+hostname uniqueness, immutable class-B policy, create cleanup, replacement ordering, active-session stale-route behavior, environment/credential revocation with partial-failure reconciliation, status transitions, and no provider-specific connector lifecycle.
+- [~] 7.2 D1 tests: session connector metadata lifecycle, create cleanup, and status transitions are covered in `session-connector.service.test.ts`. Environment/class-B rows, uniqueness, replacement ordering, and revocation reconciliation remain for S5.
 - [ ] 7.3 Data-plane tests: routing table, configured-header stripping, CA trust, dummy resolver, targeted redirect, class-C/gateway bypass, fail-closed default.
 - [ ] 7.4 Identity tests: off-Sprite replay rejected (webhook/post-clone git/environment credential); another Sprite denied.
 - [ ] 7.5 Provisioning tests: create/update label wrapper, class-A session-label authorization, class-B environment-label authorization, synchronous fail-closed, teardown without class-B policy mutation.

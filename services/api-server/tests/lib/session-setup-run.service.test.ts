@@ -21,6 +21,8 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
     startupToolchain: null,
     startupScriptCompleted: true,
     finalNetworkPolicyApplied: true,
+    sessionConnectorId: null,
+    gitConfiguredViaConnector: false,
     ...overrides,
   };
 }
@@ -35,12 +37,14 @@ function createClientState(): ClientState {
 function createHarness(args: {
   serverState?: Partial<ServerState>;
   prepareTask?: (task: SessionSetupTask) => SessionSetupTask;
+  includeSessionConnectorTask?: boolean;
 } = {}) {
   const serverState = createServerState(args.serverState);
   const clientState = createClientState();
   const service = new SessionSetupRunService({
     getServerState: () => serverState,
     getClientState: () => clientState,
+    includeSessionConnectorTask: args.includeSessionConnectorTask ?? false,
     updateRunState: (setupRun) => {
       clientState.sessionSetupRun = setupRun;
       switch (setupRun.status) {
@@ -279,6 +283,97 @@ describe("SessionSetupRunService", () => {
 
     expect(requireSetupRun(clientState).tasks.find((task) => task.id === "network_policy")?.status)
       .toBe("completed");
+  });
+
+  it("includes the session connector task after cloud container when enabled", () => {
+    const { clientState } = createHarness({ includeSessionConnectorTask: true });
+
+    expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual([
+      "cloud_container",
+      "session_connector",
+      "repository",
+      "setup_script",
+      "network_policy",
+    ]);
+    expect(requireSetupRun(clientState).tasks.find((task) => task.id === "session_connector"))
+      .toMatchObject({ isBlocking: true, canRetry: true });
+  });
+
+  it("backfills the session connector task into older running runs when enabled", () => {
+    const { clientState, service } = createHarness({
+      includeSessionConnectorTask: true,
+      serverState: { finalNetworkPolicyApplied: false },
+    });
+    const setupRun = requireSetupRun(clientState);
+    clientState.sessionSetupRun = {
+      ...setupRun,
+      tasks: setupRun.tasks.filter((task) => task.id !== "session_connector"),
+    };
+
+    service.repairOnStart();
+
+    expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual([
+      "cloud_container",
+      "session_connector",
+      "repository",
+      "setup_script",
+      "network_policy",
+    ]);
+    expect(
+      requireSetupRun(clientState).tasks.find((task) => task.id === "session_connector")?.status,
+    ).toBe("pending");
+  });
+
+  it("marks repaired session connector tasks complete when the checkpoint exists", () => {
+    const { clientState, service } = createHarness({
+      includeSessionConnectorTask: true,
+      serverState: { sessionConnectorId: "conn-1", finalNetworkPolicyApplied: false },
+    });
+    const setupRun = requireSetupRun(clientState);
+    clientState.sessionSetupRun = {
+      ...setupRun,
+      tasks: setupRun.tasks.filter((task) => task.id !== "session_connector"),
+    };
+
+    service.repairOnStart();
+
+    expect(
+      requireSetupRun(clientState).tasks.find((task) => task.id === "session_connector")?.status,
+    ).toBe("completed");
+  });
+
+  it("does not add the session connector task when disabled", () => {
+    const { clientState, service } = createHarness({
+      serverState: { finalNetworkPolicyApplied: false },
+    });
+
+    service.repairOnStart();
+
+    expect(requireSetupRun(clientState).tasks.some((task) => task.id === "session_connector"))
+      .toBe(false);
+  });
+
+  it("does not backfill the connector task into an already completed run", () => {
+    // Enabling the flags must not reopen finished sessions: they keep their
+    // original credential paths, so the rollout only affects new sessions.
+    const { clientState, service } = createHarness({
+      includeSessionConnectorTask: true,
+    });
+    const setupRun = requireSetupRun(clientState);
+    clientState.sessionSetupRun = {
+      ...setupRun,
+      status: "completed",
+      completedAt: "2026-06-02T00:00:00.000Z",
+      tasks: setupRun.tasks
+        .filter((task) => task.id !== "session_connector")
+        .map(completeTask),
+    };
+
+    service.repairOnStart();
+
+    const repairedRun = requireSetupRun(clientState);
+    expect(repairedRun.status).toBe("completed");
+    expect(repairedRun.tasks.some((task) => task.id === "session_connector")).toBe(false);
   });
 
 });

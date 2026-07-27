@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "catalog:",
-    "@fly/sprites": "^0.0.1",
+    "@fly/sprites": "^0.1.0",
     "@hono/swagger-ui": "^0.6.1",
     "@hono/zod-openapi": "catalog:",
     "@repo/api-contract": "workspace:*",

@@ -35,7 +35,7 @@ function createService(params: {
       })),
     },
     secretProvider: {
-      getGitProxySecret: () => params.gitProxySecret ?? "secret",
+      getExpectedBearerToken: () => params.gitProxySecret ?? "secret",
     },
     repoPolicyProvider: {
       getAllowedRepoFullName: () => params.repoFullName ?? "ben/repo",
@@ -215,5 +215,90 @@ describe("SessionGitProxyService", () => {
       "github_token",
       expect.any(String),
     );
+  });
+});
+
+describe("SessionGitProxyService connector cutover", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("ok")));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function createCutoverService(gitConfiguredViaConnector: boolean) {
+    const secrets: Record<string, string> = {
+      git_proxy_secret: "legacy-sprite-secret",
+      webhook_token: "gateway-session-token",
+    };
+    const service = new SessionGitProxyService({
+      logger: createLogger(),
+      env: {} as Env,
+      secretRepository: {
+        get: vi.fn((key: string) => secrets[key] ?? null),
+        set: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as SecretRepository,
+      getServerState: () => ({
+        sessionId: "abcd-session",
+        userId: "user-1",
+        gitConfiguredViaConnector,
+      }) as ServerState,
+      getClientState: () => ({
+        repoFullName: "ben/repo",
+        pushedBranch: null,
+      }) as ClientState,
+      updatePartialState: vi.fn(),
+      updatePushedBranch: vi.fn(),
+      assertSessionRepoAccess: vi.fn(async () => ({
+        ok: true,
+        value: {
+          userId: "user-1",
+          repoId: 1,
+          installationId: 2,
+          repoFullName: "ben/repo",
+        },
+      })),
+      enforceSessionAccessBlocked: vi.fn(),
+      githubTokenProvider: {
+        getInstallationTokenForRepo: vi.fn(async () => ({
+          ok: true,
+          value: "github-module-token",
+        })),
+      },
+    });
+    return service;
+  }
+
+  function fetchRefs(service: SessionGitProxyService, token: string): Promise<Response> {
+    return service.handleRequest(
+      createRequest("/git-proxy/abcd-session/github.com/ben/repo.git/info/refs", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+  }
+
+  it("accepts the legacy sprite secret before the cutover", async () => {
+    const service = createCutoverService(false);
+
+    await expect(fetchRefs(service, "legacy-sprite-secret")).resolves.toMatchObject({
+      status: 200,
+    });
+    await expect(fetchRefs(service, "gateway-session-token")).resolves.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it("accepts only the gateway-injected session token after the cutover", async () => {
+    const service = createCutoverService(true);
+
+    await expect(fetchRefs(service, "gateway-session-token")).resolves.toMatchObject({
+      status: 200,
+    });
+    await expect(fetchRefs(service, "legacy-sprite-secret")).resolves.toMatchObject({
+      status: 401,
+    });
   });
 });

@@ -109,7 +109,13 @@ export class SessionGitProxyService implements
     return result.response;
   }
 
-  getGitProxySecret(): string | null {
+  getExpectedBearerToken(): string | null {
+    // Once git is configured through the session connector, the only accepted
+    // credential is the gateway-injected session token; the legacy Sprite-held
+    // secret is rejected so an extracted bearer cannot be replayed.
+    if (this.getServerState().gitConfiguredViaConnector) {
+      return this.secretRepository.get("webhook_token");
+    }
     return this.gitProxySecret;
   }
 

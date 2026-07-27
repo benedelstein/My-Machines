@@ -22,6 +22,7 @@ import {
   type ServerState,
 } from "@/modules/session-agent/repositories/server-state.repository";
 import { SessionEnvironmentSnapshotRepository } from "@/modules/session-agent/repositories/session-environment-snapshot.repository";
+import { SessionConnectorsRepository } from "@/modules/session-agent/repositories/session-connectors.repository";
 import { SetupOutputRepository } from "@/modules/session-agent/repositories/setup-output.repository";
 import { migrateAll } from "@/modules/session-agent/repositories/schema-manager.repository";
 import { createLogger, initializeLogger } from "@/shared/logging";
@@ -49,6 +50,8 @@ import type {
   ChatMessageEvent,
 } from "@repo/shared";
 import { AgentTurnCoordinator } from "@/modules/session-agent/services/agent-turn-coordinator.service";
+import { SessionConnectorService } from "@/modules/session-agent/services/session-connector.service";
+import { getSessionConnectorConfig } from "@/shared/integrations/sprite-connectors";
 import { SessionProvisionService } from "@/modules/session-agent/services/session-provision.service";
 import { SessionChatDispatchService } from "@/modules/session-agent/services/session-chat-dispatch.service";
 import { SessionSetupRunService } from "@/modules/session-agent/services/session-setup-run.service";
@@ -69,6 +72,7 @@ import { NotificationPublisher } from "@/modules/notifications/services/notifica
 import { SessionAgentAttachmentProvider } from "./session-agent-attachment-provider";
 import { SpriteAgentProcessManager } from "@/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
 import { normalizePullRequestState } from "@/modules/session-agent/utils/session-agent-pull-request-state.utils";
+import { synthesizeSessionStatus } from "@/modules/session-agent/utils/session-status.utils";
 import { SessionAutoPullRequestService } from "./session-auto-pull-request.service";
 import { SessionPullRequestLifecycleService } from "./session-pull-request-lifecycle.service";
 import { SessionRepoAccessLifecycleService } from "./session-repo-access-lifecycle.service";
@@ -98,6 +102,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private readonly setupRunService: SessionSetupRunService;
   private readonly setupOutputService: SessionSetupOutputService;
   private readonly providerConnectionService: SessionProviderConnectionService;
+  private readonly sessionConnectorService: SessionConnectorService;
   private readonly gitProxyService: SessionGitProxyService;
   private readonly queryService: SessionQueryService;
   private readonly sessionSummaryService: SessionSummaryService;
@@ -237,6 +242,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       getServerState: () => this.serverState,
       getClientState: () => this.state,
       updateRunState: (setupRun) => this.updateSetupRun(setupRun),
+      includeSessionConnectorTask: getSessionConnectorConfig(this.env).mintEnabled,
     });
     this.turnCoordinator = new AgentTurnCoordinator({
       logger: this.logger,
@@ -294,6 +300,18 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       getClientState: () => this.state,
       getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
       getProviderCredentialAdapter,
+      getConnectorGatewayBase: () => this.sessionConnectorService.getGatewayBase(),
+    });
+
+    this.sessionConnectorService = new SessionConnectorService({
+      logger: this.logger,
+      env: this.env,
+      spriteLifecycleClient: this.spriteLifecycleClient,
+      repository: new SessionConnectorsRepository(this.env.DB),
+      getServerState: () => this.serverState,
+      updateServerState: (partial) => this.updateServerState(partial),
+      getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
+      ensureWebhookToken: () => this.processManager.ensureWebhookToken(),
     });
 
     this.provisionService = new SessionProvisionService({
@@ -307,6 +325,9 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       updatePartialState: (partial) => this.updatePartialState(partial),
       synthesizeStatus: () => this.synthesizeStatus(),
       ensureGitProxySecret: () => this.gitProxyService.ensureGitProxySecret(),
+      ensureSessionConnector: (spriteName) =>
+        this.sessionConnectorService.ensureMinted(spriteName),
+      getConnectorGatewayBase: () => this.sessionConnectorService.getGatewayBase(),
       githubTokenProvider: this.githubAppService,
       setupReporter: {
         startTask: (taskId) => this.setupRunService.startTask(taskId),
@@ -429,24 +450,10 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   private synthesizeStatus(setupRun?: SessionSetupRun | null): SessionStatus {
-    const effectiveSetupRun = setupRun === undefined
-      ? this.state.sessionSetupRun
-      : setupRun;
-    if (!this.serverState.initialized || !effectiveSetupRun) {
-      return "preparing";
-    }
-    switch (effectiveSetupRun.status) {
-      case "running":
-        return "preparing";
-      case "failed":
-        return "setup_failed";
-      case "completed":
-        return "ready";
-      default: {
-        const exhaustiveCheck: never = effectiveSetupRun.status;
-        throw new Error(`Unhandled setup run status: ${exhaustiveCheck}`);
-      }
-    }
+    return synthesizeSessionStatus({
+      initialized: this.serverState.initialized,
+      setupRun: setupRun === undefined ? this.state.sessionSetupRun : setupRun,
+    });
   }
 
   private async publishTurnFinishedNotification(message: UIMessage): Promise<void> {
@@ -816,6 +823,10 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       this.logger.warn("Failed to kill vm-agent on session delete", { error });
     }
 
+    // Delete the session's internal connector. Never throws; a failed delete
+    // leaves the D1 record in pending_revocation for reconciliation.
+    await this.sessionConnectorService.deleteForTeardown();
+
     // Clean up sprite
     if (this.serverState.spriteName) {
       try {
@@ -825,7 +836,8 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       }
     }
 
-    // Clear Agent SDK state, alarms, WebSocket resources, and all DO storage.
+    // Clear Agent SDK state, alarms, WebSocket resources, and all DO storage,
+    // including the webhook token in the secrets table.
     await this.destroy();
 
     return success(undefined);

@@ -11,6 +11,7 @@ import type { ServerState } from "../repositories/server-state.repository";
 
 const SETUP_TASK_DEFINITIONS = {
   cloud_container: { isBlocking: true, canRetry: true },
+  session_connector: { isBlocking: true, canRetry: true },
   repository: { isBlocking: true, canRetry: true },
   setup_script: { isBlocking: false, canRetry: false },
   network_policy: { isBlocking: true, canRetry: true },
@@ -25,6 +26,8 @@ export interface SessionSetupRunServiceDeps {
   getServerState: () => ServerState;
   getClientState: () => ClientState;
   updateRunState: (setupRun: SessionSetupRun) => void;
+  /** Include the session_connector task in new and repaired runs. */
+  includeSessionConnectorTask: boolean;
 }
 
 /**
@@ -35,21 +38,26 @@ export class SessionSetupRunService {
   private readonly getServerState: SessionSetupRunServiceDeps["getServerState"];
   private readonly getClientState: SessionSetupRunServiceDeps["getClientState"];
   private readonly updateRunState: SessionSetupRunServiceDeps["updateRunState"];
+  private readonly includeSessionConnectorTask: boolean;
 
   constructor(deps: SessionSetupRunServiceDeps) {
     this.getServerState = deps.getServerState;
     this.getClientState = deps.getClientState;
     this.updateRunState = deps.updateRunState;
+    this.includeSessionConnectorTask = deps.includeSessionConnectorTask;
   }
 
   buildRun(): SessionSetupRun {
     const now = new Date().toISOString();
+    const taskIds = CREATE_SETUP_TASK_IDS.filter(
+      (taskId) => taskId !== "session_connector" || this.includeSessionConnectorTask,
+    );
     return {
       id: crypto.randomUUID(),
       status: "running",
       startedAt: now,
       completedAt: null,
-      tasks: CREATE_SETUP_TASK_IDS.map(createSetupTask),
+      tasks: taskIds.map(createSetupTask),
     };
   }
 
@@ -151,7 +159,15 @@ export class SessionSetupRunService {
     this.updateRun(nextRun);
   }
 
-  /** Recovers setup run state from saved state when the DO restarts. */
+  /**
+   * Recovers setup run state from saved state when the DO restarts.
+   *
+   * Only an in-progress run is repaired. A run that already reached a terminal
+   * status is never reopened, so a session provisioned before
+   * `session_connector` existed does not gain the task retroactively and keeps
+   * its original webhook and git credential paths for the rest of its life.
+   * Enabling the connector flags therefore changes new sessions only.
+   */
   repairOnStart(): void {
     const setupRun = this.getClientState().sessionSetupRun;
     if (!setupRun) { return; }
@@ -165,12 +181,19 @@ export class SessionSetupRunService {
 
     const serverState = this.getServerState();
     const now = new Date().toISOString();
-    const repairableRun = ensureNetworkPolicyTaskPresent(currentRun, serverState, now);
+    let repairableRun = ensureNetworkPolicyTaskPresent(currentRun, serverState, now);
+    if (this.includeSessionConnectorTask) {
+      repairableRun = ensureSessionConnectorTaskPresent(repairableRun, serverState, now);
+    }
     const repairedTasks = repairableRun.tasks.map((task): SessionSetupTask => {
       if (isTerminalSetupTask(task)) { return task; }
       switch (task.id) {
         case "cloud_container":
           return serverState.spriteName && serverState.startupToolchain
+            ? completeSetupTaskForRepair(task, now)
+            : task;
+        case "session_connector":
+          return serverState.sessionConnectorId
             ? completeSetupTaskForRepair(task, now)
             : task;
         case "repository":
@@ -298,6 +321,7 @@ function updateSetupTask(
 ): SessionSetupTask {
   switch (task.id) {
     case "cloud_container":
+    case "session_connector":
     case "repository":
     case "network_policy":
     case "setup_script":
@@ -323,6 +347,29 @@ function ensureNetworkPolicyTaskPresent(
     : createSetupTask("network_policy");
   const tasks = [...setupRun.tasks];
   tasks.push(networkPolicyTask);
+  return { ...setupRun, tasks };
+}
+
+/**
+ * Back-fills the session_connector task into runs created before the flag
+ * was enabled. Inserted after cloud_container so a mid-provision restart
+ * mints the connector before the repository and network-policy steps.
+ */
+function ensureSessionConnectorTaskPresent(
+  setupRun: SessionSetupRun,
+  serverState: ServerState,
+  now: string,
+): SessionSetupRun {
+  if (setupRun.tasks.some((task) => task.id === "session_connector")) {
+    return setupRun;
+  }
+
+  const connectorTask = serverState.sessionConnectorId
+    ? completeSetupTaskForRepair(createSetupTask("session_connector"), now)
+    : createSetupTask("session_connector");
+  const tasks = [...setupRun.tasks];
+  const cloudContainerIndex = tasks.findIndex((task) => task.id === "cloud_container");
+  tasks.splice(cloudContainerIndex + 1, 0, connectorTask);
   return { ...setupRun, tasks };
 }
 

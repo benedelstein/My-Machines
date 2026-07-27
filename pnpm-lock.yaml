@@ -280,8 +280,8 @@ importers:
   packages/sprites-client:
     dependencies:
       '@fly/sprites':
-        specifier: ^0.0.1
-        version: 0.0.1
+        specifier: ^0.1.0
+        version: 0.1.0
       '@repo/shared':
         specifier: workspace:*
         version: link:../shared
@@ -354,8 +354,8 @@ importers:
         specifier: 'catalog:'
         version: 3.0.45(zod@4.3.6)
       '@fly/sprites':
-        specifier: ^0.0.1
-        version: 0.0.1
+        specifier: ^0.1.0
+        version: 0.1.0
       '@hono/swagger-ui':
         specifier: ^0.6.1
         version: 0.6.1(hono@4.11.4)
@@ -953,6 +953,10 @@ packages:
 
   '@fly/sprites@0.0.1':
     resolution: {integrity: sha512-1s+dIVi/pTMP4Aj4Mkg+4LoZ/+a0Kp6l9piPRxvpgEKm11b/eRiZgJwVytwAHeI/vtg2fuwcFExjtXOEfny/TA==}
+    engines: {node: '>=24.0.0'}
+
+  '@fly/sprites@0.1.0':
+    resolution: {integrity: sha512-08jnuPEFmImqy3/iwL+jQJ6IwrHuZlmR3w9dRSSUiZ3N4uMSqWMi5FLyL1UKiL/vtcAb9Cayj8gHsEtckDDfkQ==}
     engines: {node: '>=24.0.0'}
 
   '@hono/node-server@1.19.9':
@@ -4967,6 +4971,8 @@ snapshots:
   '@floating-ui/utils@0.2.11': {}
 
   '@fly/sprites@0.0.1': {}
+
+  '@fly/sprites@0.1.0': {}
 
   '@hono/node-server@1.19.9(hono@4.11.4)':
     dependencies:

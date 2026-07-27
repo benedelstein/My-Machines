@@ -15,6 +15,7 @@ export const SpriteResponse = z.object({
   name: z.string(),
   status: z.enum(["cold", "warm", "running"]).optional(),
   url: z.string().optional(),
+  labels: z.array(z.string()).optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
@@ -29,6 +30,7 @@ export const CreateSpriteRequest = z.object({
       storageGB: z.number().optional(),
     })
     .optional(),
+  labels: z.array(z.string()).optional(),
   image: z.string().optional(),
   env: z.record(z.string(), z.string()).optional(),
 });
@@ -65,11 +67,15 @@ export class SpriteLifecycleClient {
         }
       : undefined;
     const startedAt = Date.now();
-    const sprite = await this.spritesClient.createSprite(request.name, config);
+    const sprite = await this.spritesClient.createSprite(request.name, {
+      config,
+      labels: request.labels,
+    });
     this.logger.info("Created sprite", {
       fields: {
         spriteName: sprite.name,
         spriteId: sprite.id ?? null,
+        labels: sprite.labels ?? null,
         durationMs: Date.now() - startedAt,
       },
     });
@@ -77,6 +83,7 @@ export class SpriteLifecycleClient {
       id: sprite.id,
       name: sprite.name,
       status: sprite.status,
+      labels: sprite.labels,
       createdAt: sprite.createdAt?.toISOString(),
       updatedAt: sprite.updatedAt?.toISOString(),
     });
@@ -89,9 +96,23 @@ export class SpriteLifecycleClient {
       name: sprite.name,
       status: sprite.status,
       url: "",
+      labels: sprite.labels,
       createdAt: sprite.createdAt,
       updatedAt: sprite.updatedAt,
     });
+  }
+
+  /**
+   * Replaces the sprite's full label set and returns the updated labels.
+   * Labels are platform metadata that in-VM code cannot modify, so they are
+   * safe to use as connector access-policy scopes.
+   */
+  async updateSpriteLabels(name: string, labels: string[]): Promise<string[]> {
+    const sprite = await this.spritesClient.updateSprite(name, { labels });
+    this.logger.info("Updated sprite labels", {
+      fields: { spriteName: name, labels: sprite.labels ?? null },
+    });
+    return sprite.labels ?? [];
   }
 
   async deleteSprite(name: string): Promise<void> {

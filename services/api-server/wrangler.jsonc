@@ -117,4 +117,10 @@
   // - VOICE_TOKEN_SIGNING_KEY
   // - FIREBASE_SERVICE_ACCOUNT_JSON_BASE64
   // - INTEGRATION_SESSION_REQUEST_TOKEN
+  //
+  // Optional session-connector rollout flags ("1" to enable, default off).
+  // Either cutover implies minting. See docs/sprite-connectors.md.
+  // - SESSION_CONNECTORS_ENABLED
+  // - SESSION_CONNECTOR_WEBHOOK_CUTOVER
+  // - SESSION_CONNECTOR_GIT_CUTOVER
 }

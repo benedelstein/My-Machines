@@ -18,6 +18,7 @@ import {
   type SpriteWebsocketSession,
 } from "@repo/sprites-client";
 import { createLogger } from "@/shared/logging";
+import { getSessionConnectorConfig } from "@/shared/integrations/sprite-connectors";
 import VM_AGENT_WEBHOOK_SCRIPT from "@repo/vm-agent/dist/vm-agent-webhook.bundle.js";
 import { AgentAttachmentService } from "../agent-attachment.service";
 import type { SecretRepository } from "../../repositories/secret.repository";
@@ -70,6 +71,8 @@ export interface SpriteAgentProcessManagerDeps {
     env: Env,
     logger: Logger,
   ): ProviderCredentialAdapter;
+  /** Session connector gateway base, or null before/without a minted connector. */
+  getConnectorGatewayBase: () => string | null;
 }
 
 export type DispatchMessageResult = Result<
@@ -108,6 +111,7 @@ export class SpriteAgentProcessManager {
   private readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
   private readonly attachmentService: AgentAttachmentService;
   private readonly getProviderCredentialAdapter: SpriteAgentProcessManagerDeps["getProviderCredentialAdapter"];
+  private readonly getConnectorGatewayBase: SpriteAgentProcessManagerDeps["getConnectorGatewayBase"];
 
   /** In-flight spawn promise, or null if no spawn is running. */
   private startMutex: Promise<DispatchMessageResult> | null = null;
@@ -124,6 +128,7 @@ export class SpriteAgentProcessManager {
     this.getEnvironmentSnapshot = deps.getEnvironmentSnapshot;
     this.attachmentService = new AgentAttachmentService(deps.env, this.logger);
     this.getProviderCredentialAdapter = deps.getProviderCredentialAdapter;
+    this.getConnectorGatewayBase = deps.getConnectorGatewayBase;
   }
 
   /**
@@ -380,8 +385,7 @@ export class SpriteAgentProcessManager {
         VM_AGENT_WEBHOOK_SCRIPT,
         await this.getBundleHash(),
       );
-      const webhookToken = this.ensureWebhookToken();
-      const webhookUrl = this.buildWebhookUrl(sessionId);
+      const webhookDelivery = this.buildWebhookDelivery(sessionId);
       const processRunId = crypto.randomUUID();
       const environmentSnapshot = this.getEnvironmentSnapshot();
 
@@ -437,8 +441,10 @@ export class SpriteAgentProcessManager {
               ? { CODEX_MIN_VERSION: this.env.CODEX_MIN_VERSION }
               : {}),
             SESSION_ID: sessionId,
-            DO_WEBHOOK_URL: webhookUrl,
-            DO_WEBHOOK_TOKEN: webhookToken,
+            DO_WEBHOOK_URL: webhookDelivery.url,
+            ...(webhookDelivery.token
+              ? { DO_WEBHOOK_TOKEN: webhookDelivery.token }
+              : { DO_WEBHOOK_AUTH: "gateway" }),
             AGENT_PROCESS_RUN_ID: processRunId,
           },
           idleTimeoutMs: 45_000,
@@ -754,8 +760,38 @@ export class SpriteAgentProcessManager {
     return cliArgs;
   }
 
-  private buildWebhookUrl(sessionId: string): string {
-    return `${this.env.WORKER_URL}/internal/session/${sessionId}`;
+  /**
+   * Chooses how the vm-agent authenticates its webhook posts. Under the
+   * webhook cutover the VM gets the connector gateway base and no token — the
+   * gateway authenticates the Sprite and injects the DO's webhook token.
+   *
+   * A session provisioned before the cutover was enabled has no connector and
+   * keeps Sprite-held delivery for the rest of its life, because its setup run
+   * is already terminal and never re-runs the mint task. That path still
+   * exposes the token to the Sprite, so it is logged as an error: it is the
+   * pre-cutover posture, not a secured one.
+   */
+  private buildWebhookDelivery(sessionId: string): {
+    url: string;
+    token: string | null;
+  } {
+    const connectorConfig = getSessionConnectorConfig(this.env);
+    if (connectorConfig.webhookCutover) {
+      const gatewayBase = this.getConnectorGatewayBase();
+      if (gatewayBase) {
+        // Minting stored the token with the connector; ensure it exists so the
+        // DO can validate the gateway-injected credential.
+        this.ensureWebhookToken();
+        return { url: `${gatewayBase}/internal/session/${sessionId}`, token: null };
+      }
+      this.logger.error("Webhook cutover enabled but session has no connector", {
+        fields: { sessionId, delivery: "sprite_held_token" },
+      });
+    }
+    return {
+      url: `${this.env.WORKER_URL}/internal/session/${sessionId}`,
+      token: this.ensureWebhookToken(),
+    };
   }
 
   private async startAndWaitForReady(

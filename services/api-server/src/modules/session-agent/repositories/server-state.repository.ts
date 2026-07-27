@@ -30,6 +30,10 @@ export type ServerState = {
   startupScriptCompleted: boolean;
   /** True after the selected final network policy has been applied. */
   finalNetworkPolicyApplied: boolean;
+  /** Gateway connection id of the session's internal connector, once minted. */
+  sessionConnectorId: string | null;
+  /** True when post-clone git remotes were written against the connector gateway. */
+  gitConfiguredViaConnector: boolean;
 };
 
 function defaultServerState(): ServerState {
@@ -46,6 +50,8 @@ function defaultServerState(): ServerState {
     startupToolchain: null,
     startupScriptCompleted: false,
     finalNetworkPolicyApplied: false,
+    sessionConnectorId: null,
+    gitConfiguredViaConnector: false,
   };
 }
 

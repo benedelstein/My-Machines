@@ -1,4 +1,5 @@
 import type { Logger } from "@repo/shared";
+import { timingSafeCompare } from "@/shared/utils/crypto";
 import type {
   GitProxyRepoPolicyProvider,
   GitProxySecretProvider,
@@ -35,14 +36,18 @@ export class GitProxyService {
       fields: { method: request.method, url: request.url },
     });
 
-    const gitProxySecret = this.secretProvider.getGitProxySecret();
+    const expectedToken = this.secretProvider.getExpectedBearerToken();
     const authHeader = request.headers.get("Authorization");
-    if (!gitProxySecret || authHeader !== `Bearer ${gitProxySecret}`) {
+    const presentedToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+    if (
+      !expectedToken ||
+      !presentedToken ||
+      !timingSafeCompare(presentedToken, expectedToken)
+    ) {
       this.logger.warn("[git-proxy] auth failed", {
         fields: {
-          hasSecret: gitProxySecret !== null,
+          hasSecret: expectedToken !== null,
           hasAuthorizationHeader: authHeader !== null,
-          authorizationMatched: authHeader === `Bearer ${gitProxySecret}`,
         },
       });
       return this.result("unauthorized", 401);

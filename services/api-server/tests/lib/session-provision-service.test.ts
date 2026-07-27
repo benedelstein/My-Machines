@@ -1,268 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  ClientState,
-  Logger,
-  SessionEnvironmentSnapshot,
-  SessionSetupRun,
-  SessionSetupTask,
-} from "@repo/shared";
+import type { SessionSetupTask } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import { SessionProvisionService } from "../../src/modules/session-agent/services/session-provision.service";
 import {
-  SessionProvisionService,
-  type SessionSetupTaskReporter,
-} from "../../src/modules/session-agent/services/session-provision.service";
-import type {
-  SessionSetupOutputCollector,
-} from "../../src/modules/session-agent/services/session-setup-output.service";
-
-const mockState = vi.hoisted(() => ({
-  events: [] as string[],
-  setNetworkPolicy: vi.fn(),
-  execWs: vi.fn(),
-  ensureSpriteStartupToolchain: vi.fn(),
-  getReadOnlyTokenForRepo: vi.fn(),
-}));
+  completeTask,
+  createClientState,
+  createLogger,
+  createEnvironmentSnapshot,
+  createServerState,
+  createService,
+  createSetupReporter,
+  failTask,
+  getRemoteConfigCommand,
+  mockState,
+  resetProvisionMocks,
+} from "./session-provision-test-support";
 
 vi.mock("@repo/sprites-client", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  class WorkersSpriteClient {
-    public name: string;
-    constructor(name: string) {
-      this.name = name;
-    }
-    setNetworkPolicy = mockState.setNetworkPolicy;
-    execWs = mockState.execWs;
-  }
-  return {
-    ...actual,
-    WorkersSpriteClient,
-    buildBootstrapNetworkPolicy: () => [{ domain: "bootstrap", action: "allow" }],
-    buildFinalNetworkPolicy: () => [{ domain: "final", action: "allow" }],
-  };
+  const mocks = await import("./session-provision-mocks");
+  return mocks.mockSpriteClientModule(actual);
 });
 
-vi.mock("@/shared/integrations/sprite-startup-toolchain", () => ({
-  ensureSpriteStartupToolchain: mockState.ensureSpriteStartupToolchain,
-}));
-
-function createLogger(): Logger {
-  return {
-    log() {},
-    debug() {},
-    info() {},
-    warn() {},
-    error() {},
-    scope() {
-      return this;
-    },
-  };
-}
-
-function createClientState(args: {
-  prepareTask?: (task: SessionSetupTask) => SessionSetupTask;
-} = {}): ClientState {
-  return {
-    repoFullName: "ben/repo",
-    baseBranch: "main",
-    agentSettings: {
-      provider: "openai-codex",
-      model: "gpt-5.5",
-      maxTokens: 8192,
-    },
-    sessionSetupRun: createSetupRun(args.prepareTask),
-  } as ClientState;
-}
-
-function createSetupRun(
-  prepareTask?: (task: SessionSetupTask) => SessionSetupTask,
-): SessionSetupRun {
-  const tasks = [
-    createSetupTask("cloud_container", true),
-    createSetupTask("repository", true),
-    {
-      ...createSetupTask("setup_script", false),
-      output: null,
-      skipReason: null,
-    },
-    createSetupTask("network_policy", true),
-  ] as SessionSetupTask[];
-
-  return {
-    id: "setup-run-1",
-    status: "running",
-    startedAt: "2026-06-03T00:00:00.000Z",
-    completedAt: null,
-    tasks: prepareTask ? tasks.map(prepareTask) : tasks,
-  };
-}
-
-function createSetupTask<Id extends SessionSetupTask["id"], IsBlocking extends boolean>(
-  id: Id,
-  isBlocking: IsBlocking,
-): Extract<SessionSetupTask, { id: Id }> {
-  return {
-    id,
-    isBlocking,
-    canRetry: id !== "setup_script",
-    status: "pending",
-    startedAt: null,
-    completedAt: null,
-    error: null,
-  } as Extract<SessionSetupTask, { id: Id }>;
-}
-
-function completeTask(task: SessionSetupTask): SessionSetupTask {
-  return {
-    ...task,
-    status: "completed",
-    startedAt: "2026-06-03T00:00:00.000Z",
-    completedAt: "2026-06-03T00:00:00.000Z",
-    error: null,
-  };
-}
-
-function failTask(task: SessionSetupTask, error = "fatal failure"): SessionSetupTask {
-  return {
-    ...task,
-    status: "failed",
-    startedAt: "2026-06-03T00:00:00.000Z",
-    completedAt: "2026-06-03T00:00:00.000Z",
-    error,
-  };
-}
-
-function createServerState(overrides: Partial<ServerState> = {}): ServerState {
-  return {
-    initialized: true,
-    sessionId: "session-1",
-    userId: "user-1",
-    spriteName: null,
-    repoCloned: false,
-    agentSessionId: null,
-    agentProcessId: null,
-    agentProcessRunId: null,
-    activeUserMessageId: null,
-    startupToolchain: null,
-    startupScriptCompleted: false,
-    finalNetworkPolicyApplied: false,
-    ...overrides,
-  };
-}
-
-function createEnvironmentSnapshot(
-  overrides: Partial<SessionEnvironmentSnapshot> = {},
-): SessionEnvironmentSnapshot {
-  return {
-    sourceEnvironmentId: null,
-    sourceEnvironmentName: null,
-    repoId: 1,
-    network: { mode: "default" },
-    plainEnvVars: {},
-    startupScript: null,
-    resolvedAt: "2026-05-29T00:00:00.000Z",
-    schemaVersion: 1,
-    ...overrides,
-  };
-}
-
-function createSetupReporter(): SessionSetupTaskReporter {
-  return {
-    startTask: vi.fn(),
-    completeTask: vi.fn(),
-    failTask: vi.fn(),
-    skipTask: vi.fn(),
-  };
-}
-
-function createService(
-  serverState: ServerState,
-  clientState: ClientState,
-  envOverrides: Partial<Env> = {},
-  environmentSnapshot: SessionEnvironmentSnapshot = createEnvironmentSnapshot(),
-  setupReporter?: SessionSetupTaskReporter,
-  setupOutputCollector?: SessionSetupOutputCollector,
-) {
-  const updateServerState = vi.fn((partial: Partial<ServerState>) => {
-    Object.assign(serverState, partial);
-  });
-  const updatePartialState = vi.fn();
-  const spriteLifecycleClient = {
-    createSprite: vi.fn(async () => {
-      mockState.events.push("createSprite");
-      return { name: "sprite-1", status: "running" };
-    }),
-  };
-
-  const service = new SessionProvisionService({
-    logger: createLogger(),
-    env: {
-      SPRITES_API_KEY: "sprites-key",
-      SPRITES_API_URL: "https://api.sprites.test",
-      WORKER_URL: "https://worker.test",
-      ...envOverrides,
-    } as Env,
-    spriteLifecycleClient: spriteLifecycleClient as never,
-    getServerState: () => serverState,
-    getClientState: () => clientState,
-    getEnvironmentSnapshot: () => environmentSnapshot,
-    updateServerState,
-    updatePartialState,
-    synthesizeStatus: () => "preparing",
-    ensureGitProxySecret: vi.fn(() => "git-proxy-secret"),
-    githubTokenProvider: {
-      getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
-    },
-    setupReporter,
-    setupOutputCollector,
-  });
-
-  return { service, updateServerState, spriteLifecycleClient };
-}
-
+vi.mock("@/shared/integrations/sprite-startup-toolchain", async () => {
+  const mocks = await import("./session-provision-mocks");
+  return { ensureSpriteStartupToolchain: mocks.mockState.ensureSpriteStartupToolchain };
+});
 describe("SessionProvisionService startup toolchain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockState.events.length = 0;
-    mockState.setNetworkPolicy.mockImplementation(async () => {
-      mockState.events.push("setNetworkPolicy");
-    });
-    mockState.ensureSpriteStartupToolchain.mockImplementation(async () => {
-      mockState.events.push("startupToolchain");
-      return {
-        ok: true,
-        value: {
-          contractHash: "hash-1",
-          checkedAt: 1,
-          results: [],
-        },
-      };
-    });
-    mockState.execWs.mockImplementation(async (command: string) => {
-      if (command.includes("timeout")) {
-        mockState.events.push("startupScript");
-        return { stdout: "", stderr: "", exitCode: 0 };
-      }
-      if (command.startsWith("test -d")) {
-        mockState.events.push("cloneCheck");
-        return { stdout: "empty", stderr: "", exitCode: 0 };
-      }
-      if (command.startsWith("mkdir -p")) {
-        return { stdout: "", stderr: "", exitCode: 0 };
-      }
-      if (command.includes("git -c")) {
-        mockState.events.push("cloneRepo");
-        return { stdout: "", stderr: "", exitCode: 0 };
-      }
-      if (command.includes("git rev-parse")) {
-        return { stdout: "main", stderr: "", exitCode: 0 };
-      }
-      return { stdout: "", stderr: "", exitCode: 0 };
-    });
-    mockState.getReadOnlyTokenForRepo.mockResolvedValue({
-      ok: true,
-      value: "readonly-token",
-    });
+    resetProvisionMocks();
   });
 
   it("runs startup toolchain after bootstrap network policy and before clone", async () => {
@@ -603,6 +370,8 @@ describe("SessionProvisionService startup toolchain", () => {
       updatePartialState: vi.fn(),
       synthesizeStatus: () => "preparing",
       ensureGitProxySecret: vi.fn(() => "git-proxy-secret"),
+      ensureSessionConnector: vi.fn(async () => {}),
+      getConnectorGatewayBase: () => null,
       githubTokenProvider: {
         getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },
@@ -899,6 +668,8 @@ describe("SessionProvisionService startup toolchain", () => {
       updatePartialState,
       synthesizeStatus: () => "ready",
       ensureGitProxySecret: vi.fn(() => "git-proxy-secret"),
+      ensureSessionConnector: vi.fn(async () => {}),
+      getConnectorGatewayBase: () => null,
       githubTokenProvider: {
         getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },
@@ -960,10 +731,3 @@ describe("SessionProvisionService startup toolchain", () => {
     expect(serverState.finalNetworkPolicyApplied).toBe(true);
   });
 });
-
-function getRemoteConfigCommand(): string {
-  const remoteConfigCall = mockState.execWs.mock.calls.find(([command]) =>
-    String(command).includes("git remote set-url origin"));
-  expect(remoteConfigCall).toBeDefined();
-  return String(remoteConfigCall?.[0]);
-}

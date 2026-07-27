@@ -27,7 +27,8 @@ export class WebhookClient {
 
   constructor(
     private readonly baseUrl: string,
-    private readonly token: string,
+    /** Bearer token, or null when the connector gateway injects the credential. */
+    private readonly token: string | null,
     options: WebhookClientOptions = {},
   ) {
     this.maxAttempts = options.maxAttempts ?? MAX_ATTEMPTS;
@@ -47,7 +48,7 @@ export class WebhookClient {
         const res = await fetch(url, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${this.token}`,
+            ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),

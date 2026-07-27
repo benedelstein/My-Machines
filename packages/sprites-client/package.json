@@ -16,7 +16,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@fly/sprites": "^0.0.1",
+    "@fly/sprites": "^0.1.0",
     "@repo/shared": "workspace:*",
     "zod": "catalog:"
   },
