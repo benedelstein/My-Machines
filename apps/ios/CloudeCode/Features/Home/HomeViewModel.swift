@@ -41,6 +41,10 @@ final class HomeViewModel {
         groupPage.hasNextPage
     }
 
+    var nextRepositoryCursor: String? {
+        groupPage.nextCursor
+    }
+
     var isEmpty: Bool {
         groups.isEmpty
     }

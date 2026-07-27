@@ -181,13 +181,13 @@ struct HomeView: View {
             }
             .listRowSpacing(style.gridSize) // idt this works
 
-            if viewModel.hasNextRepositoryPage {
-                PaginationButton(
-                    title: "Load more repositories",
+            if let cursor = viewModel.nextRepositoryCursor {
+                RepositoryPaginationTrigger(
                     isLoading: viewModel.isLoadingMoreRepositories
                 ) {
                     await viewModel.loadMoreRepositories()
                 }
+                .id(cursor)
             }
         }
         .scrollContentBackground(.hidden)
@@ -303,6 +303,35 @@ private struct PaginationButton: View {
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
         .accessibilityLabel(title)
+    }
+}
+
+private struct RepositoryPaginationTrigger: View {
+    @Environment(\.theme) private var theme
+
+    let isLoading: Bool
+    let action: () async -> Void
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(theme.secondaryLabelColor)
+                    .accessibilityLabel("Loading more repositories")
+            } else {
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 44)
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .onAppear {
+            Task {
+                await action()
+            }
+        }
     }
 }
 
