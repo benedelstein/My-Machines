@@ -12,11 +12,11 @@ struct NewSessionDraftTests {
     @Test func restoredRepoSeedsPersistedEnvironmentBeforeLoading() throws {
         let (preferences, suiteName) = try makePreferences()
         defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        preferences.lastSelectedRepo = .init(
+        preferences.recordRecentRepo(.init(
             id: 42,
             fullName: "owner/repo",
             defaultBranch: "main"
-        )
+        ))
         preferences.persistEnvironmentId("environment-2", repoId: 42)
 
         let draft = makeDraft(preferences: preferences)
@@ -56,17 +56,21 @@ struct NewSessionDraftTests {
 
         #expect(draft.selectedRepo?.id == 3)
         #expect(draft.selectedBranch == "develop")
-        #expect(preferences.lastSelectedRepo?.id == 3)
     }
 
-    @Test func creatingSessionRecordsRepoInRecents() async throws {
+    @Test func creatingSessionRecordsRepoInRecentsButSelectingDoesNot() async throws {
         let (preferences, suiteName) = try makePreferences()
         defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        preferences.lastSelectedRepo = .init(
+        preferences.recordRecentRepo(.init(
+            id: 5,
+            fullName: "owner/five",
+            defaultBranch: "main"
+        ))
+        preferences.recordRecentRepo(.init(
             id: 7,
             fullName: "owner/seven",
             defaultBranch: "main"
-        )
+        ))
         let draft = makeDraft(
             preferences: preferences,
             sessionsAPI: UnavailableSessionsAPI(createSessionResponse: CreateSessionResponse(
@@ -75,6 +79,16 @@ struct NewSessionDraftTests {
                 websocketTokenExpiresAt: "2026-01-01T00:00:00Z"
             ))
         )
+
+        // Draft preselects the most recent creation; switching selection alone
+        // must not touch the recents list.
+        #expect(draft.selectedRepo?.id == 7)
+        draft.selectRepo(NewSessionPreferences.RepoSnapshot(
+            id: 9,
+            fullName: "owner/nine",
+            defaultBranch: "main"
+        ))
+        #expect(preferences.recentRepos.map(\.id) == [7, 5])
 
         _ = try await draft.createSession(
             content: "hello",
@@ -88,7 +102,7 @@ struct NewSessionDraftTests {
             )
         )
 
-        #expect(preferences.recentRepos.map(\.id) == [7])
+        #expect(preferences.recentRepos.map(\.id) == [9, 7, 5])
     }
 
     private func makeDraft(

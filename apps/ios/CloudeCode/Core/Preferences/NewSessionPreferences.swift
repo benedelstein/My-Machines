@@ -26,6 +26,7 @@ final class NewSessionPreferences {
 
     init(userDefaults: UserDefaults) {
         self.userDefaults = userDefaults
+        migrateLegacyLastSelectedRepo()
     }
 
     var lastSelectedModel: LastSelectedModel? {
@@ -40,16 +41,8 @@ final class NewSessionPreferences {
         }
     }
 
-    var lastSelectedRepo: RepoSnapshot? {
-        get {
-            userDefaults.codableValue(RepoSnapshot.self, forKey: Constants.UserDefaults.lastSelectedNewSessionRepo)
-        }
-        set {
-            userDefaults.setCodableValue(newValue, forKey: Constants.UserDefaults.lastSelectedNewSessionRepo)
-        }
-    }
-
-    /// Repos most recently used to create sessions, newest first.
+    /// Repos most recently used to create sessions, newest first. The first
+    /// entry doubles as the repo preselected in a new session draft.
     var recentRepos: [RepoSnapshot] {
         userDefaults.codableValue([RepoSnapshot].self, forKey: Constants.UserDefaults.recentNewSessionRepos) ?? []
     }
@@ -81,5 +74,19 @@ final class NewSessionPreferences {
 
     private func environmentKey(repoId: Int) -> String {
         Constants.UserDefaults.lastEnvironmentIdPrefix + String(repoId)
+    }
+
+    /// Builds before the recents list stored a separate last-selected repo;
+    /// fold it into recents once so an existing preselection survives the
+    /// upgrade, then clear the legacy key.
+    private func migrateLegacyLastSelectedRepo() {
+        let legacyKey = Constants.UserDefaults.lastSelectedNewSessionRepo
+        guard let legacy = userDefaults.codableValue(RepoSnapshot.self, forKey: legacyKey) else {
+            return
+        }
+        if recentRepos.isEmpty {
+            recordRecentRepo(legacy)
+        }
+        userDefaults.removeObject(forKey: legacyKey)
     }
 }

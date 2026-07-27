@@ -95,7 +95,9 @@ final class NewSessionDraft {
         self.environmentsStore = environmentsStore
         self.preferences = preferences
         self.githubInstallationStore = githubInstallationStore
-        repoSelection = preferences.lastSelectedRepo.map {
+        // The draft preselects the repo the last session was created with;
+        // selections that never produced a session are not restored.
+        repoSelection = preferences.recentRepos.first.map {
             RepoSelection(
                 repo: SelectedRepo(
                     id: $0.id,
@@ -214,7 +216,6 @@ final class NewSessionDraft {
             branch: branch ?? snapshot.defaultBranch,
             environmentId: environmentId
         )
-        preferences.lastSelectedRepo = snapshot
     }
 
     /// Selects a branch for the current repository.
