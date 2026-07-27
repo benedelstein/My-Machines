@@ -7,20 +7,16 @@ on:
     paths:
       - "apps/ios/**"
       - "packages/api-contract/**"
-      - "packages/shared/**"
       - "package.json"
       - "pnpm-workspace.yaml"
-      - "turbo.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/ci-ios.yml"
   pull_request:
     paths:
       - "apps/ios/**"
       - "packages/api-contract/**"
-      - "packages/shared/**"
       - "package.json"
       - "pnpm-workspace.yaml"
-      - "turbo.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/ci-ios.yml"
 

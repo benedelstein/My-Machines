@@ -8,10 +8,12 @@ on:
       - "services/api-server/**"
       - "packages/api-contract/**"
       - "packages/shared/**"
+      - "packages/sprites-client/**"
       - "packages/vm-agent/**"
       - "package.json"
       - "pnpm-workspace.yaml"
       - "turbo.json"
+      - "tsconfig.base.json"
       - "eslint.config.js"
       - "pnpm-lock.yaml"
       - ".github/workflows/ci-api-server.yml"
@@ -20,10 +22,12 @@ on:
       - "services/api-server/**"
       - "packages/api-contract/**"
       - "packages/shared/**"
+      - "packages/sprites-client/**"
       - "packages/vm-agent/**"
       - "package.json"
       - "pnpm-workspace.yaml"
       - "turbo.json"
+      - "tsconfig.base.json"
       - "eslint.config.js"
       - "pnpm-lock.yaml"
       - ".github/workflows/ci-api-server.yml"
@@ -52,17 +56,17 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: pnpm exec turbo run build --filter=@repo/api-contract --filter=@repo/shared --filter=@repo/vm-agent --filter=@repo/api-server
+        run: pnpm exec turbo run build --filter=@repo/api-contract --filter=@repo/shared --filter=@repo/sprites-client --filter=@repo/vm-agent --filter=@repo/api-server
 
       - name: Typecheck
-        run: pnpm exec turbo run typecheck --filter=@repo/api-contract --filter=@repo/shared --filter=@repo/vm-agent --filter=@repo/api-server
+        run: pnpm exec turbo run typecheck --filter=@repo/api-contract --filter=@repo/shared --filter=@repo/sprites-client --filter=@repo/vm-agent --filter=@repo/api-server
 
       # Cheap Linux gate: schema edits must ship with regenerated iOS types.
       - name: Check generated API types are current
         run: pnpm --filter @repo/api-contract codegen:check
 
       - name: Lint
-        run: pnpm exec turbo run lint --filter=@repo/api-contract --filter=@repo/shared --filter=@repo/vm-agent --filter=@repo/api-server
+        run: pnpm exec turbo run lint --filter=@repo/api-contract --filter=@repo/shared --filter=@repo/sprites-client --filter=@repo/vm-agent --filter=@repo/api-server
 
       - name: Test
-        run: pnpm exec turbo run test --filter=@repo/api-contract --filter=@repo/shared --filter=@repo/vm-agent --filter=@repo/api-server
+        run: pnpm exec turbo run test --filter=@repo/api-contract --filter=@repo/shared --filter=@repo/sprites-client --filter=@repo/vm-agent --filter=@repo/api-server

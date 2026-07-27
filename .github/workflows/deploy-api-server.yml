@@ -6,7 +6,9 @@ on:
       - main
     paths:
       - "services/api-server/**"
+      - "packages/api-contract/**"
       - "packages/shared/**"
+      - "packages/sprites-client/**"
       - "packages/vm-agent/**"
       - "pnpm-lock.yaml"
       - ".github/workflows/deploy-api-server.yml"
