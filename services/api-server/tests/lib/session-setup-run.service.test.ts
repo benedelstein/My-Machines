@@ -37,14 +37,12 @@ function createClientState(): ClientState {
 function createHarness(args: {
   serverState?: Partial<ServerState>;
   prepareTask?: (task: SessionSetupTask) => SessionSetupTask;
-  includeSessionConnectorTask?: boolean;
 } = {}) {
   const serverState = createServerState(args.serverState);
   const clientState = createClientState();
   const service = new SessionSetupRunService({
     getServerState: () => serverState,
     getClientState: () => clientState,
-    includeSessionConnectorTask: args.includeSessionConnectorTask ?? false,
     updateRunState: (setupRun) => {
       clientState.sessionSetupRun = setupRun;
       switch (setupRun.status) {
@@ -104,6 +102,7 @@ describe("SessionSetupRunService", () => {
     const setupRun = requireSetupRun(clientState);
     expect(setupRun.tasks.map((task) => [task.id, task.isBlocking, task.canRetry])).toEqual([
       ["cloud_container", true, true],
+      ["session_connector", true, true],
       ["repository", true, true],
       ["setup_script", false, false],
       ["network_policy", true, true],
@@ -242,6 +241,7 @@ describe("SessionSetupRunService", () => {
 
     expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual([
       "cloud_container",
+      "session_connector",
       "repository",
       "setup_script",
       "network_policy",
@@ -265,6 +265,7 @@ describe("SessionSetupRunService", () => {
 
     expect(requireSetupRun(clientState).tasks.map((task) => [task.id, task.canRetry])).toEqual([
       ["cloud_container", true],
+      ["session_connector", true],
       ["repository", true],
       ["setup_script", false],
       ["network_policy", true],
@@ -286,7 +287,7 @@ describe("SessionSetupRunService", () => {
   });
 
   it("includes the session connector task after cloud container when enabled", () => {
-    const { clientState } = createHarness({ includeSessionConnectorTask: true });
+    const { clientState } = createHarness();
 
     expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual([
       "cloud_container",
@@ -301,7 +302,6 @@ describe("SessionSetupRunService", () => {
 
   it("backfills the session connector task into older running runs when enabled", () => {
     const { clientState, service } = createHarness({
-      includeSessionConnectorTask: true,
       serverState: { finalNetworkPolicyApplied: false },
     });
     const setupRun = requireSetupRun(clientState);
@@ -326,7 +326,6 @@ describe("SessionSetupRunService", () => {
 
   it("marks repaired session connector tasks complete when the checkpoint exists", () => {
     const { clientState, service } = createHarness({
-      includeSessionConnectorTask: true,
       serverState: { sessionConnectorId: "conn-1", finalNetworkPolicyApplied: false },
     });
     const setupRun = requireSetupRun(clientState);
@@ -342,23 +341,10 @@ describe("SessionSetupRunService", () => {
     ).toBe("completed");
   });
 
-  it("does not add the session connector task when disabled", () => {
-    const { clientState, service } = createHarness({
-      serverState: { finalNetworkPolicyApplied: false },
-    });
-
-    service.repairOnStart();
-
-    expect(requireSetupRun(clientState).tasks.some((task) => task.id === "session_connector"))
-      .toBe(false);
-  });
-
   it("does not backfill the connector task into an already completed run", () => {
     // Enabling the flags must not reopen finished sessions: they keep their
     // original credential paths, so the rollout only affects new sessions.
-    const { clientState, service } = createHarness({
-      includeSessionConnectorTask: true,
-    });
+    const { clientState, service } = createHarness();
     const setupRun = requireSetupRun(clientState);
     clientState.sessionSetupRun = {
       ...setupRun,

@@ -18,7 +18,6 @@ import {
   type SpriteWebsocketSession,
 } from "@repo/sprites-client";
 import { createLogger } from "@/shared/logging";
-import { getSessionConnectorConfig } from "@/shared/integrations/sprite-connectors";
 import VM_AGENT_WEBHOOK_SCRIPT from "@repo/vm-agent/dist/vm-agent-webhook.bundle.js";
 import { AgentAttachmentService } from "../agent-attachment.service";
 import type { SecretRepository } from "../../repositories/secret.repository";
@@ -761,33 +760,29 @@ export class SpriteAgentProcessManager {
   }
 
   /**
-   * Chooses how the vm-agent authenticates its webhook posts. Under the
-   * webhook cutover the VM gets the connector gateway base and no token — the
-   * gateway authenticates the Sprite and injects the DO's webhook token.
+   * Chooses how the vm-agent authenticates its webhook posts. With a minted
+   * connector the VM gets the gateway base and no token — the gateway
+   * authenticates the Sprite and injects the DO's webhook token.
    *
-   * A session provisioned before the cutover was enabled has no connector and
-   * keeps Sprite-held delivery for the rest of its life, because its setup run
-   * is already terminal and never re-runs the mint task. That path still
-   * exposes the token to the Sprite, so it is logged as an error: it is the
-   * pre-cutover posture, not a secured one.
+   * A session provisioned before connectors existed has none and keeps
+   * Sprite-held token delivery for the rest of its life (its setup run is
+   * terminal and never re-runs the mint task). That legacy path still exposes
+   * the token to the Sprite, so it is logged until those sessions age out.
    */
   private buildWebhookDelivery(sessionId: string): {
     url: string;
     token: string | null;
   } {
-    const connectorConfig = getSessionConnectorConfig(this.env);
-    if (connectorConfig.webhookCutover) {
-      const gatewayBase = this.getConnectorGatewayBase();
-      if (gatewayBase) {
-        // Minting stored the token with the connector; ensure it exists so the
-        // DO can validate the gateway-injected credential.
-        this.ensureWebhookToken();
-        return { url: `${gatewayBase}/internal/session/${sessionId}`, token: null };
-      }
-      this.logger.error("Webhook cutover enabled but session has no connector", {
-        fields: { sessionId, delivery: "sprite_held_token" },
-      });
+    const gatewayBase = this.getConnectorGatewayBase();
+    if (gatewayBase) {
+      // Minting stored the token with the connector; ensure it exists so the
+      // DO can validate the gateway-injected credential.
+      this.ensureWebhookToken();
+      return { url: `${gatewayBase}/internal/session/${sessionId}`, token: null };
     }
+    this.logger.warn("Session has no connector; using sprite-held webhook token", {
+      fields: { sessionId, delivery: "sprite_held_token" },
+    });
     return {
       url: `${this.env.WORKER_URL}/internal/session/${sessionId}`,
       token: this.ensureWebhookToken(),

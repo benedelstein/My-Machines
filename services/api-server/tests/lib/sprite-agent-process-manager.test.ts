@@ -57,13 +57,13 @@ const { SpritesError } = await vi.importActual<typeof SpritesClientModule>(
   "@repo/sprites-client",
 );
 
-function createLogger(errorSpy: ReturnType<typeof vi.fn> = vi.fn()): Logger {
+function createLogger(warnSpy: ReturnType<typeof vi.fn> = vi.fn()): Logger {
   return {
     log() {},
     debug() {},
     info() {},
-    warn() {},
-    error: errorSpy,
+    warn: warnSpy,
+    error() {},
     scope() {
       return this;
     },
@@ -137,7 +137,7 @@ function createManager(
   snapshotPlainEnvVars: Record<string, string> = {},
   clientState: ClientState = createClientState(),
   connectorGatewayBase: string | null = null,
-  loggerError: ReturnType<typeof vi.fn> = vi.fn(),
+  loggerWarn: ReturnType<typeof vi.fn> = vi.fn(),
 ) {
   const updateAgentProcessState = vi.fn(
     (partial: Pick<ServerState, "agentProcessId" | "agentProcessRunId">) => {
@@ -159,7 +159,7 @@ function createManager(
       WORKER_URL: "https://worker.test",
       ...envOverrides,
     } as Env,
-    logger: createLogger(loggerError),
+    logger: createLogger(loggerWarn),
     secretRepository: {
       get: vi.fn(() => "webhook-token"),
       set: vi.fn(),
@@ -189,7 +189,7 @@ function createManager(
     manager,
     spawnedProcessState,
     updateAgentProcessState,
-    loggerError,
+    loggerWarn,
   };
 }
 
@@ -796,10 +796,10 @@ describe("SpriteAgentProcessManager", () => {
     expect(mockState.createSession).not.toHaveBeenCalled();
   });
 
-  it("delivers the webhook token to the VM by default", async () => {
+  it("falls back to sprite-held token delivery for sessions without a connector", async () => {
     mockState.createSession.mockReturnValue(createSpawnSession());
     const serverState = createServerState();
-    const { manager } = createManager(serverState);
+    const { manager, loggerWarn } = createManager(serverState);
 
     const result = await manager.dispatchMessage({
       userMessage: { id: "user-message-1", content: "turn", attachmentIds: [] },
@@ -810,14 +810,19 @@ describe("SpriteAgentProcessManager", () => {
     expect(spawnEnv.DO_WEBHOOK_URL).toBe("https://worker.test/internal/session/session-1");
     expect(spawnEnv.DO_WEBHOOK_TOKEN).toBe("webhook-token");
     expect(spawnEnv.DO_WEBHOOK_AUTH).toBeUndefined();
+    // The Sprite still holds the token on this legacy path; never silent.
+    expect(loggerWarn).toHaveBeenCalledWith(
+      "Session has no connector; using sprite-held webhook token",
+      { fields: { sessionId: "session-1", delivery: "sprite_held_token" } },
+    );
   });
 
-  it("hands the VM the connector gateway base under the webhook cutover", async () => {
+  it("hands the VM the connector gateway base when a connector exists", async () => {
     mockState.createSession.mockReturnValue(createSpawnSession());
     const serverState = createServerState({ sessionConnectorId: "conn-1" });
     const { manager } = createManager(
       serverState,
-      { SESSION_CONNECTOR_WEBHOOK_CUTOVER: "1" },
+      {},
       {},
       createClientState(),
       "https://api.sprites.test/v1/gateway/custom_api/conn-1",
@@ -834,33 +839,6 @@ describe("SpriteAgentProcessManager", () => {
     );
     expect(spawnEnv.DO_WEBHOOK_TOKEN).toBeUndefined();
     expect(spawnEnv.DO_WEBHOOK_AUTH).toBe("gateway");
-  });
-
-  it("loudly falls back to token delivery when the cutover is on without a connector", async () => {
-    mockState.createSession.mockReturnValue(createSpawnSession());
-    const serverState = createServerState();
-    const { manager, loggerError } = createManager(
-      serverState,
-      { SESSION_CONNECTOR_WEBHOOK_CUTOVER: "1" },
-      {},
-      createClientState(),
-      null,
-    );
-
-    const result = await manager.dispatchMessage({
-      userMessage: { id: "user-message-1", content: "turn", attachmentIds: [] },
-    });
-
-    expect(result.ok).toBe(true);
-    const spawnEnv = getSpawnEnv();
-    expect(spawnEnv.DO_WEBHOOK_URL).toBe("https://worker.test/internal/session/session-1");
-    expect(spawnEnv.DO_WEBHOOK_TOKEN).toBe("webhook-token");
-    expect(spawnEnv.DO_WEBHOOK_AUTH).toBeUndefined();
-    // The Sprite still holds the token here, so this must never be silent.
-    expect(loggerError).toHaveBeenCalledWith(
-      "Webhook cutover enabled but session has no connector",
-      { fields: { sessionId: "session-1", delivery: "sprite_held_token" } },
-    );
   });
 });
 

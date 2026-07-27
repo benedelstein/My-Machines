@@ -15,12 +15,6 @@ export interface Env {
   WEB_ORIGIN: string;
   PREVIEW_ORIGIN_ALLOWLIST_REGEX: string;
   CODEX_MIN_VERSION?: string;
-  /** "1"/"true" mints a per-session Sprites connector during provisioning. */
-  SESSION_CONNECTORS_ENABLED?: string;
-  /** "1"/"true" gives the VM the connector gateway base instead of DO_WEBHOOK_TOKEN. Implies minting. */
-  SESSION_CONNECTOR_WEBHOOK_CUTOVER?: string;
-  /** "1"/"true" routes post-clone git through the connector gateway. Implies minting. */
-  SESSION_CONNECTOR_GIT_CUTOVER?: string;
 
   // Secrets
   ANTHROPIC_API_KEY: string;

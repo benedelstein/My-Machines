@@ -26,8 +26,6 @@ export interface SessionSetupRunServiceDeps {
   getServerState: () => ServerState;
   getClientState: () => ClientState;
   updateRunState: (setupRun: SessionSetupRun) => void;
-  /** Include the session_connector task in new and repaired runs. */
-  includeSessionConnectorTask: boolean;
 }
 
 /**
@@ -38,26 +36,21 @@ export class SessionSetupRunService {
   private readonly getServerState: SessionSetupRunServiceDeps["getServerState"];
   private readonly getClientState: SessionSetupRunServiceDeps["getClientState"];
   private readonly updateRunState: SessionSetupRunServiceDeps["updateRunState"];
-  private readonly includeSessionConnectorTask: boolean;
 
   constructor(deps: SessionSetupRunServiceDeps) {
     this.getServerState = deps.getServerState;
     this.getClientState = deps.getClientState;
     this.updateRunState = deps.updateRunState;
-    this.includeSessionConnectorTask = deps.includeSessionConnectorTask;
   }
 
   buildRun(): SessionSetupRun {
     const now = new Date().toISOString();
-    const taskIds = CREATE_SETUP_TASK_IDS.filter(
-      (taskId) => taskId !== "session_connector" || this.includeSessionConnectorTask,
-    );
     return {
       id: crypto.randomUUID(),
       status: "running",
       startedAt: now,
       completedAt: null,
-      tasks: taskIds.map(createSetupTask),
+      tasks: CREATE_SETUP_TASK_IDS.map(createSetupTask),
     };
   }
 
@@ -182,9 +175,7 @@ export class SessionSetupRunService {
     const serverState = this.getServerState();
     const now = new Date().toISOString();
     let repairableRun = ensureNetworkPolicyTaskPresent(currentRun, serverState, now);
-    if (this.includeSessionConnectorTask) {
-      repairableRun = ensureSessionConnectorTaskPresent(repairableRun, serverState, now);
-    }
+    repairableRun = ensureSessionConnectorTaskPresent(repairableRun, serverState, now);
     const repairedTasks = repairableRun.tasks.map((task): SessionSetupTask => {
       if (isTerminalSetupTask(task)) { return task; }
       switch (task.id) {

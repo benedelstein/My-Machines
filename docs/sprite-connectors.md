@@ -58,34 +58,26 @@ The gateway base a Sprite calls is
 `buildConnectorGatewayUrl`. Restricted network modes add that hostname through
 `connectorGatewayHostname`; `open` mode is unchanged.
 
-## Rollout flags
+## Legacy sessions
 
-All three default to off. Either cutover implies minting.
+Connector provisioning is unconditional for new sessions. Sessions provisioned
+before connectors existed keep their original credential paths for the rest of
+their life: a setup run that already finished is never reopened, so those
+sessions never mint a connector.
 
-| Variable | Effect |
-| --- | --- |
-| `SESSION_CONNECTORS_ENABLED` | Mint a per-session connector during provisioning. |
-| `SESSION_CONNECTOR_WEBHOOK_CUTOVER` | The VM gets the gateway base and `DO_WEBHOOK_AUTH=gateway` instead of `DO_WEBHOOK_TOKEN`, and posts webhooks with no Authorization header. |
-| `SESSION_CONNECTOR_GIT_CUTOVER` | Post-clone git remotes point at the gateway, no bearer is written into git config, and the git proxy accepts only the gateway-injected session token. |
+- Their webhook delivery stays Sprite-held (`DO_WEBHOOK_TOKEN`), logged as a
+  warning (`"Session has no connector; using sprite-held webhook token"`) on
+  every process spawn so the remaining legacy population is visible. It
+  deliberately does not fail closed: the alternative is a session that cannot
+  report agent output at all.
+- Their git requests are authenticated by the legacy `git_proxy_secret`,
+  selected per session from the persisted `gitConfiguredViaConnector`
+  checkpoint. New sessions' git proxy requests accept only the
+  gateway-injected session token.
 
-**The flags only affect sessions created after they are enabled.** A session
-whose setup run already finished is never reopened, so it never mints a
-connector and keeps its original credential paths — including the Sprite-held
-`DO_WEBHOOK_TOKEN` — for the rest of its life. That fallback is logged at error
-level (`"Webhook cutover enabled but session has no connector"`) so a session
-still running the pre-cutover posture is visible rather than silent. Webhook
-delivery deliberately does not fail closed here: the alternative is a session
-that cannot report agent output at all.
-
-The git cutover is decided per session from the persisted
-`gitConfiguredViaConnector` checkpoint rather than the live flag, so enabling or
-rolling back the flag cannot change how an existing session's git requests are
-authenticated. During provisioning it fails the repository setup task closed
-rather than configuring a remote it cannot authenticate. The initial clone
-always stays on the direct GitHub path with its short-lived read-only token.
-
-Retiring the legacy Sprite-held paths is a follow-up: it is only safe once no
-pre-cutover sessions remain.
+The initial clone always stays on the direct GitHub path with its short-lived
+read-only token. Removing the legacy webhook and git validation paths is a
+follow-up, safe once no pre-connector sessions remain.
 
 ## Live test
 

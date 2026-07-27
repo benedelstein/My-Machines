@@ -50,7 +50,7 @@ export function createClientState(args: {
 
 export function createSetupRun(
   prepareTask?: (task: SessionSetupTask) => SessionSetupTask,
-  includeSessionConnector = false,
+  includeSessionConnector = true,
 ): SessionSetupRun {
   const tasks = [
     createSetupTask("cloud_container", true),
@@ -176,7 +176,6 @@ export function createService(
       return { name: "sprite-1", status: "running" };
     }),
   };
-  const ensureGitProxySecret = vi.fn(() => "git-proxy-secret");
   const ensureSessionConnector = vi.fn(async () => {
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
@@ -202,7 +201,6 @@ export function createService(
     updateServerState,
     updatePartialState,
     synthesizeStatus: () => "preparing",
-    ensureGitProxySecret,
     ensureSessionConnector,
     getConnectorGatewayBase,
     githubTokenProvider: {
@@ -216,7 +214,6 @@ export function createService(
     service,
     updateServerState,
     spriteLifecycleClient,
-    ensureGitProxySecret,
     ensureSessionConnector,
     getConnectorGatewayBase,
   };

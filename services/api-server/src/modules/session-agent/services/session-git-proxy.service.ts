@@ -76,15 +76,6 @@ export class SessionGitProxyService implements
     });
   }
 
-  /** Returns the cached git-proxy secret, generating and persisting it if missing. */
-  ensureGitProxySecret(): string {
-    if (!this.gitProxySecret) {
-      this.gitProxySecret = crypto.randomUUID();
-      this.secretRepository.set("git_proxy_secret", this.gitProxySecret);
-    }
-    return this.gitProxySecret;
-  }
-
   /**
    * Authenticates the session's repo access, forwards the git request to
    * GitHub, and propagates any pushed-branch update into DO state.

@@ -11,7 +11,6 @@ import {
   createService,
   createSetupReporter,
   failTask,
-  getRemoteConfigCommand,
   mockState,
   resetProvisionMocks,
 } from "./session-provision-test-support";
@@ -45,6 +44,7 @@ describe("SessionProvisionService startup toolchain", () => {
       "createSprite",
       "setNetworkPolicy",
       "startupToolchain",
+      "mintConnector",
       "cloneCheck",
       "cloneRepo",
       "setNetworkPolicy",
@@ -188,6 +188,7 @@ describe("SessionProvisionService startup toolchain", () => {
       repoCloned: taskId !== "repository",
       startupScriptCompleted: true,
       finalNetworkPolicyApplied: false,
+      sessionConnectorId: "conn-1",
     });
     const clientState = createClientState({
       prepareTask: (task) => {
@@ -281,40 +282,6 @@ describe("SessionProvisionService startup toolchain", () => {
     expect(serverState.finalNetworkPolicyApplied).toBe(true);
   });
 
-  it("keeps fetch pointed at GitHub by default", async () => {
-    const serverState = createServerState();
-    const { service } = createService(serverState, createClientState());
-
-    await service.ensureProvisioned();
-
-    const remoteConfigCommand = getRemoteConfigCommand();
-    expect(remoteConfigCommand).toContain(
-      "git remote set-url origin https://github.com/ben/repo.git",
-    );
-    expect(remoteConfigCommand).toContain(
-      "git remote set-url --push origin https://worker.test/git-proxy/session-1/github.com/ben/repo.git",
-    );
-    expect(remoteConfigCommand).toContain(
-      "git config --add \"http.https://worker.test/git-proxy/session-1/.extraHeader\" \"Authorization: Bearer git-proxy-secret\"",
-    );
-  });
-
-  it("uses the git proxy for fetch in locked network mode", async () => {
-    const serverState = createServerState();
-    const { service } = createService(
-      serverState,
-      createClientState(),
-      {},
-      createEnvironmentSnapshot({ network: { mode: "locked" } }),
-    );
-
-    await service.ensureProvisioned();
-
-    expect(getRemoteConfigCommand()).toContain(
-      "git remote set-url origin https://worker.test/git-proxy/session-1/github.com/ben/repo.git",
-    );
-  });
-
   it("runs startup script before applying final network policy", async () => {
     const serverState = createServerState();
     const { service } = createService(
@@ -369,9 +336,9 @@ describe("SessionProvisionService startup toolchain", () => {
       updateServerState: (partial) => Object.assign(serverState, partial),
       updatePartialState: vi.fn(),
       synthesizeStatus: () => "preparing",
-      ensureGitProxySecret: vi.fn(() => "git-proxy-secret"),
       ensureSessionConnector: vi.fn(async () => {}),
-      getConnectorGatewayBase: () => null,
+      getConnectorGatewayBase: () =>
+        "https://api.sprites.test/v1/gateway/custom_api/conn-1",
       githubTokenProvider: {
         getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },
@@ -413,10 +380,12 @@ describe("SessionProvisionService startup toolchain", () => {
     await service.ensureProvisioned();
 
     expect(setupReporter.startTask).toHaveBeenNthCalledWith(1, "cloud_container");
-    expect(setupReporter.startTask).toHaveBeenNthCalledWith(2, "repository");
-    expect(setupReporter.startTask).toHaveBeenNthCalledWith(3, "setup_script");
-    expect(setupReporter.startTask).toHaveBeenNthCalledWith(4, "network_policy");
+    expect(setupReporter.startTask).toHaveBeenNthCalledWith(2, "session_connector");
+    expect(setupReporter.startTask).toHaveBeenNthCalledWith(3, "repository");
+    expect(setupReporter.startTask).toHaveBeenNthCalledWith(4, "setup_script");
+    expect(setupReporter.startTask).toHaveBeenNthCalledWith(5, "network_policy");
     expect(setupReporter.completeTask).toHaveBeenCalledWith("cloud_container");
+    expect(setupReporter.completeTask).toHaveBeenCalledWith("session_connector");
     expect(setupReporter.completeTask).toHaveBeenCalledWith("repository");
     expect(setupReporter.completeTask).toHaveBeenCalledWith("setup_script", {
       exitCode: 0,
@@ -667,9 +636,9 @@ describe("SessionProvisionService startup toolchain", () => {
       updateServerState: (partial) => Object.assign(serverState, partial),
       updatePartialState,
       synthesizeStatus: () => "ready",
-      ensureGitProxySecret: vi.fn(() => "git-proxy-secret"),
       ensureSessionConnector: vi.fn(async () => {}),
-      getConnectorGatewayBase: () => null,
+      getConnectorGatewayBase: () =>
+        "https://api.sprites.test/v1/gateway/custom_api/conn-1",
       githubTokenProvider: {
         getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },

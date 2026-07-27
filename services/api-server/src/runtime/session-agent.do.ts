@@ -51,7 +51,6 @@ import type {
 } from "@repo/shared";
 import { AgentTurnCoordinator } from "@/modules/session-agent/services/agent-turn-coordinator.service";
 import { SessionConnectorService } from "@/modules/session-agent/services/session-connector.service";
-import { getSessionConnectorConfig } from "@/shared/integrations/sprite-connectors";
 import { SessionProvisionService } from "@/modules/session-agent/services/session-provision.service";
 import { SessionChatDispatchService } from "@/modules/session-agent/services/session-chat-dispatch.service";
 import { SessionSetupRunService } from "@/modules/session-agent/services/session-setup-run.service";
@@ -242,7 +241,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       getServerState: () => this.serverState,
       getClientState: () => this.state,
       updateRunState: (setupRun) => this.updateSetupRun(setupRun),
-      includeSessionConnectorTask: getSessionConnectorConfig(this.env).mintEnabled,
     });
     this.turnCoordinator = new AgentTurnCoordinator({
       logger: this.logger,
@@ -324,7 +322,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       updateServerState: (partial) => this.updateServerState(partial),
       updatePartialState: (partial) => this.updatePartialState(partial),
       synthesizeStatus: () => this.synthesizeStatus(),
-      ensureGitProxySecret: () => this.gitProxyService.ensureGitProxySecret(),
       ensureSessionConnector: (spriteName) =>
         this.sessionConnectorService.ensureMinted(spriteName),
       getConnectorGatewayBase: () => this.sessionConnectorService.getGatewayBase(),
