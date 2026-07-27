@@ -27,40 +27,6 @@ struct NewSessionPreferencesTests {
         #expect(preferences.recentRepos.map(\.id) == [1, 3, 2])
     }
 
-    @Test func legacyLastSelectedRepoSeedsEmptyRecentsOnce() throws {
-        let suiteName = "NewSessionPreferencesTests.\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        let userDefaults = try #require(UserDefaults(suiteName: suiteName))
-        userDefaults.setCodableValue(
-            snapshot(id: 1),
-            forKey: Constants.UserDefaults.lastSelectedNewSessionRepo
-        )
-
-        let preferences = NewSessionPreferences(userDefaults: userDefaults)
-
-        #expect(preferences.recentRepos.map(\.id) == [1])
-        #expect(userDefaults.object(forKey: Constants.UserDefaults.lastSelectedNewSessionRepo) == nil)
-    }
-
-    @Test func legacyLastSelectedRepoDoesNotOverrideExistingRecents() throws {
-        let suiteName = "NewSessionPreferencesTests.\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
-        let userDefaults = try #require(UserDefaults(suiteName: suiteName))
-        userDefaults.setCodableValue(
-            [snapshot(id: 2)],
-            forKey: Constants.UserDefaults.recentNewSessionRepos
-        )
-        userDefaults.setCodableValue(
-            snapshot(id: 1),
-            forKey: Constants.UserDefaults.lastSelectedNewSessionRepo
-        )
-
-        let preferences = NewSessionPreferences(userDefaults: userDefaults)
-
-        #expect(preferences.recentRepos.map(\.id) == [2])
-        #expect(userDefaults.object(forKey: Constants.UserDefaults.lastSelectedNewSessionRepo) == nil)
-    }
-
     private func snapshot(id: Int) -> NewSessionPreferences.RepoSnapshot {
         NewSessionPreferences.RepoSnapshot(
             id: id,

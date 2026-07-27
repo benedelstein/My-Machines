@@ -26,7 +26,6 @@ final class NewSessionPreferences {
 
     init(userDefaults: UserDefaults) {
         self.userDefaults = userDefaults
-        migrateLegacyLastSelectedRepo()
     }
 
     var lastSelectedModel: LastSelectedModel? {
@@ -74,19 +73,5 @@ final class NewSessionPreferences {
 
     private func environmentKey(repoId: Int) -> String {
         Constants.UserDefaults.lastEnvironmentIdPrefix + String(repoId)
-    }
-
-    /// Builds before the recents list stored a separate last-selected repo;
-    /// fold it into recents once so an existing preselection survives the
-    /// upgrade, then clear the legacy key.
-    private func migrateLegacyLastSelectedRepo() {
-        let legacyKey = Constants.UserDefaults.lastSelectedNewSessionRepo
-        guard let legacy = userDefaults.codableValue(RepoSnapshot.self, forKey: legacyKey) else {
-            return
-        }
-        if recentRepos.isEmpty {
-            recordRecentRepo(legacy)
-        }
-        userDefaults.removeObject(forKey: legacyKey)
     }
 }
