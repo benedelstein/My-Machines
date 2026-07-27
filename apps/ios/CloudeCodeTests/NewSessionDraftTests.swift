@@ -43,9 +43,60 @@ struct NewSessionDraftTests {
         #expect(draft.selectedEnvironmentId == "environment-9")
     }
 
-    private func makeDraft(preferences: NewSessionPreferences) -> NewSessionDraft {
+    @Test func selectingRecentRepoOutsideLoadedListSelectsIt() throws {
+        let (preferences, suiteName) = try makePreferences()
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        let draft = makeDraft(preferences: preferences)
+
+        draft.selectRepo(NewSessionPreferences.RepoSnapshot(
+            id: 3,
+            fullName: "owner/recent",
+            defaultBranch: "develop"
+        ))
+
+        #expect(draft.selectedRepo?.id == 3)
+        #expect(draft.selectedBranch == "develop")
+        #expect(preferences.lastSelectedRepo?.id == 3)
+    }
+
+    @Test func creatingSessionRecordsRepoInRecents() async throws {
+        let (preferences, suiteName) = try makePreferences()
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        preferences.lastSelectedRepo = .init(
+            id: 7,
+            fullName: "owner/seven",
+            defaultBranch: "main"
+        )
+        let draft = makeDraft(
+            preferences: preferences,
+            sessionsAPI: UnavailableSessionsAPI(createSessionResponse: CreateSessionResponse(
+                sessionId: "session-1",
+                websocketToken: "token",
+                websocketTokenExpiresAt: "2026-01-01T00:00:00Z"
+            ))
+        )
+
+        _ = try await draft.createSession(
+            content: "hello",
+            attachmentIds: [],
+            model: ModelSelection(
+                providerId: .claudeCode,
+                modelId: "model",
+                displayName: "Model",
+                effortId: nil,
+                effortDisplayName: nil
+            )
+        )
+
+        #expect(preferences.recentRepos.map(\.id) == [7])
+    }
+
+    private func makeDraft(
+        preferences: NewSessionPreferences,
+        sessionsAPI: any SessionsAPIProviding = UnavailableSessionsAPI()
+    ) -> NewSessionDraft {
         NewSessionDraft(
-            sessionsAPI: UnavailableSessionsAPI(),
+            sessionsAPI: sessionsAPI,
             reposAPI: UnavailableReposAPI(),
             environmentsStore: RepoEnvironmentsStore { _ in [] },
             preferences: preferences,
@@ -88,6 +139,8 @@ private struct UnavailableReposAPI: ReposAPIProviding {
 }
 
 private struct UnavailableSessionsAPI: SessionsAPIProviding {
+    var createSessionResponse: CreateSessionResponse?
+
     func listSessions(
         repoId: Int?,
         repoCursor: String?,
@@ -99,7 +152,10 @@ private struct UnavailableSessionsAPI: SessionsAPIProviding {
     }
 
     func createSession(_ request: CreateSessionRequest) async throws -> CreateSessionResponse {
-        throw TestError.unexpectedAPICall
+        guard let createSessionResponse else {
+            throw TestError.unexpectedAPICall
+        }
+        return createSessionResponse
     }
 
     func session(id: String) async throws -> SessionInfoResponse {

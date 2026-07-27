@@ -89,18 +89,45 @@ struct RepoPickerSheet: View {
                 Image(systemName: "folder")
             }
             .listRowBackground(Color.clear)
-        } else {
-            ForEach(visibleRepos, id: \.id) { repo in
-                RepoRow(
-                    fullName: repo.fullName,
-                    isSelected: repo.id == draft.selectedRepo?.id
-                ) {
-                    draft.selectRepo(repo)
-                    dismiss()
+        } else if showsRecents {
+            Section("Recents") {
+                ForEach(draft.recentRepos, id: \.id) { recent in
+                    RepoRow(
+                        fullName: recent.fullName,
+                        isSelected: recent.id == draft.selectedRepo?.id
+                    ) {
+                        draft.selectRepo(recent)
+                        dismiss()
+                    }
+                    .transition(style.fadeTransition)
                 }
-                .transition(style.fadeTransition)
             }
+
+            Section("All") {
+                repoRows
+            }
+        } else {
+            repoRows
         }
+    }
+
+    private var repoRows: some View {
+        ForEach(visibleRepos, id: \.id) { repo in
+            RepoRow(
+                fullName: repo.fullName,
+                isSelected: repo.id == draft.selectedRepo?.id
+            ) {
+                draft.selectRepo(repo)
+                dismiss()
+            }
+            .transition(style.fadeTransition)
+        }
+    }
+
+    /// Recents only make sense against the full listing; hide them while a
+    /// search query filters the results.
+    private var showsRecents: Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !draft.recentRepos.isEmpty
     }
 
     private var manageRepositoriesRow: some View {
