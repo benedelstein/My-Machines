@@ -2,17 +2,30 @@ import CoreAPI
 import Domain
 import Foundation
 
-/// One page of the session list, already mapped to domain values. Groups are
-/// derivable client-side from `SessionSummary.repoId`/`repoFullName`.
-public struct SessionSummaryPage: Sendable, Equatable {
-    public let summaries: [Domain.SessionSummary]
-    public let nextRepoCursor: String?
+/// A repository and its cursor-paginated session summaries.
+public struct SessionRepoPage: Sendable, Equatable, Identifiable {
+    public let repoId: Int
+    public let repoFullName: String
+    public let sessions: CursorPage<Domain.SessionSummary>
 
-    public init(summaries: [Domain.SessionSummary], nextRepoCursor: String?) {
-        self.summaries = summaries
-        self.nextRepoCursor = nextRepoCursor
+    public var id: Int {
+        repoId
+    }
+
+    /// Creates a repository page.
+    public init(
+        repoId: Int,
+        repoFullName: String,
+        sessions: CursorPage<Domain.SessionSummary>
+    ) {
+        self.repoId = repoId
+        self.repoFullName = repoFullName
+        self.sessions = sessions
     }
 }
+
+/// A cursor-paginated page of repository session pages.
+public typealias SessionSummaryPage = CursorPage<SessionRepoPage>
 
 extension CoreAPI.SessionSummary {
     var domainSummary: Domain.SessionSummary {
@@ -72,9 +85,18 @@ private extension CoreAPI.SessionStatus {
 
 extension ListSessionsResponse {
     var summaryPage: SessionSummaryPage {
-        SessionSummaryPage(
-            summaries: groups.flatMap(\.sessions).map(\.domainSummary),
-            nextRepoCursor: nextRepoCursor
+        CursorPage(
+            values: groups.map { group in
+                SessionRepoPage(
+                    repoId: group.repoId,
+                    repoFullName: group.repoFullName,
+                    sessions: CursorPage(
+                        values: group.sessions.map(\.domainSummary),
+                        nextCursor: group.nextSessionCursor
+                    )
+                )
+            },
+            nextCursor: nextRepoCursor
         )
     }
 }

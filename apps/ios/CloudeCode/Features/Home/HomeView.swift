@@ -163,6 +163,15 @@ struct HomeView: View {
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                     }
+
+                    if group.hasNextPage {
+                        PaginationButton(
+                            title: "Load more sessions",
+                            isLoading: viewModel.loadingSessionRepoIDs.contains(group.repoId)
+                        ) {
+                            await viewModel.loadMoreSessions(repoId: group.repoId)
+                        }
+                    }
                 } header: {
                     RepoSectionHeader(
                         group: group,
@@ -171,6 +180,15 @@ struct HomeView: View {
                 }
             }
             .listRowSpacing(style.gridSize) // idt this works
+
+            if viewModel.hasNextRepositoryPage {
+                PaginationButton(
+                    title: "Load more repositories",
+                    isLoading: viewModel.isLoadingMoreRepositories
+                ) {
+                    await viewModel.loadMoreRepositories()
+                }
+            }
         }
         .scrollContentBackground(.hidden)
         .background(theme.secondaryBackgroundColor)
@@ -240,6 +258,51 @@ struct HomeView: View {
                 sessionPendingDelete = nil
             }
         }
+    }
+}
+
+private struct PaginationButton: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.style) private var style
+
+    let title: String
+    let isLoading: Bool
+    let action: () async -> Void
+
+    var body: some View {
+        Button {
+            Task {
+                await action()
+            }
+        } label: {
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(theme.secondaryLabelColor)
+                } else {
+                    Text(title)
+                        .styledFont(.subheadline)
+                        .foregroundStyle(theme.secondaryLabelColor)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoading)
+        .listRowInsets(
+            EdgeInsets(
+                top: 0,
+                leading: style.horizontalPadding,
+                bottom: 0,
+                trailing: style.horizontalPadding
+            )
+        )
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .accessibilityLabel(title)
     }
 }
 
