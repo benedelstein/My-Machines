@@ -1,7 +1,7 @@
 # Multi-provider Auth and Model Routing Design
 
 Status: implemented with current file-name drift. Provider metadata now lives
-under `packages/shared/src/types/providers/`; provider auth dispatch is in
+in `packages/shared/src/types/providers-registry.ts`; provider auth dispatch is in
 `services/api-server/src/modules/ai-auth/services/provider-auth.service.ts`;
 Sprite credential sync is in
 `services/api-server/src/modules/ai-auth/services/provider-credential-adapter.service.ts`;

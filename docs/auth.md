@@ -342,7 +342,7 @@ After credentials are missing or revoked, identity-only routes still work: `/aut
 
 ## Preview Branches
 
-Vercel preview branches share one GitHub App with prod, which means one callback URL. The callback lives on the api-server (`api.mymachines.dev/auth/callback`); GitHub redirects every sign-in there regardless of which web origin started it. The api-server reads the attempt's bound origin — recorded and re-validated server-side — and 302s the tab back to that origin's `/api/auth/github/complete?attemptId=<id>`.
+Vercel preview branches share one GitHub App with prod, which means one callback URL. The callback lives on the api-server (`api.mymachines.dev/auth/callback`); GitHub redirects every sign-in there regardless of which web origin started it. The api-server reads the attempt's bound origin — recorded and re-validated server-side — and 302s the tab back to that origin's `/api/auth/github/complete?attemptId=<id>&completionCode=<code>`.
 
 One browser rule forces this hop: cookies are origin-scoped, so the api-server on `api.mymachines.dev` cannot Set-Cookie for `<preview>.vercel.app` (different registrable domain). Both the temporary claim cookie and the session cookie must be written by the origin that started sign-in, which is why the BFF completion route exists.
 

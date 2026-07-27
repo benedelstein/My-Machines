@@ -34,7 +34,7 @@ vm-agent
   -> WebhookAgentRunner queues turn into agent-harness
   -> stream chunks enter ChunkBatcher
   -> POST /internal/session/:sessionId/chunks
-  -> POST /internal/session/:sessionId/events for ready/error/sessionId
+  -> POST /internal/session/:sessionId/events for ready/error/sessionId/process_exit
 
 Webhook routes
   -> verify bearer token from SecretRepository
@@ -51,11 +51,12 @@ Active turn fields live in `server_state`:
 {
   activeUserMessageId: string | null;
   agentProcessId: number | null;
+  agentProcessRunId: string | null;
   agentSessionId: string | null;
 }
 ```
 
-Only one user turn may be active per session. A second `chat.message` while `activeUserMessageId` or `pendingUserMessage` is set is rejected with `CHAT_MESSAGE_FAILED`.
+Only one user turn may be active per session. A second `chat.message` while `activeUserMessageId` or `pendingUserMessage` is set is rejected with `CHAT_MESSAGE_FAILED`. `SpriteAgentProcessManager.recordAgentProcessState(...)` stores both the Sprite process id and the vm-agent `agentProcessRunId`; `AgentTurnCoordinator.handleProcessExit(...)` ignores `process_exit` events whose run id no longer matches the tracked process.
 
 ## Dispatch
 
