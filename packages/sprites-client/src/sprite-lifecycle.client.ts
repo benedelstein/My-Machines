@@ -97,8 +97,8 @@ export class SpriteLifecycleClient {
       status: sprite.status,
       url: "",
       labels: sprite.labels,
-      createdAt: sprite.createdAt,
-      updatedAt: sprite.updatedAt,
+      createdAt: sprite.createdAt?.toISOString(),
+      updatedAt: sprite.updatedAt?.toISOString(),
     });
   }
 
