@@ -21,6 +21,49 @@ function client(fetchImplementation: typeof fetch): HttpSpriteConnectorsClient {
 }
 
 describe("HttpSpriteConnectorsClient", () => {
+  it("creates a custom API connector with its final access policy", async () => {
+    const fetchSpy = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ connection: connectionPayload }, { status: 201 }),
+    );
+
+    const result = await client(fetchSpy).createCustomApiConnection({
+      name: "cloude-session-abc123",
+      baseApiUrl: "https://api.example.com",
+      accessToken: "secret-token",
+      testUrl: "https://api.example.com/health",
+      authHeaderPrefix: "Bearer",
+      description: "Cloude session connector",
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: ["session:session-1"],
+        allowedEndpoints: ["/health"],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(url).toBe("https://api.sprites.dev/v1/oauth/connections/custom_api");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toMatchObject({
+      Authorization: "Bearer test-token",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      name: "cloude-session-abc123",
+      base_api_url: "https://api.example.com",
+      access_token: "secret-token",
+      test_url: "https://api.example.com/health",
+      auth_method: "header",
+      auth_header_prefix: "Bearer",
+      description: "Cloude session connector",
+      access_policy: {
+        allow_all: false,
+        sprite_labels: ["session:session-1"],
+        allowed_endpoints: ["/health"],
+      },
+    });
+  });
+
   it("maps the snake_case connection envelope to camelCase", async () => {
     const result = await client(async () => {
       return Response.json({ connections: [connectionPayload] });

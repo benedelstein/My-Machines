@@ -16,6 +16,16 @@ export interface SpritesConnection {
   accessPolicy?: AccessPolicy;
 }
 
+export interface CreateCustomApiConnectionRequest {
+  name: string;
+  baseApiUrl: string;
+  accessToken: string;
+  testUrl: string;
+  authHeaderPrefix: string;
+  description?: string;
+  accessPolicy: AccessPolicy;
+}
+
 export type SpritesRestErrorCode =
   | "sprites_authentication_failed"
   | "sprites_rate_limited"
@@ -28,6 +38,9 @@ export interface SpritesRestError {
 }
 
 export interface SpriteConnectorsClient {
+  createCustomApiConnection(
+    request: CreateCustomApiConnectionRequest,
+  ): Promise<Result<SpritesConnection, SpritesRestError>>;
   listConnections(): Promise<Result<SpritesConnection[], SpritesRestError>>;
   updateAccessPolicy(
     connectionId: string,

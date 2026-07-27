@@ -2,6 +2,7 @@ import { z } from "zod";
 import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
+  CreateCustomApiConnectionRequest,
   SpritesConnection,
   SpriteConnectorsClient,
   SpritesRestError,
@@ -51,6 +52,35 @@ export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
     this.apiUrl = options.apiUrl.replace(/\/+$/u, "");
     this.apiToken = options.apiToken;
     this.request = options.fetch ?? fetch.bind(globalThis);
+  }
+
+  async createCustomApiConnection(
+    request: CreateCustomApiConnectionRequest,
+  ): Promise<Result<SpritesConnection, SpritesRestError>> {
+    const response = await this.fetch("/v1/oauth/connections/custom_api", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: request.name,
+        base_api_url: request.baseApiUrl,
+        access_token: request.accessToken,
+        test_url: request.testUrl,
+        auth_method: "header",
+        auth_header_prefix: request.authHeaderPrefix,
+        ...(request.description === undefined ? {} : { description: request.description }),
+        access_policy: mapAccessPolicyRequest(request.accessPolicy),
+      }),
+    });
+    if (!response.ok) {
+      return failure(response.error);
+    }
+
+    const parsed = ConnectionResponseSchema.safeParse(response.value);
+    if (!parsed.success) {
+      return failure(invalidResponse());
+    }
+
+    return success(mapConnection(parsed.data.connection));
   }
 
   async listConnections(): Promise<Result<SpritesConnection[], SpritesRestError>> {

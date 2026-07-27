@@ -163,7 +163,7 @@ Before enabling user-defined class-B connectors, the system MUST also verify tha
 the Sprites connector service prevents DNS names from resolving or rebinding to
 prohibited address ranges and prevents credential forwarding across redirects. If
 the platform does not enforce those properties, the control plane SHALL enforce
-resolved-address and redirect policy itself. A successful dashboard connection test
+resolved-address and redirect policy itself. A successful connection test
 MUST NOT be treated as proof that the target is safe.
 
 #### Scenario: Public hostname resolves to an internal address
@@ -411,36 +411,38 @@ explicit contents-read-only token exception defined above.
   that did not pass through this session's sprite-scoped gateway
 - **THEN** the Worker rejects it
 
-### Requirement: Dashboard-backed connector creation with REST scoping
+### Requirement: REST-backed Custom API connector creation
 
-The system SHALL create Sprites Custom API connectors through the dashboard flow (no
-public REST create exists), scope them via REST, verify the policy is not
-`allow_all`, and fail closed if creation or scoping cannot complete.
+The system SHALL create Sprites Custom API connectors through
+`POST /v1/oauth/connections/custom_api` with their final access policy, verify the
+returned gateway connection id and policy through REST, and fail closed if creation
+or verification cannot complete.
 
 #### Scenario: Create, scope, and verify
 
 - **WHEN** the system provisions a session connector
-- **THEN** it creates the connector via the dashboard flow, scopes it via
-  `PATCH /v1/oauth/connections/{id}` to the session Sprite, and confirms
-  `allow_all` is disabled before use
+- **THEN** it creates the connector with `allow_all: false`, the session Sprite
+  label, and the exact allowed endpoints in the initial REST request
+- **AND** re-reads the returned gateway connection id and confirms the final policy
+  before use
 
-#### Scenario: Create or scope fails
+#### Scenario: Create or verification fails
 
-- **WHEN** the dashboard flow or the REST scope/verify step fails
+- **WHEN** REST creation or verification fails
 - **THEN** the system deletes any partial connector and records a sanitized failure
   without exposing a secret to a Sprite runtime
 
 ### Requirement: Connector and secret metadata persistence
 
-The system SHALL persist connector metadata (gateway connection id and dashboard
-detail id, org, base URL, auth method, access-policy summary, status) in D1. The
+The system SHALL persist connector metadata (gateway connection id, org, base URL,
+auth method, access-policy summary, status) in D1. The
 per-session control-plane token SHALL remain in Durable Object SQLite and SHALL NOT
 be duplicated in D1.
 
 #### Scenario: Successful provisioning persists metadata
 
 - **WHEN** provisioning completes
-- **THEN** the system stores both connector ids and non-secret metadata in D1
+- **THEN** the system stores the gateway connection id and non-secret metadata in D1
 - **AND** the Durable Object remains the only persisted owner of its session token
 
 #### Scenario: Session teardown
@@ -450,16 +452,16 @@ be duplicated in D1.
   Object's session token
 - **AND** leaves every environment connector policy unchanged
 
-### Requirement: Provisioner-only dashboard authentication
+### Requirement: Control-plane-only Sprites API authentication
 
-The system SHALL keep Sprites dashboard authentication material scoped to the
-connector provisioner and MUST NOT expose dashboard cookies, storage state, CSRF
-tokens, or session payloads to clients, Sprite runtimes, logs, or D1.
+The system SHALL keep the Sprites API token scoped to the API-server control plane and
+MUST NOT expose it or submitted connector credentials to clients, Sprite runtimes,
+logs, or D1.
 
-#### Scenario: Dashboard auth expires
+#### Scenario: Sprites API authentication fails
 
-- **WHEN** the provisioner dashboard session is expired or rejected
-- **THEN** connector provisioning stops with a reauthentication-required status
+- **WHEN** Sprites rejects the API server's API token
+- **THEN** connector provisioning stops with a non-retryable authentication failure
   instead of falling back to raw secret injection
 
 ### Requirement: Synchronous fail-closed provisioning
