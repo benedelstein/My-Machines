@@ -427,7 +427,9 @@ mintConnector({ baseApiUrl, token, headerName='Authorization',
   `allow_all: false`, labels, and endpoint restrictions before returning it.
 - **Fail closed** — on any verification failure, REST-delete the connector. If a
   retryable create loses its response, reconcile only by the per-attempt unique name
-  and delete a match; otherwise return `orphan_reconciliation_required`. The live
+  and delete a match; otherwise return `orphan_reconciliation_required`. If cleanup
+  fails, retain the gateway connection id and cleanup cause in the structured error
+  so the caller can reconcile the orphan. The live
   `GET /v1/oauth/connections` envelope contained only the complete `connections`
   collection, with no cursor or pagination metadata (verified 2026-07-26).
 - **Host:** the API-server shared connector integration. The API server already

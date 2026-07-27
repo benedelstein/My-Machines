@@ -51,8 +51,12 @@ async function main(): Promise<void> {
 
   const mintResult = await mintConnector(request, { spritesClient });
   if (!mintResult.ok) {
+    const failedCleanup = mintResult.error.cleanup.attempted
+      && !mintResult.error.cleanup.succeeded
+      ? `; orphan connector ${mintResult.error.cleanup.gatewayConnectionId}`
+      : "";
     throw new Error(
-      `Connector mint failed: ${mintResult.error.code} at ${mintResult.error.stage}`,
+      `Connector mint failed: ${mintResult.error.code} at ${mintResult.error.stage}${failedCleanup}`,
     );
   }
 

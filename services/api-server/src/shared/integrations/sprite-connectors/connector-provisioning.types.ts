@@ -1,9 +1,20 @@
 import type { AccessPolicy, SpritesRestErrorCode } from "@repo/sprites-client";
 
-export interface CleanupStatus {
-  attempted: boolean;
-  succeeded: boolean;
-}
+export type CleanupStatus =
+  | {
+    attempted: false;
+    succeeded: false;
+  }
+  | {
+    attempted: true;
+    succeeded: true;
+  }
+  | {
+    attempted: true;
+    succeeded: false;
+    gatewayConnectionId: string;
+    error: ConnectorCleanupError;
+  };
 
 export interface ConnectorProvisioningDurations {
   createMs?: number;

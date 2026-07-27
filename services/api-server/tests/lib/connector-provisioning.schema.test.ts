@@ -20,6 +20,14 @@ describe("MintConnectorRequestSchema", () => {
     expect(MintConnectorRequestSchema.safeParse(withoutPins).success).toBe(false);
   });
 
+  it("rejects mixed session and environment labels without pinned endpoints", () => {
+    const { allowedEndpoints: _allowedEndpoints, ...withoutPins } = validRequest;
+    expect(MintConnectorRequestSchema.safeParse({
+      ...withoutPins,
+      spriteLabels: ["session:test-123", "env:environment-1"],
+    }).success).toBe(false);
+  });
+
   it("accepts environment labels without pinned endpoints", () => {
     const { allowedEndpoints: _allowedEndpoints, ...withoutPins } = validRequest;
     expect(MintConnectorRequestSchema.safeParse({
@@ -53,6 +61,16 @@ describe("MintConnectorRequestSchema", () => {
       testUrl: "https://other.example.com/health",
     }).success).toBe(false);
   });
+
+  it.each(["baseApiUrl", "testUrl"] as const)(
+    "returns a failed parse for a malformed %s",
+    (field) => {
+      expect(MintConnectorRequestSchema.safeParse({
+        ...validRequest,
+        [field]: "not-a-url",
+      }).success).toBe(false);
+    },
+  );
 
   it.each([
     "https://localhost",

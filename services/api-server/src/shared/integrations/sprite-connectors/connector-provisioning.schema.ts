@@ -1,8 +1,23 @@
 import { z } from "zod";
 import { isInternalHostname } from "./internal-hostname";
 
-const httpsUrl = z.string().url().superRefine((value, context) => {
-  const url = new URL(value);
+function parseUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
+const httpsUrl = z.string().superRefine((value, context) => {
+  const url = parseUrl(value);
+  if (url === undefined) {
+    context.addIssue({
+      code: "custom",
+      message: "A valid URL is required",
+    });
+    return;
+  }
   if (url.protocol !== "https:") {
     context.addIssue({
       code: "custom",
@@ -47,7 +62,9 @@ function requireMatchingTestOrigin(
   value: z.infer<typeof MintConnectorRequestBaseSchema>,
   context: z.RefinementCtx,
 ): void {
-  if (new URL(value.baseApiUrl).origin !== new URL(value.testUrl).origin) {
+  const baseUrl = parseUrl(value.baseApiUrl);
+  const testUrl = parseUrl(value.testUrl);
+  if (baseUrl !== undefined && testUrl !== undefined && baseUrl.origin !== testUrl.origin) {
     context.addIssue({
       code: "custom",
       path: ["testUrl"],
@@ -60,8 +77,10 @@ function requireSessionEndpointPins(
   value: z.infer<typeof MintConnectorRequestBaseSchema>,
   context: z.RefinementCtx,
 ): void {
-  const isSessionConnector = value.spriteLabels.every((label) => label.startsWith("session:"));
-  if (isSessionConnector && value.allowedEndpoints === undefined) {
+  // A connector carrying any session label is reachable by that session's
+  // Sprite, even when the policy also contains environment labels.
+  const hasSessionLabel = value.spriteLabels.some((label) => label.startsWith("session:"));
+  if (hasSessionLabel && value.allowedEndpoints === undefined) {
     context.addIssue({
       code: "custom",
       path: ["allowedEndpoints"],

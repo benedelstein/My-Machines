@@ -285,7 +285,15 @@ async function cleanupConnector(
   const result = await timings.time("cleanupMs", () => {
     return deleteConnectorAndVerify(connectionId, spritesClient);
   });
-  return { attempted: true, succeeded: result.ok };
+  if (result.ok) {
+    return { attempted: true, succeeded: true };
+  }
+  return {
+    attempted: true,
+    succeeded: false,
+    gatewayConnectionId: connectionId,
+    error: result.error,
+  };
 }
 
 function defaultNameSuffix(): string {

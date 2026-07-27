@@ -25,6 +25,8 @@ at the Sprites gateway after evaluating its access policy.
 Successful responses do not need name reconciliation. A name lookup is used only
 when the create request has an uncertain outcome, such as a retryable transport
 failure or an invalid response that may have followed a successful mutation.
+If automatic deletion fails, the structured error retains the gateway connection
+id and cleanup cause so the caller can reconcile the orphan.
 
 Session-scoped connectors must specify `allowedEndpoints`; environment-scoped
 connectors may authorize the full configured origin.

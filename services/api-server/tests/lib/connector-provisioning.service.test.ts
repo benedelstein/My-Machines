@@ -234,6 +234,77 @@ describe("mintConnector", () => {
     });
     expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
   });
+
+  it("surfaces the orphan id when delete fails after a verification mismatch", async () => {
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.getResults = [success(connection({
+      accessPolicy: {
+        allowAll: true,
+        spriteLabels: ["session:test-123"],
+      },
+    }))];
+    spritesClient.deleteResult = failure({
+      code: "sprites_request_failed",
+      retryable: true,
+    });
+
+    const result = await mintConnector(request, {
+      spritesClient,
+      nameSuffix: () => "suffix01",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "connector_verification_failed",
+        cleanup: {
+          attempted: true,
+          succeeded: false,
+          gatewayConnectionId: "gateway-connection-id",
+          error: {
+            code: "cleanup_failed",
+            cause: "sprites_request_failed",
+            retryable: true,
+          },
+        },
+      },
+    });
+  });
+
+  it("surfaces the orphan id when a connector remains after delete", async () => {
+    const spritesClient = new FakeSpritesClient();
+    spritesClient.getResults = [
+      success(connection({
+        accessPolicy: {
+          allowAll: true,
+          spriteLabels: ["session:test-123"],
+        },
+      })),
+      success(connection()),
+    ];
+
+    const result = await mintConnector(request, {
+      spritesClient,
+      nameSuffix: () => "suffix01",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "connector_verification_failed",
+        cleanup: {
+          attempted: true,
+          succeeded: false,
+          gatewayConnectionId: "gateway-connection-id",
+          error: {
+            code: "cleanup_failed",
+            cause: "connector_still_present",
+            retryable: true,
+          },
+        },
+      },
+    });
+  });
 });
 
 describe("deleteConnectorAndVerify", () => {
