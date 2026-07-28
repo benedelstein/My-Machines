@@ -584,6 +584,20 @@ sequenceDiagram
   Connector-->>Git: Stream response
 ```
 
+**Future optimization — move the git data plane out of the Durable Object
+(recorded 2026-07-27).** As implemented, the git-proxy route hands the raw
+request to the session DO, so the entire packfile stream flows through the DO —
+the same single-threaded instance that handles the session's webhook chunks and
+WebSocket broadcasting. The DO is only genuinely needed for three small things:
+validating the gateway-injected session token (DO SQLite), reading the repo
+allowlist and branch lock, and recording `pushedBranch` after a successful push.
+The target shape is validate-then-stream: the Worker makes one internal RPC to
+the DO (validate token, return repo policy + branch lock), streams the GitHub
+exchange entirely Worker-side with the D1-cached installation token, and reports
+a successful push back to the DO with a second small RPC. Do this only if the
+S2.3 post-clone read-latency measurement shows the DO hop matters; git
+operations are infrequent and GitHub round-trips dominate today.
+
 The initial clone is the explicit exception:
 
 ```mermaid
@@ -644,6 +658,22 @@ requests. The native shim is not a connector, is not per user, and receives no
 refresh token. It accepts only authenticated Worker calls, rebuilds an allowlisted
 request, strips inbound proxy metadata, and streams the response. See
 `provider-proxying.md` for the transport evidence and remaining uncertainty.
+
+**Constraint — validate-then-stream; the DO never carries inference bytes.**
+Inference streams are long-lived, per-turn, and latency-sensitive; routing them
+through the session DO would put minutes-long provider streams on the same
+single-threaded event loop as the session's webhook and WebSocket hot path. The
+inference routes MUST make exactly one small internal RPC to the DO per request
+— validate the gateway-injected session token against DO SQLite and return the
+authenticated session's user id — and then handle everything else Worker-side:
+the D1 OAuth read/refresh, provider egress, and response streaming. The DO hop
+is authentication only; no request or response body ever passes through the DO.
+This keeps the token's single source of truth (and instant revocation) in DO
+SQLite without putting the DO on the data path. If a measured need ever arises
+to remove the RPC entirely, the recorded escape hatch is storing a hash of the
+session token in `session_connectors` for stateless Worker-side validation — a
+hash is not the credential, so D1 custody intent is preserved — but prefer the
+RPC until then.
 
 The existing refresh implementations already have a cross-session race: two Worker
 instances can read the same expiring user record, refresh outside a lock/version
