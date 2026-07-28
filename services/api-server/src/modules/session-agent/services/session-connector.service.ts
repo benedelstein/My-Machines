@@ -41,7 +41,8 @@ export interface SessionConnectorServiceDeps {
   spriteLifecycleClient: SpriteLifecycleClient;
   repository: SessionConnectorsRepository;
   getServerState: () => ServerState;
-  updateServerState: (partial: Partial<ServerState>) => void;
+  /** Checkpoints the minted connector's gateway connection id in ServerState. */
+  setSessionConnectorId: (gatewayConnectionId: string) => void;
   getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
   ensureWebhookToken: () => string;
   /** Test seam; defaults to an HTTP client against SPRITES_API_URL. */
@@ -60,7 +61,7 @@ export class SessionConnectorService {
   private readonly spriteLifecycleClient: SpriteLifecycleClient;
   private readonly repository: SessionConnectorsRepository;
   private readonly getServerState: () => ServerState;
-  private readonly updateServerState: SessionConnectorServiceDeps["updateServerState"];
+  private readonly setSessionConnectorId: SessionConnectorServiceDeps["setSessionConnectorId"];
   private readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
   private readonly ensureWebhookToken: () => string;
   private readonly spritesClient: SpriteConnectorsClient;
@@ -71,7 +72,7 @@ export class SessionConnectorService {
     this.spriteLifecycleClient = deps.spriteLifecycleClient;
     this.repository = deps.repository;
     this.getServerState = deps.getServerState;
-    this.updateServerState = deps.updateServerState;
+    this.setSessionConnectorId = deps.setSessionConnectorId;
     this.getEnvironmentSnapshot = deps.getEnvironmentSnapshot;
     this.ensureWebhookToken = deps.ensureWebhookToken;
     this.spritesClient =
@@ -165,7 +166,7 @@ export class SessionConnectorService {
         : new Error("Session connector metadata persist failed");
     }
 
-    this.updateServerState({ sessionConnectorId: minted.gatewayConnectionId });
+    this.setSessionConnectorId(minted.gatewayConnectionId);
     this.logger.info("Session connector minted", {
       fields: {
         sessionId,
@@ -238,19 +239,18 @@ export class SessionConnectorService {
 
   /**
    * Ensures the Sprite carries the session (and environment) labels before the
-   * connector is minted, repairing Sprites created before label support.
-   *
-   * The read-back is a diagnostic, not the security boundary: Fly evaluates the
-   * label policy at the gateway before injecting the credential, so a Sprite
-   * that is genuinely unlabelled loses connector access rather than gaining
-   * any. The Sprites client also cannot distinguish "no labels" from "labels
-   * not reported", so a missing read-back is logged instead of failing the
-   * session.
+   * connector is minted, repairing Sprites created before label support. Skips
+   * the read-back entirely when creation already applied the labels. Fly
+   * enforces the label policy at the gateway, so a missing label costs the
+   * Sprite connector access rather than granting any.
    */
   private async ensureSpriteLabels(
     spriteName: string,
     sessionId: string,
   ): Promise<void> {
+    if (this.getServerState().spriteLabelsApplied) {
+      return;
+    }
     const snapshot = this.getEnvironmentSnapshot();
     const desired = buildSessionSpriteLabels(
       sessionId,

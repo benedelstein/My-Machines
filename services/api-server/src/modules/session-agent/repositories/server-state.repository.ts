@@ -32,6 +32,8 @@ export type ServerState = {
   finalNetworkPolicyApplied: boolean;
   /** Gateway connection id of the session's internal connector, once minted. */
   sessionConnectorId: string | null;
+  /** True when sprite creation applied the session labels, skipping label repair. */
+  spriteLabelsApplied: boolean;
   /** True when post-clone git remotes were written against the connector gateway. */
   gitConfiguredViaConnector: boolean;
 };
@@ -51,6 +53,7 @@ function defaultServerState(): ServerState {
     startupScriptCompleted: false,
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
+    spriteLabelsApplied: false,
     gitConfiguredViaConnector: false,
   };
 }

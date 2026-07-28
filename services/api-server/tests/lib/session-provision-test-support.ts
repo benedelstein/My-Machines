@@ -1,7 +1,6 @@
 import { expect, vi } from "vitest";
 import type {
   ClientState,
-  Logger,
   SessionEnvironmentSnapshot,
   SessionSetupRun,
   SessionSetupTask,
@@ -16,21 +15,10 @@ import type {
   SessionSetupOutputCollector,
 } from "../../src/modules/session-agent/services/session-setup-output.service";
 import { mockState } from "./session-provision-mocks";
+import { createTestLogger } from "./test-logger";
 
 export { mockState, resetProvisionMocks } from "./session-provision-mocks";
-
-export function createLogger(): Logger {
-  return {
-    log() {},
-    debug() {},
-    info() {},
-    warn() {},
-    error() {},
-    scope() {
-      return this;
-    },
-  };
-}
+export { createTestLogger } from "./test-logger";
 
 export function createClientState(args: {
   prepareTask?: (task: SessionSetupTask) => SessionSetupTask;
@@ -128,6 +116,7 @@ export function createServerState(overrides: Partial<ServerState> = {}): ServerS
     startupScriptCompleted: false,
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
+    spriteLabelsApplied: false,
     gitConfiguredViaConnector: false,
     ...overrides,
   };
@@ -187,7 +176,7 @@ export function createService(
   );
 
   const service = new SessionProvisionService({
-    logger: createLogger(),
+    logger: createTestLogger(),
     env: {
       SPRITES_API_KEY: "sprites-key",
       SPRITES_API_URL: "https://api.sprites.test",

@@ -215,8 +215,6 @@ export class SessionProvisionService {
         });
       }
     }
-
-    this.updatePartialState({ status: this.synthesizeStatus() });
   }
 
   private recordProvisioningError(error: unknown): void {
@@ -229,7 +227,6 @@ export class SessionProvisionService {
   }
 
   private async ensureCloudContainerTask(): Promise<void> {
-    this.updatePartialState({ status: this.synthesizeStatus() });
     if (!this.spriteName) {
       const sessionId = this.getServerState().sessionId;
       if (!sessionId) {
@@ -238,12 +235,13 @@ export class SessionProvisionService {
       this.logger.debug("creating sprite", {
         fields: { sessionId },
       });
+      const labels = buildSessionSpriteLabels(
+        sessionId,
+        this.getEnvironmentSnapshot().sourceEnvironmentId,
+      );
       const spriteResponse = await this.spriteLifecycleClient.createSprite({
         name: sessionId,
-        labels: buildSessionSpriteLabels(
-          sessionId,
-          this.getEnvironmentSnapshot().sourceEnvironmentId,
-        ),
+        labels,
       });
       this.spriteName = spriteResponse.name;
       // For provisioning, allow network access to known-good domains.
@@ -259,8 +257,12 @@ export class SessionProvisionService {
         connectorGatewayHostname: this.connectorGatewayHostname(),
       });
       await sprite.setNetworkPolicy(networkPolicy);
-      this.updateServerState({ spriteName: this.spriteName });
-      this.updatePartialState({ status: this.synthesizeStatus() });
+      this.updateServerState({
+        spriteName: this.spriteName,
+        spriteLabelsApplied: labels.every((label) =>
+          (spriteResponse.labels ?? []).includes(label),
+        ),
+      });
     }
     if (!this.getServerState().startupToolchain) {
       await this.ensureStartupToolchain(this.spriteName);
@@ -268,9 +270,7 @@ export class SessionProvisionService {
   }
 
   private async ensureSessionConnectorTask(spriteName: string): Promise<void> {
-    this.updatePartialState({ status: this.synthesizeStatus() });
     await this.ensureSessionConnector(spriteName);
-    this.updatePartialState({ status: this.synthesizeStatus() });
   }
 
   /** Gateway hostname kept reachable in restricted network modes. */
@@ -281,15 +281,11 @@ export class SessionProvisionService {
   private async ensureRepositoryTask(
     spriteName: string,
   ): Promise<void> {
-    this.updatePartialState({ status: this.synthesizeStatus() });
     if (!this.getServerState().repoCloned) {
       await this.cloneRepo(spriteName);
       this.updateServerState({ repoCloned: true });
     }
-    this.updatePartialState({
-      status: this.synthesizeStatus(),
-      lastError: null,
-    });
+    this.updatePartialState({ lastError: null });
   }
 
   private async ensureSetupScriptTask(
@@ -361,12 +357,10 @@ export class SessionProvisionService {
   private async ensureNetworkPolicyTask(
     spriteName: string,
   ): Promise<void> {
-    this.updatePartialState({ status: this.synthesizeStatus() });
     if (!this.getServerState().finalNetworkPolicyApplied) {
       await this.applyFinalNetworkPolicy(spriteName);
       this.updateServerState({ finalNetworkPolicyApplied: true });
     }
-    this.updatePartialState({ status: this.synthesizeStatus() });
   }
 
   private requireSpriteName(): string {

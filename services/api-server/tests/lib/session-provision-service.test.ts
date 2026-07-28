@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionSetupTask } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
 import { SessionProvisionService } from "../../src/modules/session-agent/services/session-provision.service";
+import { createTestLogger } from "./test-logger";
 import {
   completeTask,
   createClientState,
-  createLogger,
   createEnvironmentSnapshot,
   createServerState,
   createService,
@@ -318,7 +318,7 @@ describe("SessionProvisionService startup toolchain", () => {
       schemaVersion: 1 as const,
     };
     const serviceWithScript = new SessionProvisionService({
-      logger: createLogger(),
+      logger: createTestLogger(),
       env: {
         SPRITES_API_KEY: "sprites-key",
         SPRITES_API_URL: "https://api.sprites.test",
@@ -616,7 +616,7 @@ describe("SessionProvisionService startup toolchain", () => {
     });
 
     const service = new SessionProvisionService({
-      logger: createLogger(),
+      logger: createTestLogger(),
       env: {
         SPRITES_API_KEY: "sprites-key",
         SPRITES_API_URL: "https://api.sprites.test",

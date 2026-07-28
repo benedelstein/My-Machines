@@ -307,7 +307,8 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       spriteLifecycleClient: this.spriteLifecycleClient,
       repository: new SessionConnectorsRepository(this.env.DB),
       getServerState: () => this.serverState,
-      updateServerState: (partial) => this.updateServerState(partial),
+      setSessionConnectorId: (gatewayConnectionId) =>
+        this.updateServerState({ sessionConnectorId: gatewayConnectionId }),
       getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
       ensureWebhookToken: () => this.processManager.ensureWebhookToken(),
     });
@@ -833,8 +834,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       }
     }
 
-    // Clear Agent SDK state, alarms, WebSocket resources, and all DO storage,
-    // including the webhook token in the secrets table.
+    // Clear Agent SDK state, alarms, WebSocket resources, and all DO storage.
     await this.destroy();
 
     return success(undefined);

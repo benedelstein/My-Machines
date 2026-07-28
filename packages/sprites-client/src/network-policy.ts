@@ -274,7 +274,7 @@ export function buildBootstrapNetworkPolicy(args: {
 }): NetworkPolicyRule[] {
   return buildNetworkPolicy([
     allow(args.workerHostname),
-    ...gatewayRules(args.connectorGatewayHostname),
+    ...(args.connectorGatewayHostname ? [allow(args.connectorGatewayHostname)] : []),
   ]);
 }
 
@@ -288,18 +288,18 @@ export function buildFinalNetworkPolicy(args: {
    */
   connectorGatewayHostname?: string;
 }): NetworkPolicyRule[] {
+  const gatewayRule = args.connectorGatewayHostname
+    ? [allow(args.connectorGatewayHostname)]
+    : [];
   switch (args.network.mode) {
     case "open":
       return [{ domain: "*", action: "allow" }];
     case "default":
-      return buildNetworkPolicy([
-        allow(args.workerHostname),
-        ...gatewayRules(args.connectorGatewayHostname),
-      ]);
+      return buildNetworkPolicy([allow(args.workerHostname), ...gatewayRule]);
     case "custom": {
       const customRules = [
         allow(args.workerHostname),
-        ...gatewayRules(args.connectorGatewayHostname),
+        ...gatewayRule,
         ...args.network.extraAllowlist.map(allow),
       ];
       return args.network.includeDefaultAllowlist
@@ -312,7 +312,7 @@ export function buildFinalNetworkPolicy(args: {
     case "locked":
       return appendDenyAll([
         allow(args.workerHostname),
-        ...gatewayRules(args.connectorGatewayHostname),
+        ...gatewayRule,
         ...getProviderNetworkPolicyRules(args.providerId),
       ]);
     default: {
@@ -320,10 +320,6 @@ export function buildFinalNetworkPolicy(args: {
       throw new Error(`Unhandled network mode: ${exhaustiveCheck}`);
     }
   }
-}
-
-function gatewayRules(hostname: string | undefined): NetworkPolicyRule[] {
-  return hostname ? [allow(hostname)] : [];
 }
 
 export function getProviderNetworkPolicyRules(

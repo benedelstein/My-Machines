@@ -1,24 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ClientState, Logger } from "@repo/shared";
+import { createTestLogger } from "./test-logger";
+import type { ClientState } from "@repo/shared";
 import { GitProxyService } from "../../src/shared/integrations/git/git-proxy.service";
 import type { GitProxyTokenProvider } from "../../src/shared/integrations/git/git.providers";
 import { SessionGitProxyService } from "../../src/modules/session-agent/services/session-git-proxy.service";
 import type { SecretRepository } from "../../src/modules/session-agent/repositories/secret.repository";
 import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
 import type { Env } from "../../src/shared/types";
-
-function createLogger(): Logger {
-  return {
-    log() {},
-    debug() {},
-    info() {},
-    warn() {},
-    error() {},
-    scope() {
-      return this;
-    },
-  };
-}
 
 function createService(params: {
   tokenProvider?: GitProxyTokenProvider;
@@ -42,7 +30,7 @@ function createService(params: {
       getSessionId: () => params.sessionId ?? "abcd-session",
       getPushedBranch: () => params.pushedBranch ?? null,
     },
-    logger: createLogger(),
+    logger: createTestLogger(),
   });
 }
 
@@ -174,7 +162,7 @@ describe("SessionGitProxyService", () => {
     });
     const updatePushedBranch = vi.fn();
     const service = new SessionGitProxyService({
-      logger: createLogger(),
+      logger: createTestLogger(),
       env: {} as Env,
       secretRepository,
       getServerState: () => serverState,
@@ -234,7 +222,7 @@ describe("SessionGitProxyService connector cutover", () => {
       webhook_token: "gateway-session-token",
     };
     const service = new SessionGitProxyService({
-      logger: createLogger(),
+      logger: createTestLogger(),
       env: {} as Env,
       secretRepository: {
         get: vi.fn((key: string) => secrets[key] ?? null),

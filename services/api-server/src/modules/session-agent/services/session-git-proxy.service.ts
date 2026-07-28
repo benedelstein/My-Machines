@@ -33,8 +33,8 @@ export interface SessionGitProxyServiceDeps {
 
 /**
  * Session-scoped adapter around the agnostic `GitProxyService`.
- * Owns the git-proxy shared secret (persisted via `SecretRepository`),
- * and access-control/pushed-branch state mutation. Installation tokens stay
+ * Resolves the expected request bearer from `SecretRepository` and owns
+ * access-control/pushed-branch state mutation. Installation tokens stay
  * in the GitHub module's D1 token cache.
  */
 export class SessionGitProxyService implements
@@ -53,8 +53,6 @@ export class SessionGitProxyService implements
   private readonly enforceSessionAccessBlocked: () => Promise<void>;
   private readonly githubTokenProvider: SessionGitProxyServiceDeps["githubTokenProvider"];
   private readonly gitProxyService: GitProxyService;
-  /** Shared secret for authenticating sprite → worker git-proxy requests. */
-  private gitProxySecret: string | null;
 
   constructor(deps: SessionGitProxyServiceDeps) {
     this.logger = deps.logger.scope("session-git-proxy");
@@ -67,7 +65,6 @@ export class SessionGitProxyService implements
     this.assertSessionRepoAccess = deps.assertSessionRepoAccess;
     this.enforceSessionAccessBlocked = deps.enforceSessionAccessBlocked;
     this.githubTokenProvider = deps.githubTokenProvider;
-    this.gitProxySecret = this.secretRepository.get("git_proxy_secret");
     this.gitProxyService = new GitProxyService({
       tokenProvider: this,
       secretProvider: this,
@@ -107,7 +104,7 @@ export class SessionGitProxyService implements
     if (this.getServerState().gitConfiguredViaConnector) {
       return this.secretRepository.get("webhook_token");
     }
-    return this.gitProxySecret;
+    return this.secretRepository.get("git_proxy_secret");
   }
 
   getAllowedRepoFullName(): string | null {

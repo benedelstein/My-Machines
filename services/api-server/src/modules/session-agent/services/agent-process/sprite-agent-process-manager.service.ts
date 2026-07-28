@@ -775,9 +775,8 @@ export class SpriteAgentProcessManager {
   } {
     const gatewayBase = this.getConnectorGatewayBase();
     if (gatewayBase) {
-      // Minting stored the token with the connector; ensure it exists so the
-      // DO can validate the gateway-injected credential.
-      this.ensureWebhookToken();
+      // The token already exists: minting created it and handed it to the
+      // connector, and the DO reads it from the repository at webhook time.
       return { url: `${gatewayBase}/internal/session/${sessionId}`, token: null };
     }
     this.logger.warn("Session has no connector; using sprite-held webhook token", {

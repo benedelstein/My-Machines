@@ -6,7 +6,8 @@ import type {
   SpritesRestError,
 } from "@repo/sprites-client";
 import { describe, expect, it, vi } from "vitest";
-import type { Logger, SessionEnvironmentSnapshot } from "@repo/shared";
+import { createTestLogger } from "./test-logger";
+import type { SessionEnvironmentSnapshot } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
 import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
 import type {
@@ -17,19 +18,6 @@ import {
   buildSessionSpriteLabels,
   SessionConnectorService,
 } from "../../src/modules/session-agent/services/session-connector.service";
-
-function createLogger(): Logger {
-  return {
-    log() {},
-    debug() {},
-    info() {},
-    warn() {},
-    error() {},
-    scope() {
-      return this;
-    },
-  };
-}
 
 /** Echoes created connectors back through get/list so mint verification passes. */
 class FakeSpritesClient implements SpriteConnectorsClient {
@@ -97,6 +85,7 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
     startupScriptCompleted: false,
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
+    spriteLabelsApplied: false,
     gitConfiguredViaConnector: false,
     ...overrides,
   };
@@ -162,8 +151,8 @@ function createService(args: {
   const serverState = args.serverState ?? createServerState();
   const spritesClient = new FakeSpritesClient();
   const repository = createFakeRepository();
-  const updateServerState = vi.fn((partial: Partial<ServerState>) => {
-    Object.assign(serverState, partial);
+  const setSessionConnectorId = vi.fn((gatewayConnectionId: string) => {
+    serverState.sessionConnectorId = gatewayConnectionId;
   });
   const updateSpriteLabels = vi.fn(async (_name: string, labels: string[]) => labels);
   const spriteLifecycleClient = {
@@ -176,7 +165,7 @@ function createService(args: {
   const ensureWebhookToken = vi.fn(() => "webhook-token-value");
 
   const service = new SessionConnectorService({
-    logger: createLogger(),
+    logger: createTestLogger(),
     env: {
       SPRITES_API_KEY: "sprites-key",
       SPRITES_API_URL: "https://api.sprites.test",
@@ -185,7 +174,7 @@ function createService(args: {
     spriteLifecycleClient: spriteLifecycleClient as never,
     repository: repository as unknown as SessionConnectorsRepository,
     getServerState: () => serverState,
-    updateServerState,
+    setSessionConnectorId,
     getEnvironmentSnapshot: () =>
       args.environmentSnapshot ?? createEnvironmentSnapshot(),
     ensureWebhookToken,
@@ -198,7 +187,7 @@ function createService(args: {
     spritesClient,
     repository,
     spriteLifecycleClient,
-    updateServerState,
+    setSessionConnectorId,
     ensureWebhookToken,
   };
 }
@@ -242,6 +231,18 @@ describe("SessionConnectorService.ensureMinted", () => {
       gatewayConnectionId: "gateway-conn-1",
       status: "active",
     });
+  });
+
+  it("skips the label read-back when creation already applied the labels", async () => {
+    const { service, spriteLifecycleClient, spritesClient } = createService({
+      serverState: createServerState({ spriteLabelsApplied: true }),
+    });
+
+    await service.ensureMinted("sprite-1");
+
+    expect(spriteLifecycleClient.getSprite).not.toHaveBeenCalled();
+    expect(spriteLifecycleClient.updateSpriteLabels).not.toHaveBeenCalled();
+    expect(spritesClient.createdRequests).toHaveLength(1);
   });
 
   it("repairs missing sprite labels before minting", async () => {

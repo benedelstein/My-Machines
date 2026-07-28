@@ -5,7 +5,7 @@ import {
   getDefaultNetworkAllowlistDomains,
   getProviderNetworkPolicyRules,
 } from "../src/network-policy";
-import { buildConnectorGatewayUrl } from "../src/connector-gateway";
+import { buildConnectorGatewayUrl } from "../src/sprite-connectors.client";
 
 describe("Sprite network policies", () => {
   it("builds bootstrap policy from default policy plus worker host", () => {

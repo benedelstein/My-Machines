@@ -112,7 +112,14 @@ function parsePolicySummary(json: string): AccessPolicy | null {
 }
 
 function parseStatus(status: string): SessionConnectorStatus {
-  // Unknown statuses degrade to pending_revocation so a bad row is treated
-  // as needing reconciliation, never as an active connector.
-  return status === "active" ? "active" : "pending_revocation";
+  switch (status) {
+    case "active":
+      return "active";
+    case "pending_revocation":
+      return "pending_revocation";
+    default:
+      // Unknown statuses degrade to pending_revocation so a bad row is
+      // treated as needing reconciliation, never as an active connector.
+      return "pending_revocation";
+  }
 }

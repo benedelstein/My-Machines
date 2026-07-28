@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as SpritesClientModule from "@repo/sprites-client";
-import type { AgentSettings, ClientState, Logger, SessionSetupRun } from "@repo/shared";
+import type { AgentSettings, ClientState, SessionSetupRun } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
 import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
 
@@ -49,6 +49,7 @@ vi.mock("../../src/modules/session-agent/services/agent-attachment.service", () 
 }));
 
 import { encodeAgentInput, encodeAgentOutput } from "@repo/shared";
+import { createTestLogger } from "./test-logger";
 import { SpriteAgentProcessManager } from "../../src/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
 
 // The barrel is mocked above with its own SpritesError class; importActual
@@ -56,19 +57,6 @@ import { SpriteAgentProcessManager } from "../../src/modules/session-agent/servi
 const { SpritesError } = await vi.importActual<typeof SpritesClientModule>(
   "@repo/sprites-client",
 );
-
-function createLogger(warnSpy: ReturnType<typeof vi.fn> = vi.fn()): Logger {
-  return {
-    log() {},
-    debug() {},
-    info() {},
-    warn: warnSpy,
-    error() {},
-    scope() {
-      return this;
-    },
-  };
-}
 
 const agentSettings: AgentSettings = {
   provider: "openai-codex",
@@ -159,7 +147,7 @@ function createManager(
       WORKER_URL: "https://worker.test",
       ...envOverrides,
     } as Env,
-    logger: createLogger(loggerWarn),
+    logger: createTestLogger({ warn: loggerWarn }),
     secretRepository: {
       get: vi.fn(() => "webhook-token"),
       set: vi.fn(),

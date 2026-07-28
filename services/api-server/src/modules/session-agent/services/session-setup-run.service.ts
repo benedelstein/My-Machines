@@ -153,13 +153,9 @@ export class SessionSetupRunService {
   }
 
   /**
-   * Recovers setup run state from saved state when the DO restarts.
-   *
-   * Only an in-progress run is repaired. A run that already reached a terminal
-   * status is never reopened, so a session provisioned before
-   * `session_connector` existed does not gain the task retroactively and keeps
-   * its original webhook and git credential paths for the rest of its life.
-   * Enabling the connector flags therefore changes new sessions only.
+   * Recovers setup run state from saved state when the DO restarts. Only a
+   * running run is repaired; terminal runs are never reopened, so tasks added
+   * after a session finished provisioning are not applied retroactively.
    */
   repairOnStart(): void {
     const setupRun = this.getClientState().sessionSetupRun;
@@ -174,8 +170,7 @@ export class SessionSetupRunService {
 
     const serverState = this.getServerState();
     const now = new Date().toISOString();
-    let repairableRun = ensureNetworkPolicyTaskPresent(currentRun, serverState, now);
-    repairableRun = ensureSessionConnectorTaskPresent(repairableRun, serverState, now);
+    const repairableRun = ensureBackfilledTasksPresent(currentRun, serverState, now);
     const repairedTasks = repairableRun.tasks.map((task): SessionSetupTask => {
       if (isTerminalSetupTask(task)) { return task; }
       switch (task.id) {
@@ -322,6 +317,16 @@ function updateSetupTask(
       throw new Error(`Unhandled setup task: ${JSON.stringify(exhaustiveCheck)}`);
     }
   }
+}
+
+/** Inserts setup tasks added after this run was built, in their run positions. */
+function ensureBackfilledTasksPresent(
+  setupRun: SessionSetupRun,
+  serverState: ServerState,
+  now: string,
+): SessionSetupRun {
+  const withNetworkPolicy = ensureNetworkPolicyTaskPresent(setupRun, serverState, now);
+  return ensureSessionConnectorTaskPresent(withNetworkPolicy, serverState, now);
 }
 
 function ensureNetworkPolicyTaskPresent(
