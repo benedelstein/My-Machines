@@ -1,17 +1,28 @@
 /**
- * Live probe: does the Sprites connector gateway pass git smart-HTTP through?
+ * Live probe: which request `Accept` headers does the Sprites connector
+ * gateway forward?
  *
- * Verified 2026-07-28: the gateway content-negotiates on the request Accept
- * header and returns 406 for git's exact-match media types (e.g.
- * "application/x-git-receive-pack-result"). A single Accept header listing the
- * git type plus a wildcard passes, but git sends the bare type and two
- * separate Accept headers
- * are not merged, so git cannot work around it client-side. Response
- * content-types pass through untouched. Re-run this after a Fly-side fix;
- * every probe should print STATUS:200 before moving post-clone git remotes
- * onto the connector gateway.
+ * Verified 2026-07-28. The gateway forwards ONLY when the Accept header list
+ * contains the literal token `application/json` or `*` + `/` + `*`, or when
+ * Accept is absent. Everything else gets `406 Not Acceptable` before the
+ * request reaches the upstream:
  *
- * Usage: SPRITES_API_KEY=... npx tsx scripts/test-gateway-git-headers.ts
+ *   PASS  (absent) | application/json | wildcard | "application/json, <x>"
+ *         | "<x>, wildcard" (incl. q-weighted)
+ *   406   text/event-stream | text/plain | text/html | text/(wildcard)
+ *         | application/octet-stream | application/vnd.api+json
+ *         | git smart-HTTP types (application/x-git-*)
+ *
+ * Note `text/(wildcard)` does NOT match `text/event-stream`, so this is a
+ * literal token allowlist, not real content negotiation. Consequences:
+ * git (hardcodes x-git-* types) cannot use the gateway; SSE clients that send
+ * a bare `text/event-stream` cannot either. Response content-types, query
+ * strings, deep wildcard paths, and custom user agents all pass through fine.
+ *
+ * Re-run after any Fly-side fix; every probe should print STATUS:200 before
+ * routing git or a bare-SSE client through the gateway.
+ *
+ * Usage: SPRITES_API_KEY=... npx tsx scripts/test-gateway-accept-headers.ts
  */
 import { SpritesClient } from "@fly/sprites";
 import {
@@ -121,6 +132,33 @@ async function main(): Promise<void> {
     await run(
       "K: git-typed response passes back",
       `curl -sS -o /tmp/k.out -w "STATUS:%{http_code} TYPE:%{content_type}\\n" "${gateway}/response-headers?Content-Type=application/x-git-upload-pack-result"`,
+    );
+    await run(
+      "L: Accept text/event-stream (SSE, provider inference)",
+      `curl -sS -o /dev/null -w "STATUS:%{http_code}\\n" -H "Accept: text/event-stream" "${gateway}/anything/sse"`,
+    );
+    await run(
+      "M: Accept application/json",
+      `curl -sS -o /dev/null -w "STATUS:%{http_code}\\n" -X POST -H "Content-Type: application/json" -H "Accept: application/json" --data "{}" "${gateway}/anything/json"`,
+    );
+    for (const [tag, accept] of [
+      ["text/plain", "text/plain"],
+      ["text/html", "text/html"],
+      ["octet-stream", "application/octet-stream"],
+      ["json+sse", "application/json, text/event-stream"],
+      ["sse then wildcard", "text/event-stream, */*"],
+      ["sse q-weighted", "text/event-stream;q=1.0, */*;q=0.1"],
+      ["json subtype+suffix", "application/vnd.api+json"],
+      ["text wildcard", "text/*"],
+    ] as const) {
+      await run(
+        `N[${tag}]`,
+        `curl -sS -o /dev/null -w "STATUS:%{http_code}\\n" -H "Accept: ${accept}" "${gateway}/anything/n"`,
+      );
+    }
+    await run(
+      "O: no Accept header at all",
+      `curl -sS -o /dev/null -w "STATUS:%{http_code}\\n" -H "Accept:" "${gateway}/anything/o"`,
     );
     await run(
       "I: GET git Accept plus */*",

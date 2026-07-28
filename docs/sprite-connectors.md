@@ -59,19 +59,33 @@ The gateway base a Sprite calls is
 `buildConnectorGatewayUrl`. Restricted network modes add that hostname through
 `connectorGatewayHostname`; `open` mode is unchanged.
 
-## Git is not on the gateway yet
+## Gateway Accept-header limitation
 
-The Sprites gateway content-negotiates on the request `Accept` header and
-returns `406 Not Acceptable` for git smart-HTTP's exact-match media types
-(verified by live probe, 2026-07-28 — see
-`test:live:gateway-git-headers`). Git hardcodes those headers and the gateway
-does not merge multiple `Accept` headers, so there is no client-side
-workaround. Until Fly passes `Accept` through, post-clone git remotes stay on
-the legacy worker-proxy path with the Sprite-held `git_proxy_secret` bearer,
-and the git proxy selects the expected bearer per session from the persisted
-`gitConfiguredViaConnector` checkpoint (false for every session today). The
-connector's `allowedEndpoints` already pin the session's git-proxy path, so
-the cutover is a `cloneRepo` change once the gateway is fixed.
+The gateway only forwards a request when its `Accept` header contains the
+literal token `application/json` or the wildcard, or when `Accept` is absent.
+Anything else returns `406 Not Acceptable` before reaching the upstream —
+including `text/event-stream`, `text/plain`, `application/octet-stream`, and
+git smart-HTTP's `application/x-git-*` types. A `text/*` wildcard does not
+match `text/event-stream`, so this is a literal token allowlist rather than
+real content negotiation. Verified by live probe 2026-07-28:
+`pnpm --filter @repo/api-server test:live:gateway-accept`.
+
+What this means per flow:
+
+- **Webhooks: unaffected.** The vm-agent's webhook client sets no `Accept`, so
+  `fetch` sends the wildcard and the gateway forwards.
+- **Git: blocked.** Git hardcodes `application/x-git-*` accept types and the
+  gateway does not merge multiple `Accept` headers, so there is no
+  client-side workaround. Post-clone remotes stay on the legacy worker-proxy
+  path with the Sprite-held `git_proxy_secret` bearer; the git proxy picks the
+  expected bearer per session from the persisted `gitConfiguredViaConnector`
+  checkpoint (false for every session today). The connector already pins the
+  session's git-proxy path, so the cutover is a `cloneRepo` change once the
+  gateway is fixed.
+- **Provider inference (S4): verify before building.** A client that sends a
+  bare `Accept: text/event-stream` for streaming would 406; one that sends
+  `application/json` (alone or alongside SSE) works. Check what the Claude and
+  Codex CLIs actually send before routing inference through the gateway.
 
 ## Legacy sessions
 

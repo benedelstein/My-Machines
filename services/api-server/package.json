@@ -16,7 +16,7 @@
     "test:coverage": "vitest run --coverage",
     "test:live:sprite": "tsx scripts/test-sprite.ts",
     "test:live:sprite-connector": "tsx scripts/test-sprite-connector.ts",
-    "test:live:gateway-git-headers": "tsx scripts/test-gateway-git-headers.ts",
+    "test:live:gateway-accept": "tsx scripts/test-gateway-accept-headers.ts",
     "test:fcm": "tsx scripts/test-fcm.ts"
   },
   "dependencies": {
