@@ -13,6 +13,7 @@
 - [x] 0.10b Codex: Codex 0.144.3 completed `gpt-5.4` inference from a fresh Sprite through `webhooks.bze.llc` using a custom Responses provider and short-lived Cloude bearer. A native reqwest proxy validated the bearer, injected D1 OAuth + `ChatGPT-Account-ID`, stripped tunnel/proxy headers, and streamed the response. A manual follow-up launched the normal interactive TUI without `auth.json`. The same fresh request through local workerd received a ChatGPT-edge HTML `403`, while Node's ordinary native `fetch` succeeded. A same-machine transport probe isolated unavoidable `CF-Worker` metadata and a different TLS fingerprint as concrete differences, but the exact WAF rule is not observable (`test:live:codex-oauth-control-plane-proxy`, 2026-07-23).
 - [x] 0.11 REST connection endpoints take the **gateway connection id**; delete is `DELETE /v1/oauth/connections/{id}` (proven by the passing disposable live test, 2026-07-24).
 - [x] 0.12 End-to-end disposable REST mint: create returned `201` with label + `/headers` policy; a matching labelled Sprite received the injected credential; `/get` returned `403`; connector and Sprite cleanup both succeeded (2026-07-26).
+- [x] 0.13 The gateway content-negotiates on the request `Accept` header and returns `406` for git smart-HTTP's exact-match media types; `Accept: <git-type>, */*` in one header passes but git sends the bare type and two separate `Accept` headers are not merged, so there is no client-side workaround; response content-types pass through; query strings, deep wildcard paths, and git's user agent all forward (live probe `test:live:gateway-git-headers`, 2026-07-28). Post-clone git through the gateway is blocked on a Fly-side fix.
 
 ## 1. Connector provisioning (`mintConnector`) — cross-cutting
 
@@ -47,9 +48,9 @@
 
 ## S2. Git cutover
 
-- [x] S2.1 Route post-clone fetch/push through the internal connector; Worker git-proxy accepts ONLY the gateway-injected credential, not a Sprite-held bearer. Preserve the existing per-request repository-access check: connector/session identity authenticates the caller but does not authorize repository access. Once `gitConfiguredViaConnector` is set, `getExpectedBearerToken` returns only the session token and the legacy secret is rejected.
+- [ ] S2.1 Route post-clone fetch/push through the internal connector; Worker git-proxy accepts ONLY the gateway-injected credential, not a Sprite-held bearer. Preserve the existing per-request repository-access check. BLOCKED on 0.13 (gateway 406s git Accept headers). The Worker-side mechanism is landed and tested — `getExpectedBearerToken` returns only the session token once `gitConfiguredViaConnector` is set — but `cloneRepo` keeps remotes on the legacy worker-proxy bearer until the gateway passes Accept through.
 - [x] S2.2 Preserve Worker-custodied installation token, `cloude/*` branch validation + lock, repo allowlist, `locked` policy. Unchanged; only the accepted bearer and the remote URL differ.
-- [x] S2.3 Keep initial clone on the existing direct GitHub path with its short-lived contents-read-only token; retire `gitProxySecret` for later fetch/push behind a flag and measure post-clone read latency. Clone path untouched; `gitProxySecret` is no longer generated for new sessions (cutover unconditional) and its validation survives only for pre-connector sessions. Latency measurement is still pending; a public-repo direct-fetch fast path is a possible follow-up if gateway fetch proves slow.
+- [ ] S2.3 Keep initial clone on the existing direct GitHub path with its short-lived contents-read-only token; retire `gitProxySecret` for later fetch/push and measure post-clone read latency. BLOCKED on 0.13 with S2.1; `gitProxySecret` generation was restored for new sessions until the gateway fix. A public-repo direct-fetch fast path remains a possible follow-up if gateway fetch proves slow.
 
 ## S3. Transparent proxy data plane
 

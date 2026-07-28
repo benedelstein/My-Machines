@@ -235,6 +235,7 @@ public extension SessionClientState {
         /// A setup step reported by the session runtime.
         public enum TaskID: RawRepresentable, Codable, Equatable, Hashable, Sendable {
             case cloudContainer
+            case sessionConnector
             case repository
             case setupScript
             case networkPolicy
@@ -244,6 +245,7 @@ public extension SessionClientState {
             public init(rawValue: String) {
                 switch rawValue {
                 case "cloud_container": self = .cloudContainer
+                case "session_connector": self = .sessionConnector
                 case "repository": self = .repository
                 case "setup_script": self = .setupScript
                 case "network_policy": self = .networkPolicy
@@ -255,6 +257,7 @@ public extension SessionClientState {
             public var rawValue: String {
                 switch self {
                 case .cloudContainer: "cloud_container"
+                case .sessionConnector: "session_connector"
                 case .repository: "repository"
                 case .setupScript: "setup_script"
                 case .networkPolicy: "network_policy"

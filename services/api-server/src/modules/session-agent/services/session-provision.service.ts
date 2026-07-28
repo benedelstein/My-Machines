@@ -72,8 +72,8 @@ export interface SessionProvisionServiceDeps {
   updateServerState: (partial: Partial<ServerState>) => void;
   updatePartialState: (partial: ProvisionClientStateUpdate) => void;
   synthesizeStatus: () => SessionStatus;
+  ensureGitProxySecret: () => string;
   ensureSessionConnector: (spriteName: string) => Promise<void>;
-  getConnectorGatewayBase: () => string | null;
   githubTokenProvider: {
     getReadOnlyTokenForRepo(
       repoFullName: string,
@@ -102,8 +102,8 @@ export class SessionProvisionService {
   private readonly updateServerState: SessionProvisionServiceDeps["updateServerState"];
   private readonly updatePartialState: SessionProvisionServiceDeps["updatePartialState"];
   private readonly synthesizeStatus: () => SessionStatus;
+  private readonly ensureGitProxySecret: () => string;
   private readonly ensureSessionConnector: SessionProvisionServiceDeps["ensureSessionConnector"];
-  private readonly getConnectorGatewayBase: SessionProvisionServiceDeps["getConnectorGatewayBase"];
   private readonly githubTokenProvider: SessionProvisionServiceDeps["githubTokenProvider"];
   private readonly setupReporter: SessionProvisionServiceDeps["setupReporter"];
   private readonly setupOutputCollector: SessionProvisionServiceDeps["setupOutputCollector"];
@@ -123,8 +123,8 @@ export class SessionProvisionService {
     this.updateServerState = deps.updateServerState;
     this.updatePartialState = deps.updatePartialState;
     this.synthesizeStatus = deps.synthesizeStatus;
+    this.ensureGitProxySecret = deps.ensureGitProxySecret;
     this.ensureSessionConnector = deps.ensureSessionConnector;
-    this.getConnectorGatewayBase = deps.getConnectorGatewayBase;
     this.githubTokenProvider = deps.githubTokenProvider;
     this.setupReporter = deps.setupReporter;
     this.setupOutputCollector = deps.setupOutputCollector;
@@ -441,15 +441,13 @@ export class SessionProvisionService {
       createLogger("sprite-websocket.session.ts"),
     );
 
-    // Post-clone fetch and push go through the session connector gateway: the
-    // gateway authenticates the Sprite and injects the session credential, so
-    // no bearer is written into git config. The session_connector task runs
-    // before this one, so a missing gateway base is an invariant violation.
-    const connectorGatewayBase = this.getConnectorGatewayBase();
-    if (!connectorGatewayBase) {
-      throw new Error("Session connector gateway base is missing");
-    }
-    const proxyBaseUrl = `${connectorGatewayBase}/git-proxy/${sessionId}`;
+    // Post-clone git stays on the legacy worker-proxy bearer path: the Sprites
+    // gateway rejects git smart-HTTP with 406 because it content-negotiates on
+    // git's exact-match Accept headers, and git cannot override them (verified
+    // by live probe, 2026-07-28; multiple Accept headers are not merged).
+    // Route these remotes through the session connector gateway once Fly
+    // passes Accept through.
+    const proxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
     const cloneUrl = `${proxyBaseUrl}/github.com/${repoFullName}.git`;
     const githubRemoteUrl = `https://github.com/${repoFullName}.git`;
 
@@ -522,23 +520,28 @@ export class SessionProvisionService {
       this.updatePartialState({ baseBranch: actualBaseBranch });
     }
 
-    // The Sprite holds no git bearer; scrub the clone token header and any
-    // legacy worker-proxy auth header left by a pre-connector configuration.
-    const legacyProxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
+    const gitProxySecret = this.ensureGitProxySecret();
+    const fetchUrl =
+      this.getEnvironmentSnapshot().network.mode === "locked"
+        ? cloneUrl
+        : githubRemoteUrl;
+
+    // Configure remote URLs, git identity, and proxy auth header
     await sprite.execWs(
       dedent`
       set -e
       cd ${WORKSPACE_DIR}
-      git remote set-url origin ${cloneUrl}
+      git remote set-url origin ${fetchUrl}
       git remote set-url --push origin ${cloneUrl}
       git config user.email "agent@mymachines.dev"
       git config user.name "My Machines"
       git config --unset-all http.extraHeader || true
-      git config --unset-all "http.${legacyProxyBaseUrl}/.extraHeader" || true
+      git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
+      git config --add "http.${proxyBaseUrl}/.extraHeader" "Authorization: Bearer ${gitProxySecret}"
     `,
       {},
     );
-    this.updateServerState({ gitConfiguredViaConnector: true });
+    this.updateServerState({ gitConfiguredViaConnector: false });
   }
 
   private async applyFinalNetworkPolicy(spriteName: string): Promise<void> {

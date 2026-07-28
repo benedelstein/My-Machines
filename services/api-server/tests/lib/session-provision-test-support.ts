@@ -165,16 +165,11 @@ export function createService(
       return { name: "sprite-1", status: "running" };
     }),
   };
+  const ensureGitProxySecret = vi.fn(() => "git-proxy-secret");
   const ensureSessionConnector = vi.fn(async () => {
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
   });
-  const getConnectorGatewayBase = vi.fn(() =>
-    serverState.sessionConnectorId
-      ? `https://api.sprites.test/v1/gateway/custom_api/${serverState.sessionConnectorId}`
-      : null,
-  );
-
   const service = new SessionProvisionService({
     logger: createTestLogger(),
     env: {
@@ -190,8 +185,8 @@ export function createService(
     updateServerState,
     updatePartialState,
     synthesizeStatus: () => "preparing",
+    ensureGitProxySecret,
     ensureSessionConnector,
-    getConnectorGatewayBase,
     githubTokenProvider: {
       getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
     },
@@ -203,8 +198,8 @@ export function createService(
     service,
     updateServerState,
     spriteLifecycleClient,
+    ensureGitProxySecret,
     ensureSessionConnector,
-    getConnectorGatewayBase,
   };
 }
 

@@ -39,8 +39,9 @@ Each session mints one internal connector during provisioning, as the blocking
 - The Sprite is created with `session:<sessionId>` labels, plus
   `env:<environmentId>` when the session came from an environment. Labels are
   platform metadata that in-VM root cannot change, so they are the connector's
-  access-policy scope. `SessionConnectorService` re-reads the Sprite and repairs
-  missing labels before minting, and fails closed if they do not persist.
+  access-policy scope. For sprites created before label support,
+  `SessionConnectorService` re-reads the Sprite and repairs missing labels
+  before minting; Fly enforces the label policy at the gateway.
 - The connector's base URL is `WORKER_URL`, its `test_url` is `WORKER_URL/health`
   (same origin, unauthenticated), and its injected credential is the Durable
   Object's existing `webhook_token`. The token is never handed to the Sprite.
@@ -58,26 +59,34 @@ The gateway base a Sprite calls is
 `buildConnectorGatewayUrl`. Restricted network modes add that hostname through
 `connectorGatewayHostname`; `open` mode is unchanged.
 
+## Git is not on the gateway yet
+
+The Sprites gateway content-negotiates on the request `Accept` header and
+returns `406 Not Acceptable` for git smart-HTTP's exact-match media types
+(verified by live probe, 2026-07-28 — see
+`test:live:gateway-git-headers`). Git hardcodes those headers and the gateway
+does not merge multiple `Accept` headers, so there is no client-side
+workaround. Until Fly passes `Accept` through, post-clone git remotes stay on
+the legacy worker-proxy path with the Sprite-held `git_proxy_secret` bearer,
+and the git proxy selects the expected bearer per session from the persisted
+`gitConfiguredViaConnector` checkpoint (false for every session today). The
+connector's `allowedEndpoints` already pin the session's git-proxy path, so
+the cutover is a `cloneRepo` change once the gateway is fixed.
+
 ## Legacy sessions
 
 Connector provisioning is unconditional for new sessions. Sessions provisioned
 before connectors existed keep their original credential paths for the rest of
 their life: a setup run that already finished is never reopened, so those
-sessions never mint a connector.
-
-- Their webhook delivery stays Sprite-held (`DO_WEBHOOK_TOKEN`), logged as a
-  warning (`"Session has no connector; using sprite-held webhook token"`) on
-  every process spawn so the remaining legacy population is visible. It
-  deliberately does not fail closed: the alternative is a session that cannot
-  report agent output at all.
-- Their git requests are authenticated by the legacy `git_proxy_secret`,
-  selected per session from the persisted `gitConfiguredViaConnector`
-  checkpoint. New sessions' git proxy requests accept only the
-  gateway-injected session token.
+sessions never mint a connector. Their webhook delivery stays Sprite-held
+(`DO_WEBHOOK_TOKEN`), logged as a warning (`"Session has no connector; using
+sprite-held webhook token"`) on every process spawn so the remaining legacy
+population is visible. It deliberately does not fail closed: the alternative is
+a session that cannot report agent output at all.
 
 The initial clone always stays on the direct GitHub path with its short-lived
-read-only token. Removing the legacy webhook and git validation paths is a
-follow-up, safe once no pre-connector sessions remain.
+read-only token. Removing the legacy webhook validation path is a follow-up,
+safe once no pre-connector sessions remain.
 
 ## Live test
 

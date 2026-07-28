@@ -64,34 +64,44 @@ describe("SessionProvisionService session connector", () => {
     expect(ensureSessionConnector).toHaveBeenCalledWith("sprite-1");
   });
 
-  it("configures git remotes through the connector gateway", async () => {
+  it("keeps post-clone git on the legacy worker proxy while the gateway rejects git", async () => {
+    // The Sprites gateway 406s git smart-HTTP Accept headers (2026-07-28), so
+    // git remotes stay on the worker-proxy bearer path until Fly fixes it.
     const serverState = createServerState();
-    const { service } = createService(
+    const { service, ensureGitProxySecret } = createService(
       serverState,
       createClientState(),
     );
 
     await service.ensureProvisioned();
 
-    const gatewayRemote =
-      "https://api.sprites.test/v1/gateway/custom_api/conn-1/git-proxy/session-1/github.com/ben/repo.git";
     const remoteConfigCommand = getRemoteConfigCommand();
-    expect(remoteConfigCommand).toContain(`git remote set-url origin ${gatewayRemote}`);
-    expect(remoteConfigCommand).toContain(`git remote set-url --push origin ${gatewayRemote}`);
-    expect(remoteConfigCommand).not.toContain("extraHeader\" \"Authorization");
-    expect(serverState.gitConfiguredViaConnector).toBe(true);
+    expect(remoteConfigCommand).toContain(
+      "git remote set-url origin https://github.com/ben/repo.git",
+    );
+    expect(remoteConfigCommand).toContain(
+      "git remote set-url --push origin https://worker.test/git-proxy/session-1/github.com/ben/repo.git",
+    );
+    expect(remoteConfigCommand).toContain(
+      "git config --add \"http.https://worker.test/git-proxy/session-1/.extraHeader\" \"Authorization: Bearer git-proxy-secret\"",
+    );
+    expect(ensureGitProxySecret).toHaveBeenCalled();
+    expect(serverState.gitConfiguredViaConnector).toBe(false);
   });
 
-  it("fails the repository task when no connector gateway exists", async () => {
+  it("uses the worker proxy for fetch in locked network mode", async () => {
     const serverState = createServerState();
-    const { service, ensureSessionConnector } = createService(
+    const { service } = createService(
       serverState,
-      createClientState({ includeSessionConnector: false }),
+      createClientState(),
+      {},
+      createEnvironmentSnapshot({ network: { mode: "locked" } }),
     );
-    ensureSessionConnector.mockImplementation(async () => {});
 
-    await expect(service.ensureProvisioned()).rejects.toThrow(
-      "Session connector gateway base is missing",
+    await service.ensureProvisioned();
+
+    expect(getRemoteConfigCommand()).toContain(
+      "git remote set-url origin https://worker.test/git-proxy/session-1/github.com/ben/repo.git",
     );
   });
 });

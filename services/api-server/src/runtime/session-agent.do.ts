@@ -323,9 +323,9 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       updateServerState: (partial) => this.updateServerState(partial),
       updatePartialState: (partial) => this.updatePartialState(partial),
       synthesizeStatus: () => this.synthesizeStatus(),
+      ensureGitProxySecret: () => this.gitProxyService.ensureGitProxySecret(),
       ensureSessionConnector: (spriteName) =>
         this.sessionConnectorService.ensureMinted(spriteName),
-      getConnectorGatewayBase: () => this.sessionConnectorService.getGatewayBase(),
       githubTokenProvider: this.githubAppService,
       setupReporter: {
         startTask: (taskId) => this.setupRunService.startTask(taskId),

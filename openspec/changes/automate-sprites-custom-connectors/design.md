@@ -584,6 +584,16 @@ sequenceDiagram
   Connector-->>Git: Stream response
 ```
 
+**Blocker — the gateway rejects git smart-HTTP (verified 2026-07-28).** The
+gateway content-negotiates on the request `Accept` header and returns `406`
+for git's exact-match media types. A single combined `Accept: <git-type>, */*`
+passes, but git hardcodes the bare type and the gateway does not merge
+multiple `Accept` headers, so no client-side workaround exists; response
+content-types pass through fine (`test:live:gateway-git-headers`). Post-clone
+remotes therefore stay on the legacy worker-proxy bearer path until Fly passes
+`Accept` through; the Worker-side identity-bound validation is landed and
+flips on per session via `gitConfiguredViaConnector`.
+
 **Future optimization — move the git data plane out of the Durable Object
 (recorded 2026-07-27).** As implemented, the git-proxy route hands the raw
 request to the session DO, so the entire packfile stream flows through the DO —

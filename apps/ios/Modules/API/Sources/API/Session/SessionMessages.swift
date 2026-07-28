@@ -154,6 +154,8 @@ private extension SessionClientState.SessionSetupTask {
         switch task {
         case .cloudContainer(let payload):
             self = Self(payload)
+        case .sessionConnector(let payload):
+            self = Self(payload)
         case .repository(let payload):
             self = Self(payload)
         case .setupScript(let payload):
@@ -175,6 +177,19 @@ private extension SessionClientState.SessionSetupTask {
     }
 
     init(_ task: CoreAPI.CloudContainerSetupTask) {
+        self.init(
+            id: .init(rawValue: task.id),
+            status: task.status.clientStateStatus,
+            startedAt: task.startedAt,
+            completedAt: task.completedAt,
+            error: task.error,
+            isBlocking: task.isBlocking,
+            canRetry: task.canRetry,
+            output: nil
+        )
+    }
+
+    init(_ task: CoreAPI.SessionConnectorSetupTask) {
         self.init(
             id: .init(rawValue: task.id),
             status: task.status.clientStateStatus,
