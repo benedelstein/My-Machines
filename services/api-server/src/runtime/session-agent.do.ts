@@ -324,8 +324,11 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       updatePartialState: (partial) => this.updatePartialState(partial),
       synthesizeStatus: () => this.synthesizeStatus(),
       ensureGitProxySecret: () => this.gitProxyService.ensureGitProxySecret(),
+      retireGitProxySecret: () => this.gitProxyService.retireGitProxySecret(),
       ensureSessionConnector: (spriteName) =>
         this.sessionConnectorService.ensureMinted(spriteName),
+      getSessionConnectorGatewayBase: () =>
+        this.sessionConnectorService.getGatewayBase(),
       githubTokenProvider: this.githubAppService,
       setupReporter: {
         startTask: (taskId) => this.setupRunService.startTask(taskId),
@@ -542,6 +545,12 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     return true;
   }
 
+  mintGitCapability(webhookToken: string): { token: string; expiresAt: number } | null {
+    if (!this.isWebhookTokenValid(webhookToken)) {
+      return null;
+    }
+    return this.gitProxyService.mintGitCapability();
+  }
   // HTTP/RPC Handlers
 
   /**
@@ -820,6 +829,11 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     } catch (error) {
       this.logger.warn("Failed to kill vm-agent on session delete", { error });
     }
+
+    // Revoke short-lived Git authority and connector mint authority before
+    // potentially slow external cleanup.
+    this.gitProxyService.revokeGitCapabilities();
+    this.secretRepository.delete("webhook_token");
 
     // Delete the session's internal connector. Never throws; a failed delete
     // leaves the D1 record in pending_revocation for reconciliation.

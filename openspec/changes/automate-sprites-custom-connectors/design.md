@@ -13,9 +13,13 @@ data/control planes) are chosen so every prong composes.
    Fly checks the connector's access policy against the calling Sprite before
    injecting the credential, so an extracted URL/secret cannot be replayed from a
    laptop, another org's Sprite, or after the session ends.
-2. **Protected secrets out of the sandbox.** Webhook, post-clone git, provider, and
-   environment credentials never exist inside the Sprite. Fly injects connector
-   credentials downstream of the Sprite. Refreshable provider OAuth remains in our
+2. **Protected upstream secrets out of the sandbox.** Webhook, GitHub installation,
+   provider, and environment credentials never exist inside the Sprite. Fly injects
+   connector credentials downstream of the Sprite. Until Fly accepts Git
+   smart-HTTP content types, the connector exchanges its identity-bound session
+   credential for a five-minute opaque Git-proxy capability. That narrow,
+   expiring capability is present in the Sprite process but is not an upstream
+   credential. Refreshable provider OAuth remains in our
    encrypted D1 record and is injected by the control plane after the per-session
    class-A connector authenticates the Sprite. The initial clone is the explicit
    exception: it uses the existing short-lived, contents-read-only GitHub
@@ -34,7 +38,7 @@ It can read anything in the Sprite, flush iptables, kill the proxy, read the loc
 CA key. The design must therefore make security independent of anything the Sprite
 controls:
 
-- **Prevented in every network mode:** off-Sprite replay of webhook, post-clone git,
+- **Prevented in every network mode:** off-Sprite replay of webhook, GitHub,
   provider, and environment credentials (prong 1, via Fly identity checks), and
   extraction of those protected secrets (prong 2). Directly reaching a connector's
   upstream does not inject the protected credential.
@@ -51,27 +55,30 @@ controls:
 - **Explicitly accepted for initial clone:** the root-capable Sprite can observe and
   replay the short-lived contents-read-only installation token while it remains
   valid. That token cannot push, and the Sprite receives the same repository
-  contents through the clone. Subsequent fetch and push move to the class-A
-  connector; the initial clone is not proxied because the extra hop would add
+  contents through the clone. The initial clone is not proxied because the extra hop would add
   material latency to the largest git transfer.
+- **Interim Git capability exception:** until Fly accepts Git smart-HTTP content
+  types, root can extract and replay a Git-proxy capability for at most five
+  minutes. It cannot reveal the GitHub token, cannot mint another capability
+  off-Sprite, and is revoked from DO SQLite at teardown.
 
 ### What already exists (build on it, don't reinvent)
 
 - `network-policy.ts` — `buildFinalNetworkPolicy` with a `locked` mode (Worker +
   provider + `deny-all`). The Sprites network policy is enforced outside the VM at
   **L3/L4** (verified: IP-direct `connect()` to non-allowlisted hosts is refused).
-- `GitProxyService` — Sprite calls `WORKER_URL/git-proxy/:sessionId/...` with a
-  per-session `gitProxySecret` written into git config as
-  `Authorization: Bearer <secret>`; the Worker mints the GitHub installation token
-  and injects it only when forwarding to GitHub. Push branch validation
+- `GitProxyService` — legacy Sprites call `WORKER_URL/git-proxy/:sessionId/...`
+  with a per-session `gitProxySecret`. New sessions use a connector-authenticated
+  mint endpoint and present a five-minute capability through Git's credential
+  helper; the Worker mints the GitHub installation token and injects it only when
+  forwarding to GitHub. Push branch validation
   (`cloude/*` + session suffix + branch lock) and repo allowlist are enforced.
 - `session-provision.service.ts` — `cloneRepo`, git remote setup, and a
   `plainEnvVars` path (the very name implies the missing _secret_ env path this
   change provides).
 
-The gap: webhook, post-clone git, and provider calls are authenticated by **bearer
-secrets in the Sprite**, which are replayable and extractable. No transparent proxy
-exists, and there is no path for environment-owned header credentials.
+The remaining gap is provider proxying and environment-owned header credentials;
+legacy sessions retain their original Sprite-held webhook and Git bearers.
 
 ## The unified model
 
@@ -79,16 +86,16 @@ Classify every outbound flow, and route each class exactly one way:
 
 | Class                             | Examples                             | Path                                                                                                            |
 | --------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| A. Credential → our control plane | webhook, git, Claude/Codex inference | Sprite → **internal per-session connector** → Worker; Worker injects or delegates the final upstream credential |
+| A. Credential → our control plane | webhook, Git mint, Claude/Codex inference | Sprite → **internal per-session connector** → Worker; Worker injects or delegates the final upstream credential |
 | B. Credential → external upstream | environment header secret            | Sprite → transparent proxy → **environment connector** → upstream (injects the real secret, Sprites-custodied)  |
 | C. Direct egress allowed by environment | npm, pypi, github raw, user allowlist | **direct** according to `open`/`default`/`custom`/`locked` (no connector credential)                         |
 | D. Direct egress denied by environment  | hosts outside a restricted mode's rules | **denied** by that mode's external network policy; this class is empty under `open`                          |
 
 A connector is the single primitive for A and B: **Fly verifies Sprite identity →
 injects a connector credential → forwards.** Provider inference is class A because
-it enters our control plane under the same session identity as webhook and git.
+it enters our control plane under the same session identity as webhook and Git minting.
 Every class-A client is explicitly configurable — the vm-agent's webhook base, the
-post-clone git remote, and the provider CLIs' custom base URLs are all written by
+Git capability mint, and the provider CLIs' custom base URLs are all written by
 our provisioning code — so **class A points directly at the connector gateway and
 never enters the transparent proxy**. The proxy solves exactly one problem:
 class-B upstreams are called by _unmodified, arbitrary_ tools that address the
@@ -107,7 +114,7 @@ opaque to us.
 ```mermaid
 flowchart LR
   subgraph sprite["Sprite VM — untrusted, root-capable"]
-    agent["VM agent and Git<br/>webhook base + git remote = gateway URL"]
+    agent["VM agent and Git<br/>webhook + Git mint = gateway<br/>Git data = Worker"]
     tools["Arbitrary unmodified tools"]
     providerCli["Claude or Codex CLI<br/>custom base URL + non-secret placeholder"]
     resolver["Local resolver<br/>class B host → reserved IP"]
@@ -139,7 +146,8 @@ flowchart LR
   end
 
   agent -.->|"all direct egress constrained by"| networkPolicy
-  agent -->|"webhook + post-clone Git, configured directly<br/>no protected credential"| sessionConnector
+  agent -->|"webhook + Git capability mint/refresh<br/>no protected upstream credential"| sessionConnector
+  agent -->|"Git smart-HTTP + short-lived capability"| worker
   providerCli -->|"class-A gateway + session/provider path<br/>placeholder only"| sessionConnector
   proxy -->|"environment request<br/>no protected credential"| environmentConnector
 
@@ -175,22 +183,22 @@ the secret:
 - **Lifetime:** one per session, minted at provisioning, deleted at teardown.
 - **Base URL:** our Worker (`WORKER_URL`), path-routed so one connector serves
   existing `/internal/session/:sessionId/{chunks|events}` and
-  `/git-proxy/:sessionId/...`, plus
+  `/internal/session/:sessionId/capabilities/git`, plus
   `/internal/session/:sessionId/inference/{claude|codex}/...` (the gateway forwards
   `base + <path after conn id>`). Every class-A client is configured **directly**:
   provider CLIs point their supported custom base URL at the inference prefix, the
-  vm-agent's webhook base is the gateway URL, and the post-clone git remote is
-  rewritten to the gateway URL (we already rewrite it today via `GitProxyService`).
+  vm-agent's webhook base is the gateway URL, and the Git helper calls the
+  capability-mint path. The Git data remote points directly at the Worker.
   Class A never enters the transparent proxy — direct config means real TLS to the
   gateway, no dependency on the local CA, resolver, or proxy process for our own
-  hottest paths (webhook output streaming, git).
+  hottest paths (webhook output streaming and Git capability minting).
 - **Injected secret:** the existing **per-session control-plane token**, generated and
   stored by the session Durable Object in its SQLite. The Worker route resolves the
   Durable Object from the existing `:sessionId` path, and that Durable Object
   validates the gateway-injected token. There is no generic `/webhook` route or D1
   secret-to-session lookup. The implementation may retain the current
   `webhook_token` storage name initially, but its authority is explicitly broadened
-  to the session's allowlisted webhook, git, and inference routes.
+  to the session's allowlisted webhook, Git capability-mint, and inference routes.
 - **Scope:** a **per-session label** (e.g. `session:<sessionId>`) set on the Sprite
   before the connector is minted; the connector policy is
   `sprite_labels: [session:<sessionId>]`. The API
@@ -199,7 +207,7 @@ the secret:
   binds this connector to this one Sprite.
 - **Paths:** endpoint allowlisting is mandatory for class A. Its base URL is the
   shared Cloude Worker, and the injected session token is valid only on the exact
-  webhook, git, provider-inference, and health paths for that session. An
+  webhook, Git capability-mint, provider-inference, and health paths for that session. An
   off-allowlist Worker path MUST be rejected by the gateway before token injection.
 
 ### Environment connectors (class B) — per environment and hostname
@@ -319,8 +327,9 @@ session membership.
 
 ## Data plane: the transparent proxy (with every complication)
 
-**Class B only.** All class-A flows are explicitly configured to the gateway and
-never touch this data plane, so the proxy, CA, resolver, and redirect rules are
+**Class B only.** Webhook, Git capability mint/refresh, and provider traffic are
+explicitly configured to the gateway; Git smart-HTTP data is configured directly
+to the Worker. None touches this data plane, so the proxy, CA, resolver, and redirect rules are
 provisioned only when the session's environment defines at least one header
 credential. Sessions without class-B credentials get no MITM data plane at all.
 All components non-secret. Generalizes the proven `sprite-egress-proxy.mjs` from a
@@ -462,7 +471,7 @@ Ordered:
    `session:<sessionId>`); verify the policy and store connector metadata in D1.
    The token remains in Durable Object SQLite and is never handed to the Sprite.
 4. Configure every class-A client **directly** against the session connector
-   gateway: the vm-agent's webhook base, the post-clone git remote, and compatible
+   gateway: the vm-agent's webhook base, the Git capability mint, and compatible
    provider CLIs (inference path + non-secret local placeholder). Then, **only if
    the environment defines header credentials**, install the class-B data plane:
    toolchain, local CA + trust, local resolver, transparent proxy + **routing
@@ -475,13 +484,14 @@ Ordered:
 7. Teardown: delete the internal connector and Durable Object session token; tear
    down the data plane and Sprite. Do not edit any class-B connector policy.
 
-## Cutovers (close the replayable paths)
+## Cutovers
 
-For each of webhook and git, the Worker endpoint must **stop accepting a
-Sprite-held bearer** and require the **gateway-injected** credential (which the
-Sprite never possesses). Leaving the raw `WORKER_URL/...` endpoint accepting a
-Sprite-carried token keeps the replay hole open. Do each behind a flag; keep the old
-path until the connector path is proven, then remove it.
+Webhook must stop accepting a Sprite-held bearer and require the
+gateway-injected credential. Git capability mint/refresh has the same
+identity-bound requirement, but Git smart-HTTP data calls the raw Worker URL with
+the five-minute capability. A stolen unexpired capability is replayable
+off-Sprite until expiry or immediate DO revocation; the connector prevents
+off-Sprite mint/refresh, not replay during the TTL.
 
 - **Webhook (priority):** preserve the existing
   `/internal/session/:sessionId/chunks` and
@@ -490,12 +500,11 @@ path until the connector path is proven, then remove it.
   route resolves the Durable Object from `:sessionId`, and that Durable Object
   validates the token from its SQLite. There is no generic `/webhook` route and no
   D1 token-to-session lookup.
-- **Git:** preserve Worker-custodied installation token, `cloude/*` branch
-  validation + lock, repo allowlist, `locked` policy; change only how the
-  Sprite→Worker call is authenticated for post-clone fetch and push
-  (identity-bound, not a Sprite-held bearer). Keep the initial clone on the existing
-  direct GitHub path with its short-lived contents-read-only token as the explicit
-  latency exception.
+- **Git:** preserve Worker-custodied installation token, branch validation + lock,
+  repo allowlist, and `locked` policy. The connector authenticates only the
+  capability mint/refresh; fetch and push go directly to the Worker using that
+  short-lived capability. Keep the initial clone on direct GitHub with its
+  short-lived contents-read-only token as the explicit latency exception.
 
 ## Data model (D1)
 
@@ -558,30 +567,34 @@ the webhook token; the connector custodies the forwarding copy; the Sprite has
 neither. Connector creation is the only control-plane operation that transfers the
 token from the session provisioning path to Sprites.
 
-### Git fetch and push after initial clone (class A)
+### Git fetch and push after initial clone (interim class-A control plane)
 
-Webhook and Git share the per-session connector because they share the same Worker
-base and session trust boundary. The GitHub installation token is a **different**
-credential from the gateway-injected session token. The post-clone remote is
-rewritten to the gateway URL — the same explicit-remote move `GitProxyService`
-makes today, with a different URL and no bearer written into git config.
+Webhook and Git capability minting share the per-session connector because they
+share the same Worker base and session trust boundary. The GitHub installation
+token is a **different** credential from both the gateway-injected session token
+and the short-lived capability. The post-clone remote points directly at the
+Worker Git proxy. A repo-local exact-URL credential helper calls the connector's
+JSON mint endpoint and supplies the resulting five-minute capability to Git.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant Git as Git client in Sprite<br/>remote = gateway URL
+  participant Git as Git client in Sprite<br/>remote = Worker URL
   participant Connector as Per-session connector<br/>(Sprites managed)
+  participant Mint as Worker capability mint
   participant GitProxy as Worker Git proxy
   participant GitHub as GitHub
 
-  Git->>Connector: git fetch or push to gateway remote<br/>(direct TLS; no session bearer in git config)
+  Git->>Connector: helper POST capability mint<br/>Accept: application/json
   Note over Connector: Verify Sprite identity and<br/>session:{id} label policy
-  Connector->>GitProxy: Forward with injected per-session credential
-  GitProxy->>GitProxy: Validate session, repository, cloude/* branch,<br/>session suffix, and branch lock
+  Connector->>Mint: Inject per-session credential
+  Mint->>Mint: DO validates token; store/reuse<br/>five-minute capability in SQLite
+  Mint-->>Git: capability
+  Git->>GitProxy: Git smart HTTP + Basic capability
+  GitProxy->>GitProxy: Validate capability, repository, branch policy,<br/>session suffix, and branch lock
   GitProxy->>GitHub: Git smart-HTTP request with<br/>server-custodied installation token
   GitHub-->>GitProxy: Stream packfile response
-  GitProxy-->>Connector: Stream response without buffering
-  Connector-->>Git: Stream response
+  GitProxy-->>Git: Stream response without connector
 ```
 
 **Blocker — the gateway's `Accept` allowlist rejects git (verified
@@ -591,19 +604,30 @@ wildcard token, or is absent; everything else returns `406` before reaching
 the upstream. A `text/*` wildcard does not match `text/event-stream`, so it is
 a literal token allowlist rather than content negotiation. Git hardcodes
 `application/x-git-*` types and the gateway does not merge multiple `Accept`
-headers, so no client-side workaround exists. Post-clone remotes therefore
-stay on the legacy worker-proxy bearer path until Fly widens the allowlist;
-the Worker-side identity-bound validation is landed and flips on per session
-via `gitConfiguredViaConnector`. Webhooks are unaffected because the vm-agent
-sends no `Accept`. This constrains S4: verify the provider CLIs' `Accept`
-headers before routing inference through the gateway.
+headers, so Git data cannot traverse the connector. New sessions authenticate
+the small JSON capability mint through it, while legacy sessions retain their
+existing bearer path. Webhooks are unaffected because the vm-agent sends no
+`Accept`. This constrains S4: verify the provider CLIs' `Accept` headers before
+routing inference through the gateway.
+
+**Exit plan — return Git data to the connector.** The capability path is an
+interim compatibility mechanism, not the target architecture. After Fly ships a
+fix, rerun `test:live:gateway-accept` and require Git's
+`application/x-git-*` requests to reach the Worker through the gateway. A support
+confirmation alone is not sufficient. Once verified, new session connectors add
+`/git-proxy/:sessionId/*` to their endpoint allowlist, both post-clone remotes
+point to the gateway URL, and the Worker authenticates those sessions only with
+the connector-injected session token. New sessions stop installing the credential
+helper and stop minting capabilities. Existing capability-mode sessions remain
+supported until migrated or drained, after which the mint endpoint, helper, and
+capability state can be removed.
 
 **Future optimization — move the git data plane out of the Durable Object
 (recorded 2026-07-27).** As implemented, the git-proxy route hands the raw
 request to the session DO, so the entire packfile stream flows through the DO —
 the same single-threaded instance that handles the session's webhook chunks and
 WebSocket broadcasting. The DO is only genuinely needed for three small things:
-validating the gateway-injected session token (DO SQLite), reading the repo
+validating the short-lived capability (DO SQLite), reading the repo
 allowlist and branch lock, and recording `pushedBranch` after a successful push.
 The target shape is validate-then-stream: the Worker makes one internal RPC to
 the DO (validate token, return repo policy + branch lock), streams the GitHub
@@ -618,7 +642,7 @@ The initial clone is the explicit exception:
 flowchart LR
   provisioner["Session provisioner"] -->|"mint short-lived, contents-read-only token"| sprite["Sprite initial clone"]
   sprite -->|"direct HTTPS clone<br/>token temporarily present in Sprite"| github["GitHub"]
-  sprite -->|"replace remote after clone"| workerRemote["Worker Git-proxy remote<br/>all later fetch/push uses class A"]
+  sprite -->|"replace remote after clone"| workerRemote["Worker Git-proxy remote<br/>later fetch/push uses short-lived capabilities"]
 ```
 
 This accepts temporary private-repository read exposure to avoid routing the large
@@ -739,13 +763,17 @@ abstraction, and one proxy — so no stage requires redesigning another.
 - **S1 — connector spine + webhook.** REST-backed `mintConnector` + internal
   per-session connector + `session_connectors` D1 + webhook cutover. Proves
   identity-bound class-A end to end.
-- **S2 — post-clone git cutover.** Move fetch/push onto the internal connector;
-  Worker rejects the Sprite-held bearer. Initial clone remains direct with its
-  contents-read-only installation token.
+- **S2 — post-clone git cutover.** Until Fly fixes Git content negotiation,
+  authenticate a short-lived capability mint through the connector and send Git
+  data directly to the Worker. New sessions reject and delete the legacy bearer.
+  Initial clone remains direct with its contents-read-only installation token.
+  When the live gateway probe confirms the fix, switch new-session post-clone Git
+  data back to the connector, retire capability issuance for new sessions, and
+  remove compatibility support after older sessions migrate or drain.
 - **S3 — transparent proxy data plane.** Toolchain, CA/trust, resolver, routing
   table, dummy-destination redirect, class-C/gateway bypass. Exists solely to
-  enable class B (S5); webhook, git, and provider CLIs stay on direct gateway
-  configuration permanently and never migrate onto the proxy.
+  enable class B (S5); webhook, Git minting, and provider CLIs stay on direct
+  gateway configuration and never migrate onto the proxy.
 - **S4 — provider inference through the control plane.** Claude is verified at the
   CLI/control-plane boundary: Claude Code 2.1.207 completed interactive and
   non-interactive inference using `ANTHROPIC_BASE_URL` and
@@ -796,9 +824,9 @@ abstraction, and one proxy — so no stage requires redesigning another.
   not enforce them, add a server-side resolved-address/redirect policy and document
   the residual rebinding boundary. Redirects MUST NOT forward the injected
   credential to a different origin.
-- **git read latency** — the connector path for chunked pulls (direct gateway
-  remote, no proxy hop); measure; don't route initial clone through it; validate
-  post-clone fetch performance only.
+- **git read latency** — the direct Worker path for chunked pulls (short-lived
+  capability, no connector data hop); measure; don't route initial clone through
+  it; validate post-clone fetch performance only.
 
 ## Resolved (verified)
 
@@ -826,11 +854,14 @@ abstraction, and one proxy — so no stage requires redesigning another.
   replaces token delivery to the VM, not route or state ownership.
 - Initial clone through connector? **No** — retain the current short-lived,
   contents-read-only installation token in the Sprite for clone latency. Protect
-  post-clone fetch and push through class A.
+  post-clone fetch and push with connector-minted capabilities sent directly to
+  the Worker only while Fly rejects Git content types. Once the live gateway probe
+  confirms Git's media types pass, route post-clone fetch and push through the
+  per-session connector again and retire the interim capability path.
 - Transparent redirect loop? **Avoided structurally** — only the dummy destination
-  returned for class-B hosts is redirected; every class-A client (webhook, git,
-  provider CLIs) is configured directly to the gateway, and class-C/gateway
-  destinations are never intercepted.
+  returned for class-B hosts is redirected; webhook, Git mint/refresh, and provider
+  CLIs use the gateway while Git smart-HTTP uses the direct Worker URL.
+  Class-C/gateway destinations are never intercepted.
 - Does connector provisioning require a browser? **No** — the REST endpoint covers
   the required Custom API connector shape.
 - Async provisioning? **No** — synchronous, fail-closed.

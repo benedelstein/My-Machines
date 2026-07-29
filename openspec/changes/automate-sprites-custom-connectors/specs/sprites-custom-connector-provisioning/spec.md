@@ -1,29 +1,37 @@
 ## ADDED Requirements
 
-### Requirement: Protected credentials stay outside the Sprite with a read-only clone exception
+### Requirement: Protected credentials stay outside the Sprite with narrow Git exceptions
 
-The system SHALL keep webhook, post-clone git, provider, and environment credentials
+The system SHALL keep webhook, upstream GitHub, provider, and environment credentials
 out of the Sprite runtime. Fly SHALL authorize the specific Sprite and inject a
 connector credential downstream. For refreshable provider OAuth, the connector
 credential SHALL authenticate a control-plane inference proxy, and that proxy SHALL
 refresh/read the encrypted provider credential and inject it only on the provider
 hop. The initial repository clone MAY retain the existing short-lived,
 contents-read-only GitHub installation token inside the Sprite to avoid proxying the
-bulk clone transfer.
+bulk clone transfer. While Fly rejects Git smart-HTTP content types, the
+connector MAY exchange its identity-bound session credential for a five-minute
+opaque Git-proxy capability. This interim capability SHALL be scoped to the
+session Git proxy, stored and validated in the session DO, and SHALL NOT contain
+or expose a GitHub credential.
 
 #### Scenario: Secret is required for an outbound call
 
 - **WHEN** a Sprite makes a protected credential-bearing outbound call after initial
   clone (webhook, git fetch/push, provider API, or an environment credential's
   upstream)
-- **THEN** the credential is injected downstream of the Sprite and is never present
-  in the Sprite's env, files, process args, or trust-store-readable material
+- **THEN** the upstream credential is injected downstream of the Sprite and is
+  never present in the Sprite's env, files, process args, or
+  trust-store-readable material
+- **AND** the interim Git-proxy capability is held only by the credential-helper
+  process and expires within five minutes
 
 #### Scenario: Sprite is compromised
 
 - **WHEN** a process inside the Sprite reads all available Sprite state
-- **THEN** it obtains no reusable webhook, post-clone git, provider, or environment
-  credential
+- **THEN** it obtains no webhook, GitHub, provider, or environment credential
+- **AND** any extracted interim Git-proxy capability expires within five minutes
+  and can be revoked immediately from DO SQLite
 
 ### Requirement: Provider OAuth is injected through the session-scoped control plane
 
@@ -90,7 +98,8 @@ final ChatGPT hop to a shared stateless native HTTP service.
 - **THEN** it MAY execute the clone inside the Sprite with a short-lived,
   contents-read-only installation token
 - **AND** that token cannot push
-- **AND** all subsequent fetch and push operations use the class-A connector
+- **AND** all subsequent fetch and push operations use connector-minted
+  capabilities against the Worker Git proxy
 
 ### Requirement: Environment header credentials via connectors
 
@@ -252,9 +261,10 @@ through destination-targeted iptables/nft redirection, MITM-terminates it with a
 Sprite-trusted local CA, strips the configured client credential header, and
 rewrites requests to the single connector gateway URL assigned to that hostname,
 failing closed for unrouted destinations. Class-A traffic SHALL NOT enter the
-proxy: every class-A client (webhook base, post-clone git remote, provider CLI
-base URL) is explicitly configured to the connector gateway URL. Class-C and
-gateway traffic SHALL not enter the proxy. The proxy, CA, resolver, and redirect
+proxy: webhook, Git capability mint/refresh, and provider CLI traffic are
+explicitly configured to the connector gateway. Git smart-HTTP data is
+explicitly configured directly to the Worker. Class-C and gateway traffic SHALL
+not enter the proxy. The proxy, CA, resolver, and redirect
 rules SHALL be installed only for sessions whose environment defines at least one
 class-B credential.
 
@@ -330,12 +340,13 @@ redirection cannot be established.
   cannot be applied
 - **THEN** the session does not start rather than running with uncaptured egress
 
-### Requirement: Caller-identity-bound authorization (no off-Sprite replay)
+### Requirement: Upstream credentials use caller-identity-bound authorization
 
-The system SHALL authorize each protected credential by the caller's verified Sprite
+The system SHALL authorize each protected upstream credential by the caller's verified Sprite
 identity (the connector gateway's access policy), not by possession of a bearer
 secret, so that an extracted credential cannot be replayed from anywhere other than
-the authorized Sprite.
+the authorized Sprite. The interim Git-proxy capability is a delegated, short-lived
+exception governed by its separate requirement below.
 
 #### Scenario: Extracted credential replayed from off-Sprite
 
@@ -356,9 +367,10 @@ one Custom API connector scoped to that label. The connector SHALL inject the
 existing Durable Object session token (currently stored as `webhook_token`). The
 Worker SHALL resolve the Durable Object from each allowlisted route's `:sessionId`,
 and the Durable Object SHALL validate the injected token from its SQLite. The same
-connector and token SHALL authorize webhook, post-clone git, and provider inference
-paths; no provider-specific connector SHALL be created. The class-A connector SHALL
-set `allowed_endpoints` to the exact session webhook, git, provider-inference, and
+connector and token SHALL authorize webhook, Git capability minting, and provider
+inference paths; no provider-specific connector SHALL be created. The class-A
+connector SHALL set `allowed_endpoints` to the exact session webhook,
+Git capability-mint, provider-inference, and
 health paths. It MUST NOT authorize unrelated Worker paths.
 
 #### Scenario: Injected secret identifies the session
@@ -366,7 +378,7 @@ health paths. It MUST NOT authorize unrelated Worker paths.
 - **WHEN** a request arrives at
   `/internal/session/:sessionId/chunks` or
   `/internal/session/:sessionId/events`,
-  `/git-proxy/:sessionId/...`, or
+  `/internal/session/:sessionId/capabilities/git`, or
   `/internal/session/:sessionId/inference/:provider/...` with the gateway-injected
   token
 - **THEN** the Worker resolves the Durable Object from `:sessionId`
@@ -391,25 +403,60 @@ that session.
   gateway-injected Durable Object webhook token
 - **THEN** the Worker rejects it
 
-### Requirement: Git access is caller-identity-bound
+### Requirement: Git capability minting is caller-identity-bound
 
-The system SHALL route post-clone git fetch and push through the per-session connector so the
-Sprite→Worker call is authorized by verified Sprite identity, MUST stop accepting a
-Sprite-held bearer on the git-proxy endpoint, and SHALL retain branch validation,
-repo allowlisting, and Worker-custodied GitHub tokens. The initial clone MAY use the
+Until the connector accepts Git smart-HTTP content types, the system SHALL
+authenticate a short-lived Git capability mint through the per-session connector
+and route post-clone fetch and push directly to the Worker Git proxy. New sessions
+MUST stop accepting the legacy Sprite-held bearer and webhook token on the Git
+proxy endpoint, and SHALL retain expiry checks, branch validation, repo
+allowlisting, and Worker-custodied GitHub tokens. The initial clone MAY use the
 explicit contents-read-only token exception defined above.
 
 #### Scenario: Agent pulls and pushes
 
 - **WHEN** the agent performs git fetch and push
-- **THEN** the operations succeed through the connector with the GitHub credential
-  injected downstream and branch validation still applied
+- **THEN** the credential helper mints through the connector and the Git operation
+  succeeds directly through the Worker with branch validation still applied
 
-#### Scenario: Extracted git secret replayed off-Sprite
+#### Scenario: Extracted Git capability replayed off-Sprite
 
-- **WHEN** an extracted git-proxy secret is presented to the Worker from a caller
-  that did not pass through this session's sprite-scoped gateway
-- **THEN** the Worker rejects it
+- **WHEN** an extracted, still-valid Git capability is presented directly to the
+  Worker from an off-Sprite caller
+- **THEN** the Worker accepts it until its five-minute expiry or immediate DO
+  revocation
+- **AND** the off-Sprite caller cannot use it to mint or refresh another capability
+  because minting requires the connector-injected webhook token
+
+### Requirement: Git smart-HTTP returns to the connector after the gateway fix
+
+The direct-Worker capability path SHALL be temporary. The system MUST NOT switch
+Git data back based only on a platform announcement: the live gateway `Accept`
+probe SHALL first demonstrate that Git's `application/x-git-*` requests reach the
+Worker without `406`. After that verification, newly provisioned sessions SHALL
+allowlist their session Git-proxy path on the per-session connector, configure
+both post-clone fetch and push remotes to the connector gateway, and accept only
+the gateway-injected session credential for those Git requests. New sessions
+SHALL stop installing the Git credential helper and minting Git capabilities.
+Capability mode MAY remain available only for already-provisioned sessions until
+they are migrated or drained.
+
+#### Scenario: Fly's fix is verified
+
+- **WHEN** the live gateway probe confirms Git smart-HTTP `Accept` types reach the
+  Worker through the connector
+- **THEN** new post-clone Git fetch and push traffic traverses the per-session
+  connector
+- **AND** the gateway verifies Sprite identity and injects the session credential
+- **AND** the Sprite receives neither a Git capability nor an upstream GitHub
+  credential
+
+#### Scenario: Fly reports a fix but the probe still fails
+
+- **WHEN** Fly reports the limitation fixed but any Git smart-HTTP probe still
+  returns `406` or fails to reach the Worker
+- **THEN** the capability path remains active and production Git remotes are not
+  switched
 
 ### Requirement: REST-backed Custom API connector creation
 

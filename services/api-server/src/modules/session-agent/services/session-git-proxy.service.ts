@@ -7,6 +7,8 @@ import type {
   SessionRepoAccessResult,
 } from "@/shared/types/repo-access";
 import type { GitHubAppResult } from "@/shared/types/github";
+import { z } from "zod";
+import { timingSafeCompare } from "@/shared/utils/crypto";
 import { GitProxyService } from "@/shared/integrations/git/git-proxy.service";
 import type {
   GitProxyProviderError,
@@ -30,6 +32,22 @@ export interface SessionGitProxyServiceDeps {
     getInstallationTokenForRepo(repoFullName: string): Promise<GitHubAppResult<string>>;
   };
 }
+
+const GIT_CAPABILITY_TTL_MS = 5 * 60 * 1000;
+const GIT_CAPABILITY_ROTATION_WINDOW_MS = 60 * 1000;
+const GIT_CAPABILITY_USERNAME = "x-capability";
+
+const GitCapabilityEntrySchema = z.object({
+  token: z.string().min(1),
+  expiresAt: z.number().int().positive(),
+});
+
+const StoredGitCapabilitySchema = z.object({
+  current: GitCapabilityEntrySchema,
+  previous: GitCapabilityEntrySchema.optional(),
+});
+
+export type MintedGitCapability = z.infer<typeof GitCapabilityEntrySchema>;
 
 /**
  * Session-scoped adapter around the agnostic `GitProxyService`.
@@ -84,6 +102,45 @@ export class SessionGitProxyService implements
     return secret;
   }
 
+  /** Removes the legacy session-long Git bearer after capability cutover. */
+  retireGitProxySecret(): void {
+    this.secretRepository.delete("git_proxy_secret");
+  }
+
+  /**
+   * Mints or reuses the session's short-lived Git capability.
+   * The read/rotate/write sequence is synchronous inside the Durable Object.
+   */
+  mintGitCapability(): MintedGitCapability | null {
+    if (this.getServerState().gitAuthMode !== "capability") {
+      return null;
+    }
+
+    const now = Date.now();
+    const stored = this.readGitCapability();
+    if (stored && stored.current.expiresAt - now > GIT_CAPABILITY_ROTATION_WINDOW_MS) {
+      return stored.current;
+    }
+
+    const current = {
+      token: randomBase64Url(32),
+      expiresAt: now + GIT_CAPABILITY_TTL_MS,
+    };
+    const previous = stored?.current.expiresAt && stored.current.expiresAt > now
+      ? stored.current
+      : undefined;
+    this.secretRepository.set(
+      "git_capability",
+      JSON.stringify({ current, ...(previous ? { previous } : {}) }),
+    );
+    return current;
+  }
+
+  /** Revokes all outstanding Git capabilities for the session. */
+  revokeGitCapabilities(): void {
+    this.secretRepository.delete("git_capability");
+  }
+
   /**
    * Authenticates the session's repo access, forwards the git request to
    * GitHub, and propagates any pushed-branch update into DO state.
@@ -108,14 +165,39 @@ export class SessionGitProxyService implements
     return result.response;
   }
 
-  getExpectedBearerToken(): string | null {
-    // Once git is configured through the session connector, the only accepted
-    // credential is the gateway-injected session token; the legacy Sprite-held
-    // secret is rejected so an extracted bearer cannot be replayed.
-    if (this.getServerState().gitConfiguredViaConnector) {
-      return this.secretRepository.get("webhook_token");
+  authenticateGitRequest(authorization: string | null): boolean {
+    const mode = this.getServerState().gitAuthMode;
+    if (mode === "legacy_secret") {
+      const expected = this.secretRepository.get("git_proxy_secret");
+      const presented = authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+      return Boolean(expected && presented && timingSafeCompare(expected, presented));
     }
-    return this.secretRepository.get("git_proxy_secret");
+
+    const basic = parseBasicAuthorization(authorization);
+    if (!basic || basic.username !== GIT_CAPABILITY_USERNAME) {
+      return false;
+    }
+    const now = Date.now();
+    const stored = this.readGitCapability();
+    if (!stored) {
+      return false;
+    }
+
+    const currentValid = stored.current.expiresAt > now
+      && timingSafeCompare(stored.current.token, basic.password);
+    const previousValid = stored.previous !== undefined
+      && stored.previous.expiresAt > now
+      && timingSafeCompare(stored.previous.token, basic.password);
+
+    const previous = stored.previous?.expiresAt && stored.previous.expiresAt > now
+      ? stored.previous
+      : undefined;
+    if (stored.current.expiresAt <= now) {
+      this.secretRepository.delete("git_capability");
+    } else if (stored.previous && !previous) {
+      this.secretRepository.set("git_capability", JSON.stringify({ current: stored.current }));
+    }
+    return currentValid || previousValid;
   }
 
   getAllowedRepoFullName(): string | null {
@@ -162,6 +244,23 @@ export class SessionGitProxyService implements
       default:
         return { code: "TOKEN_UNAVAILABLE", status: 503, message: error.message };
     }
+  }
+
+  private readGitCapability(): z.infer<typeof StoredGitCapabilitySchema> | null {
+    const raw = this.secretRepository.get("git_capability");
+    if (!raw) {
+      return null;
+    }
+    try {
+      const parsed = StoredGitCapabilitySchema.safeParse(JSON.parse(raw));
+      if (parsed.success) {
+        return parsed.data;
+      }
+    } catch {
+      // Invalid persisted secret is revoked below.
+    }
+    this.secretRepository.delete("git_capability");
+    return null;
   }
 
   private async respondToAccessFailure(
@@ -220,5 +319,36 @@ export class SessionGitProxyService implements
         );
       }
     }
+  }
+}
+
+function randomBase64Url(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+function parseBasicAuthorization(
+  authorization: string | null,
+): { username: string; password: string } | null {
+  const encoded = authorization?.match(/^Basic\s+(.+)$/i)?.[1];
+  if (!encoded) {
+    return null;
+  }
+  try {
+    const decoded = atob(encoded);
+    const separator = decoded.indexOf(":");
+    if (separator < 0) {
+      return null;
+    }
+    return {
+      username: decoded.slice(0, separator),
+      password: decoded.slice(separator + 1),
+    };
+  } catch {
+    return null;
   }
 }

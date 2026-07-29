@@ -337,7 +337,9 @@ describe("SessionProvisionService startup toolchain", () => {
       updatePartialState: vi.fn(),
       synthesizeStatus: () => "preparing",
       ensureGitProxySecret: vi.fn(() => "git-proxy-secret"),
+      retireGitProxySecret: vi.fn(),
       ensureSessionConnector: vi.fn(async () => {}),
+      getSessionConnectorGatewayBase: () => null,
       githubTokenProvider: {
         getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },
@@ -636,7 +638,9 @@ describe("SessionProvisionService startup toolchain", () => {
       updatePartialState,
       synthesizeStatus: () => "ready",
       ensureGitProxySecret: vi.fn(() => "git-proxy-secret"),
+      retireGitProxySecret: vi.fn(),
       ensureSessionConnector: vi.fn(async () => {}),
+      getSessionConnectorGatewayBase: () => null,
       githubTokenProvider: {
         getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },

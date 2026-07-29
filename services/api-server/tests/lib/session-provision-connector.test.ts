@@ -64,11 +64,9 @@ describe("SessionProvisionService session connector", () => {
     expect(ensureSessionConnector).toHaveBeenCalledWith("sprite-1");
   });
 
-  it("keeps post-clone git on the legacy worker proxy while the gateway rejects git", async () => {
-    // The Sprites gateway 406s git smart-HTTP Accept headers (2026-07-28), so
-    // git remotes stay on the worker-proxy bearer path until Fly fixes it.
+  it("configures direct Worker remotes with an exact-url credential helper", async () => {
     const serverState = createServerState();
-    const { service, ensureGitProxySecret } = createService(
+    const { service, ensureGitProxySecret, retireGitProxySecret } = createService(
       serverState,
       createClientState(),
     );
@@ -77,16 +75,19 @@ describe("SessionProvisionService session connector", () => {
 
     const remoteConfigCommand = getRemoteConfigCommand();
     expect(remoteConfigCommand).toContain(
-      "git remote set-url origin https://github.com/ben/repo.git",
+      "git remote set-url origin 'https://worker.test/git-proxy/session-1/github.com/ben/repo.git'",
     );
     expect(remoteConfigCommand).toContain(
-      "git remote set-url --push origin https://worker.test/git-proxy/session-1/github.com/ben/repo.git",
+      "git remote set-url --push origin 'https://worker.test/git-proxy/session-1/github.com/ben/repo.git'",
     );
     expect(remoteConfigCommand).toContain(
-      "git config --add \"http.https://worker.test/git-proxy/session-1/.extraHeader\" \"Authorization: Bearer git-proxy-secret\"",
+      "credential.https://worker.test/git-proxy/session-1/github.com/ben/repo.git.helper",
     );
-    expect(ensureGitProxySecret).toHaveBeenCalled();
-    expect(serverState.gitConfiguredViaConnector).toBe(false);
+    expect(remoteConfigCommand).toContain("git config credential.useHttpPath true");
+    expect(remoteConfigCommand).not.toContain("Authorization: Bearer git-proxy-secret");
+    expect(ensureGitProxySecret).not.toHaveBeenCalled();
+    expect(retireGitProxySecret).toHaveBeenCalled();
+    expect(serverState.gitAuthMode).toBe("capability");
   });
 
   it("uses the worker proxy for fetch in locked network mode", async () => {
@@ -101,7 +102,43 @@ describe("SessionProvisionService session connector", () => {
     await service.ensureProvisioned();
 
     expect(getRemoteConfigCommand()).toContain(
-      "git remote set-url origin https://worker.test/git-proxy/session-1/github.com/ben/repo.git",
+      "git remote set-url origin 'https://worker.test/git-proxy/session-1/github.com/ben/repo.git'",
     );
+  });
+
+  it("fails closed before retiring legacy auth when capability setup fails", async () => {
+    const serverState = createServerState();
+    const { service, retireGitProxySecret } = createService(
+      serverState,
+      createClientState(),
+    );
+    const defaultExec = mockState.execWs.getMockImplementation()!;
+    mockState.execWs.mockImplementation(async (command: string, options: unknown) => {
+      if (command.includes("credential.useHttpPath")) {
+        return { stdout: "", stderr: "git config failed", exitCode: 1 };
+      }
+      return defaultExec(command, options);
+    });
+
+    await expect(service.ensureProvisioned()).rejects.toThrow(
+      "Git capability setup failed (exit 1): git config failed",
+    );
+    expect(retireGitProxySecret).not.toHaveBeenCalled();
+    expect(serverState.gitAuthMode).toBe("legacy_secret");
+  });
+
+  it("keeps legacy bearer configuration for pre-connector sessions", async () => {
+    const serverState = createServerState();
+    const { service, ensureGitProxySecret } = createService(
+      serverState,
+      createClientState({ includeSessionConnector: false }),
+    );
+
+    await service.ensureProvisioned();
+
+    const command = getRemoteConfigCommand();
+    expect(command).toContain("Authorization: Bearer git-proxy-secret");
+    expect(ensureGitProxySecret).toHaveBeenCalled();
+    expect(serverState.gitAuthMode).toBe("legacy_secret");
   });
 });

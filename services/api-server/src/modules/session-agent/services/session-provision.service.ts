@@ -73,7 +73,9 @@ export interface SessionProvisionServiceDeps {
   updatePartialState: (partial: ProvisionClientStateUpdate) => void;
   synthesizeStatus: () => SessionStatus;
   ensureGitProxySecret: () => string;
+  retireGitProxySecret: () => void;
   ensureSessionConnector: (spriteName: string) => Promise<void>;
+  getSessionConnectorGatewayBase: () => string | null;
   githubTokenProvider: {
     getReadOnlyTokenForRepo(
       repoFullName: string,
@@ -103,7 +105,10 @@ export class SessionProvisionService {
   private readonly updatePartialState: SessionProvisionServiceDeps["updatePartialState"];
   private readonly synthesizeStatus: () => SessionStatus;
   private readonly ensureGitProxySecret: () => string;
+  private readonly retireGitProxySecret: () => void;
   private readonly ensureSessionConnector: SessionProvisionServiceDeps["ensureSessionConnector"];
+  private readonly getSessionConnectorGatewayBase:
+    SessionProvisionServiceDeps["getSessionConnectorGatewayBase"];
   private readonly githubTokenProvider: SessionProvisionServiceDeps["githubTokenProvider"];
   private readonly setupReporter: SessionProvisionServiceDeps["setupReporter"];
   private readonly setupOutputCollector: SessionProvisionServiceDeps["setupOutputCollector"];
@@ -124,7 +129,9 @@ export class SessionProvisionService {
     this.updatePartialState = deps.updatePartialState;
     this.synthesizeStatus = deps.synthesizeStatus;
     this.ensureGitProxySecret = deps.ensureGitProxySecret;
+    this.retireGitProxySecret = deps.retireGitProxySecret;
     this.ensureSessionConnector = deps.ensureSessionConnector;
+    this.getSessionConnectorGatewayBase = deps.getSessionConnectorGatewayBase;
     this.githubTokenProvider = deps.githubTokenProvider;
     this.setupReporter = deps.setupReporter;
     this.setupOutputCollector = deps.setupOutputCollector;
@@ -441,12 +448,6 @@ export class SessionProvisionService {
       createLogger("sprite-websocket.session.ts"),
     );
 
-    // Post-clone git stays on the legacy worker-proxy bearer path: the Sprites
-    // gateway rejects git smart-HTTP with 406 because it content-negotiates on
-    // git's exact-match Accept headers, and git cannot override them (verified
-    // by live probe, 2026-07-28; multiple Accept headers are not merged).
-    // Route these remotes through the session connector gateway once Fly
-    // passes Accept through.
     const proxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
     const cloneUrl = `${proxyBaseUrl}/github.com/${repoFullName}.git`;
     const githubRemoteUrl = `https://github.com/${repoFullName}.git`;
@@ -520,28 +521,67 @@ export class SessionProvisionService {
       this.updatePartialState({ baseBranch: actualBaseBranch });
     }
 
-    const gitProxySecret = this.ensureGitProxySecret();
-    const fetchUrl =
-      this.getEnvironmentSnapshot().network.mode === "locked"
-        ? cloneUrl
-        : githubRemoteUrl;
+    const connectorGatewayBase = this.getSessionConnectorGatewayBase();
+    if (connectorGatewayBase) {
+      const helperPath = `/home/sprite/.local/bin/mm-git-credential-${sessionId}`;
+      const mintUrl =
+        `${connectorGatewayBase}/internal/session/${sessionId}/capabilities/git`;
+      const helperSource = buildGitCredentialHelper({
+        remoteUrl: cloneUrl,
+        mintUrl,
+      });
+      const helperBase64 = btoa(helperSource);
+      const capabilitySetupResult = await sprite.execWs(
+        dedent`
+        set -e
+        mkdir -p /home/sprite/.local/bin
+        echo ${shellQuote(helperBase64)} | base64 -d > ${shellQuote(helperPath)}
+        chmod 700 ${shellQuote(helperPath)}
+        cd ${WORKSPACE_DIR}
+        git remote set-url origin ${shellQuote(cloneUrl)}
+        git remote set-url --push origin ${shellQuote(cloneUrl)}
+        git config user.email "agent@mymachines.dev"
+        git config user.name "My Machines"
+        git config --unset-all http.extraHeader || true
+        git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
+        git config --unset-all credential.helper || true
+        git config credential.helper ""
+        git config --add ${shellQuote(`credential.${cloneUrl}.helper`)} ${shellQuote(helperPath)}
+        git config ${shellQuote(`credential.${cloneUrl}.username`)} x-capability
+        git config credential.useHttpPath true
+      `,
+        {},
+      );
+      if (capabilitySetupResult.exitCode !== 0) {
+        throw new Error(
+          `Git capability setup failed (exit ${capabilitySetupResult.exitCode}): `
+          + capabilitySetupResult.stderr,
+        );
+      }
+      this.retireGitProxySecret();
+      this.updateServerState({ gitAuthMode: "capability" });
+      return;
+    }
 
-    // Configure remote URLs, git identity, and proxy auth header
+    const gitProxySecret = this.ensureGitProxySecret();
+    const fetchUrl = this.getEnvironmentSnapshot().network.mode === "locked"
+      ? cloneUrl
+      : githubRemoteUrl;
     await sprite.execWs(
       dedent`
-      set -e
-      cd ${WORKSPACE_DIR}
-      git remote set-url origin ${fetchUrl}
-      git remote set-url --push origin ${cloneUrl}
-      git config user.email "agent@mymachines.dev"
-      git config user.name "My Machines"
-      git config --unset-all http.extraHeader || true
-      git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
-      git config --add "http.${proxyBaseUrl}/.extraHeader" "Authorization: Bearer ${gitProxySecret}"
-    `,
+        set -e
+        cd ${WORKSPACE_DIR}
+        git remote set-url origin ${shellQuote(fetchUrl)}
+        git remote set-url --push origin ${shellQuote(cloneUrl)}
+        git config user.email "agent@mymachines.dev"
+        git config user.name "My Machines"
+        git config --unset-all http.extraHeader || true
+        git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
+        git config --add "http.${proxyBaseUrl}/.extraHeader" "Authorization: Bearer ${gitProxySecret}"
+      `,
       {},
     );
-    this.updateServerState({ gitConfiguredViaConnector: false });
+    this.updateServerState({ gitAuthMode: "legacy_secret" });
   }
 
   private async applyFinalNetworkPolicy(spriteName: string): Promise<void> {
@@ -564,6 +604,46 @@ export class SessionProvisionService {
       }),
     );
   }
+}
+
+function buildGitCredentialHelper(input: {
+  remoteUrl: string;
+  mintUrl: string;
+}): string {
+  const remote = new URL(input.remoteUrl);
+  return `#!/usr/bin/env bun
+const operation = process.argv[2] ?? "";
+const input = await Bun.stdin.text();
+if (operation !== "get") process.exit(0);
+const values = Object.fromEntries(input.trim().split("\\n").filter(Boolean).map((line) => {
+  const separator = line.indexOf("=");
+  return separator < 0 ? [line, ""] : [line.slice(0, separator), line.slice(separator + 1)];
+}));
+if (values.protocol !== ${JSON.stringify(remote.protocol.slice(0, -1))}
+  || values.host !== ${JSON.stringify(remote.host)}
+  || values.path !== ${JSON.stringify(remote.pathname.slice(1))}) process.exit(0);
+let response;
+for (let attempt = 0; attempt < 3; attempt++) {
+  try {
+    response = await fetch(${JSON.stringify(input.mintUrl)}, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    if (response.ok || response.status < 500) break;
+  } catch {}
+  if (attempt < 2) await Bun.sleep(100 * (attempt + 1));
+}
+if (!response?.ok) {
+  process.stderr.write("Git credential mint failed\\n");
+  process.exit(1);
+}
+const body = await response.json();
+if (typeof body?.token !== "string" || !body.token || !Number.isInteger(body.expiresAt)) {
+  process.stderr.write("Git credential mint returned an invalid response\\n");
+  process.exit(1);
+}
+process.stdout.write("username=x-capability\\npassword=" + body.token + "\\n\\n");
+`;
 }
 
 function getErrorMessage(error: unknown): string {

@@ -1,5 +1,4 @@
 import type { Logger } from "@repo/shared";
-import { timingSafeCompare } from "@/shared/utils/crypto";
 import type {
   GitProxyRepoPolicyProvider,
   GitProxySecretProvider,
@@ -36,21 +35,16 @@ export class GitProxyService {
       fields: { method: request.method, url: request.url },
     });
 
-    const expectedToken = this.secretProvider.getExpectedBearerToken();
     const authHeader = request.headers.get("Authorization");
-    const presentedToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
-    if (
-      !expectedToken ||
-      !presentedToken ||
-      !timingSafeCompare(presentedToken, expectedToken)
-    ) {
+    if (!this.secretProvider.authenticateGitRequest(authHeader)) {
       this.logger.warn("[git-proxy] auth failed", {
         fields: {
-          hasSecret: expectedToken !== null,
           hasAuthorizationHeader: authHeader !== null,
         },
       });
-      return this.result("unauthorized", 401);
+      return this.result("unauthorized", 401, {
+        "WWW-Authenticate": 'Basic realm="my-machines-git-proxy"',
+      });
     }
 
     const githubPath = this.parseGitHubPath(path);
@@ -159,9 +153,13 @@ export class GitProxyService {
     }
   }
 
-  private result(message: string, status: number): GitProxyResult {
+  private result(
+    message: string,
+    status: number,
+    headers?: HeadersInit,
+  ): GitProxyResult {
     return {
-      response: new Response(message, { status }),
+      response: new Response(message, { status, headers }),
       pushedBranch: null,
     };
   }

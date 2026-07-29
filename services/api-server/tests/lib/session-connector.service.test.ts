@@ -86,7 +86,7 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
     spriteLabelsApplied: false,
-    gitConfiguredViaConnector: false,
+    gitAuthMode: "legacy_secret",
     ...overrides,
   };
 }
@@ -222,7 +222,7 @@ describe("SessionConnectorService.ensureMinted", () => {
       allowedEndpoints: [
         "/internal/session/session-1/chunks",
         "/internal/session/session-1/events",
-        "/git-proxy/session-1/*",
+        "/internal/session/session-1/capabilities/git",
         "/health",
       ],
     });

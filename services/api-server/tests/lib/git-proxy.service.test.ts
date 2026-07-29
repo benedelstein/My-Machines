@@ -23,7 +23,8 @@ function createService(params: {
       })),
     },
     secretProvider: {
-      getExpectedBearerToken: () => params.gitProxySecret ?? "secret",
+      authenticateGitRequest: (authorization) =>
+        authorization === `Bearer ${params.gitProxySecret ?? "secret"}`,
     },
     repoPolicyProvider: {
       getAllowedRepoFullName: () => params.repoFullName ?? "ben/repo",
@@ -151,6 +152,7 @@ describe("SessionGitProxyService", () => {
     const serverState = {
       sessionId: "abcd-session",
       userId: "user-1",
+      gitAuthMode: "legacy_secret",
     } as ServerState;
     const secretRepository = {
       get: vi.fn(() => "secret"),
@@ -216,23 +218,28 @@ describe("SessionGitProxyService connector cutover", () => {
     vi.unstubAllGlobals();
   });
 
-  function createCutoverService(gitConfiguredViaConnector: boolean) {
+  function createCutoverService(gitAuthMode: ServerState["gitAuthMode"]) {
     const secrets: Record<string, string> = {
       git_proxy_secret: "legacy-sprite-secret",
       webhook_token: "gateway-session-token",
     };
+    const secretRepository = {
+      get: vi.fn((key: string) => secrets[key] ?? null),
+      set: vi.fn((key: string, value: string) => {
+        secrets[key] = value;
+      }),
+      delete: vi.fn((key: string) => {
+        delete secrets[key];
+      }),
+    } as unknown as SecretRepository;
     const service = new SessionGitProxyService({
       logger: createTestLogger(),
       env: {} as Env,
-      secretRepository: {
-        get: vi.fn((key: string) => secrets[key] ?? null),
-        set: vi.fn(),
-        delete: vi.fn(),
-      } as unknown as SecretRepository,
+      secretRepository,
       getServerState: () => ({
         sessionId: "abcd-session",
         userId: "user-1",
-        gitConfiguredViaConnector,
+        gitAuthMode,
       }) as ServerState,
       getClientState: () => ({
         repoFullName: "ben/repo",
@@ -257,7 +264,7 @@ describe("SessionGitProxyService connector cutover", () => {
         })),
       },
     });
-    return service;
+    return { service, secrets, secretRepository };
   }
 
   function fetchRefs(service: SessionGitProxyService, token: string): Promise<Response> {
@@ -269,24 +276,70 @@ describe("SessionGitProxyService connector cutover", () => {
   }
 
   it("accepts the legacy sprite secret before the cutover", async () => {
-    const service = createCutoverService(false);
+    const { service } = createCutoverService("legacy_secret");
 
+    expect(service.mintGitCapability()).toBeNull();
     await expect(fetchRefs(service, "legacy-sprite-secret")).resolves.toMatchObject({
       status: 200,
+    });
+    const unauthorized = await fetchRefs(service, "gateway-session-token");
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers.get("WWW-Authenticate"))
+      .toBe('Basic realm="my-machines-git-proxy"');
+  });
+
+  it("accepts only Basic capabilities in capability mode", async () => {
+    const { service } = createCutoverService("capability");
+    const capability = service.mintGitCapability();
+    expect(capability).not.toBeNull();
+    const basic = btoa(`x-capability:${capability!.token}`);
+
+    await expect(service.handleRequest(
+      createRequest("/git-proxy/abcd-session/github.com/ben/repo.git/info/refs", {
+        headers: { Authorization: `Basic ${basic}` },
+      }),
+    )).resolves.toMatchObject({ status: 200 });
+    await expect(fetchRefs(service, "legacy-sprite-secret")).resolves.toMatchObject({
+      status: 401,
     });
     await expect(fetchRefs(service, "gateway-session-token")).resolves.toMatchObject({
       status: 401,
     });
   });
 
-  it("accepts only the gateway-injected session token after the cutover", async () => {
-    const service = createCutoverService(true);
+  it("rotates near expiry while accepting the previous capability until expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-28T00:00:00Z"));
+    const { service } = createCutoverService("capability");
+    const first = service.mintGitCapability()!;
+    expect(service.mintGitCapability()).toEqual(first);
 
-    await expect(fetchRefs(service, "gateway-session-token")).resolves.toMatchObject({
-      status: 200,
-    });
-    await expect(fetchRefs(service, "legacy-sprite-secret")).resolves.toMatchObject({
-      status: 401,
-    });
+    vi.advanceTimersByTime(4 * 60 * 1000 + 1);
+    const second = service.mintGitCapability()!;
+    expect(second.token).not.toBe(first.token);
+    expect(service.authenticateGitRequest(
+      `Basic ${btoa(`x-capability:${first.token}`)}`,
+    )).toBe(true);
+
+    vi.advanceTimersByTime(60 * 1000);
+    expect(service.authenticateGitRequest(
+      `Basic ${btoa(`x-capability:${first.token}`)}`,
+    )).toBe(false);
+    expect(service.authenticateGitRequest(
+      `Basic ${btoa(`x-capability:${second.token}`)}`,
+    )).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("revokes capabilities and rejects malformed persisted JSON", () => {
+    const { service, secrets } = createCutoverService("capability");
+    const capability = service.mintGitCapability()!;
+    service.revokeGitCapabilities();
+    expect(service.authenticateGitRequest(
+      `Basic ${btoa(`x-capability:${capability.token}`)}`,
+    )).toBe(false);
+
+    secrets.git_capability = "{invalid";
+    expect(service.mintGitCapability()).not.toBeNull();
   });
 });

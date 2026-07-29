@@ -83,6 +83,9 @@ export interface SessionAgentRpc {
     chunks: Array<{ sequence: number; chunk: UIMessageChunk }>,
   ): Promise<boolean>;
   handleWebhookEvent(token: string, event: AgentEvent): boolean;
+  mintGitCapability(
+    webhookToken: string,
+  ): { token: string; expiresAt: number } | null;
   handleInit(request: InitSessionAgentRequest): Promise<HandleInitResult>;
   handleGetSession(): HandleGetSessionResult;
   handleGetMessages(): HandleGetMessagesResult;

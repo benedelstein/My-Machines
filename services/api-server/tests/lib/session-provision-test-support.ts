@@ -117,7 +117,7 @@ export function createServerState(overrides: Partial<ServerState> = {}): ServerS
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
     spriteLabelsApplied: false,
-    gitConfiguredViaConnector: false,
+    gitAuthMode: "legacy_secret",
     ...overrides,
   };
 }
@@ -166,6 +166,7 @@ export function createService(
     }),
   };
   const ensureGitProxySecret = vi.fn(() => "git-proxy-secret");
+  const retireGitProxySecret = vi.fn();
   const ensureSessionConnector = vi.fn(async () => {
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
@@ -186,7 +187,10 @@ export function createService(
     updatePartialState,
     synthesizeStatus: () => "preparing",
     ensureGitProxySecret,
+    retireGitProxySecret,
     ensureSessionConnector,
+    getSessionConnectorGatewayBase: () =>
+      serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
     githubTokenProvider: {
       getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
     },
@@ -199,6 +203,7 @@ export function createService(
     updateServerState,
     spriteLifecycleClient,
     ensureGitProxySecret,
+    retireGitProxySecret,
     ensureSessionConnector,
   };
 }

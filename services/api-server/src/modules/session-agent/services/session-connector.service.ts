@@ -113,7 +113,7 @@ export class SessionConnectorService {
       allowedEndpoints: [
         `/internal/session/${sessionId}/chunks`,
         `/internal/session/${sessionId}/events`,
-        `/git-proxy/${sessionId}/*`,
+        `/internal/session/${sessionId}/capabilities/git`,
         "/health",
       ],
     });

@@ -21,12 +21,7 @@ export interface GitProxyTokenProvider {
 }
 
 export interface GitProxySecretProvider {
-  /**
-   * The bearer token the git-proxy must receive on this session's requests:
-   * the gateway-injected session token once git is configured through the
-   * connector, otherwise the legacy Sprite-held git-proxy secret.
-   */
-  getExpectedBearerToken(): string | null;
+  authenticateGitRequest(authorization: string | null): boolean;
 }
 
 export interface GitProxyRepoPolicyProvider {

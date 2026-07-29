@@ -46,7 +46,8 @@ Each session mints one internal connector during provisioning, as the blocking
   (same origin, unauthenticated), and its injected credential is the Durable
   Object's existing `webhook_token`. The token is never handed to the Sprite.
 - `allowedEndpoints` pins the session's own paths only: the two webhook routes,
-  its git-proxy prefix, and `/health`.
+  the Git capability-mint route, and `/health`. Git packfile traffic does not
+  traverse the connector while the gateway rejects Git smart-HTTP `Accept` types.
 - Non-secret metadata lands in the D1 `session_connectors` table; the gateway
   connection id is also checkpointed in `ServerState.sessionConnectorId`. If the
   D1 write fails, the connector is deleted before the failure surfaces.
@@ -74,14 +75,25 @@ What this means per flow:
 
 - **Webhooks: unaffected.** The vm-agent's webhook client sets no `Accept`, so
   `fetch` sends the wildcard and the gateway forwards.
-- **Git: blocked.** Git hardcodes `application/x-git-*` accept types and the
-  gateway does not merge multiple `Accept` headers, so there is no
-  client-side workaround. Post-clone remotes stay on the legacy worker-proxy
-  path with the Sprite-held `git_proxy_secret` bearer; the git proxy picks the
-  expected bearer per session from the persisted `gitConfiguredViaConnector`
-  checkpoint (false for every session today). The connector already pins the
-  session's git-proxy path, so the cutover is a `cloneRepo` change once the
-  gateway is fixed.
+- **Git data cannot traverse the connector.** Git hardcodes
+  `application/x-git-*` accept types and the gateway does not merge multiple
+  `Accept` headers. New sessions therefore use the connector only to mint a
+  five-minute opaque Git capability. A repo-local credential helper requests
+  that capability with `Accept: application/json`; Git then presents it with
+  HTTP Basic directly to the Worker Git proxy. The DO stores current and
+  previous capabilities in its existing secrets table, verifies expiry and
+  repository authorization, and revokes them at teardown. Pre-connector
+  sessions retain their legacy `git_proxy_secret`. An extracted capability is
+  replayable off-Sprite while it remains valid; connector identity prevents an
+  off-Sprite caller from minting or refreshing one, not replay during the TTL.
+- **The Git capability path is temporary.** When Fly fixes the gateway, rerun
+  `test:live:gateway-accept` and require Git's `application/x-git-*` requests to
+  reach the Worker before changing production routing. Then add the session's
+  Git-proxy path back to the connector allowlist, point post-clone fetch and push
+  remotes at the connector gateway, and authenticate them with the
+  gateway-injected session token. Stop installing the credential helper and
+  issuing capabilities for new sessions; retain capability-mode compatibility
+  only until existing sessions have migrated or drained.
 - **Provider inference (S4): verify before building.** A client that sends a
   bare `Accept: text/event-stream` for streaming would 406; one that sends
   `application/json` (alone or alongside SSE) works. Check what the Claude and
@@ -99,7 +111,9 @@ population is visible. It deliberately does not fail closed: the alternative is
 a session that cannot report agent output at all.
 
 The initial clone always stays on the direct GitHub path with its short-lived
-read-only token. Removing the legacy webhook validation path is a follow-up,
+read-only token. New sessions use rotating Git capabilities for both post-clone
+fetch and push; pre-connector sessions keep their original remotes and bearer.
+Removing the legacy webhook validation path is a follow-up,
 safe once no pre-connector sessions remain.
 
 ## Live test

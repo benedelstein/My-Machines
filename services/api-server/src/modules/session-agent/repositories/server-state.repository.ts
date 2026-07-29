@@ -34,8 +34,8 @@ export type ServerState = {
   sessionConnectorId: string | null;
   /** True when sprite creation applied the session labels, skipping label repair. */
   spriteLabelsApplied: boolean;
-  /** True when post-clone git remotes were written against the connector gateway. */
-  gitConfiguredViaConnector: boolean;
+  /** Authentication mode used by post-clone Git proxy requests. */
+  gitAuthMode: "legacy_secret" | "capability";
 };
 
 function defaultServerState(): ServerState {
@@ -54,7 +54,7 @@ function defaultServerState(): ServerState {
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
     spriteLabelsApplied: false,
-    gitConfiguredViaConnector: false,
+    gitAuthMode: "legacy_secret",
   };
 }
 
@@ -77,7 +77,11 @@ export class ServerStateRepository implements Repository {
     const rows = this.sql<{ state: string }>`SELECT state FROM server_state WHERE id = 'state'`;
     if (!rows[0]?.state) { return defaultServerState(); }
     // Merge on defaults so older persisted states without newer fields stay valid.
-    return { ...defaultServerState(), ...JSON.parse(rows[0].state) } as ServerState;
+    const parsed = JSON.parse(rows[0].state) as Partial<ServerState> & {
+      gitConfiguredViaConnector?: boolean;
+    };
+    const { gitConfiguredViaConnector: _legacyConnectorFlag, ...persisted } = parsed;
+    return { ...defaultServerState(), ...persisted };
   }
 
   update(partial: Partial<ServerState>): void {
