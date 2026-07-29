@@ -9,6 +9,7 @@ import type {
 import type { GitHubAppResult } from "@/shared/types/github";
 import { z } from "zod";
 import { timingSafeCompare } from "@/shared/utils/crypto";
+import { parseBasicAuthorization } from "@/shared/utils/http-auth";
 import { GitProxyService } from "@/shared/integrations/git/git-proxy.service";
 import type {
   GitProxyProviderError,
@@ -318,26 +319,4 @@ function randomBase64Url(byteLength: number): string {
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/, "");
-}
-
-function parseBasicAuthorization(
-  authorization: string | null,
-): { username: string; password: string } | null {
-  const encoded = authorization?.match(/^Basic\s+(.+)$/i)?.[1];
-  if (!encoded) {
-    return null;
-  }
-  try {
-    const decoded = atob(encoded);
-    const separator = decoded.indexOf(":");
-    if (separator < 0) {
-      return null;
-    }
-    return {
-      username: decoded.slice(0, separator),
-      password: decoded.slice(separator + 1),
-    };
-  } catch {
-    return null;
-  }
 }

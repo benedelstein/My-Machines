@@ -441,9 +441,10 @@ export class SpriteAgentProcessManager {
               : {}),
             SESSION_ID: sessionId,
             DO_WEBHOOK_URL: webhookDelivery.url,
+            DO_WEBHOOK_AUTH: webhookDelivery.token ? "bearer" : "gateway",
             ...(webhookDelivery.token
               ? { DO_WEBHOOK_TOKEN: webhookDelivery.token }
-              : { DO_WEBHOOK_AUTH: "gateway" }),
+              : { DO_WEBHOOK_TOKEN: "" }),
             AGENT_PROCESS_RUN_ID: processRunId,
           },
           idleTimeoutMs: 45_000,

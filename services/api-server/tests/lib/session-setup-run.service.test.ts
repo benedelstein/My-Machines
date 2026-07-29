@@ -287,7 +287,7 @@ describe("SessionSetupRunService", () => {
       .toBe("completed");
   });
 
-  it("includes the session connector task after cloud container when enabled", () => {
+  it("includes the session connector task after cloud container", () => {
     const { clientState } = createHarness();
 
     expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual([
@@ -301,7 +301,7 @@ describe("SessionSetupRunService", () => {
       .toMatchObject({ isBlocking: true, canRetry: true });
   });
 
-  it("backfills the session connector task into older running runs when enabled", () => {
+  it("backfills the session connector task into older running runs", () => {
     const { clientState, service } = createHarness({
       serverState: { finalNetworkPolicyApplied: false },
     });

@@ -17,6 +17,10 @@ export interface GitProxyResult {
   pushedBranch: string | null;
 }
 
+// HTTP Basic requires a realm. This stable value names the Worker git-proxy
+// protection space; it is not a credential or an upstream GitHub identifier.
+const GIT_PROXY_BASIC_REALM = "my-machines-git-proxy";
+
 export class GitProxyService {
   private readonly tokenProvider: GitProxyTokenProvider;
   private readonly secretProvider: GitProxySecretProvider;
@@ -43,7 +47,7 @@ export class GitProxyService {
         },
       });
       return this.result("unauthorized", 401, {
-        "WWW-Authenticate": 'Basic realm="my-machines-git-proxy"',
+        "WWW-Authenticate": `Basic realm="${GIT_PROXY_BASIC_REALM}"`,
       });
     }
 

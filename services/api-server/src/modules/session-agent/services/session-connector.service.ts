@@ -272,6 +272,9 @@ export class SessionConnectorService {
       this.logger.warn("Sprite labels missing after update", {
         fields: { sessionId, spriteName, missing, reported: updated },
       });
+      throw new Error(
+        `Sprite label update did not persist required labels: ${missing.join(", ")}`,
+      );
     }
   }
 

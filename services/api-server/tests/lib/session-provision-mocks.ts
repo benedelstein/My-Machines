@@ -9,6 +9,7 @@ export const mockState = {
   events: [] as string[],
   setNetworkPolicy: vi.fn(),
   execWs: vi.fn(),
+  writeFile: vi.fn(),
   ensureSpriteStartupToolchain: vi.fn(),
   getReadOnlyTokenForRepo: vi.fn(),
 };
@@ -22,6 +23,7 @@ export function mockSpriteClientModule(actual: Record<string, unknown>) {
     }
     setNetworkPolicy = mockState.setNetworkPolicy;
     execWs = mockState.execWs;
+    writeFile = mockState.writeFile;
   }
   return {
     ...actual,
@@ -69,4 +71,5 @@ export function resetProvisionMocks(): void {
     ok: true,
     value: "readonly-token",
   });
+  mockState.writeFile.mockResolvedValue(undefined);
 }

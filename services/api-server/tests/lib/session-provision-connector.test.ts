@@ -83,6 +83,11 @@ describe("SessionProvisionService session connector", () => {
     expect(remoteConfigCommand).toContain(
       "credential.https://worker.test/git-proxy/session-1/github.com/ben/repo.git.helper",
     );
+    expect(mockState.writeFile).toHaveBeenCalledWith(
+      "/home/sprite/.local/bin/mm-git-credential-session-1",
+      expect.stringContaining("x-ephemeral-git-token"),
+      { mode: "0700" },
+    );
     expect(remoteConfigCommand).toContain("git config credential.useHttpPath true");
     expect(remoteConfigCommand).toContain(
       "git config 'http.https://worker.test/git-proxy/session-1/.proactiveAuth' basic",

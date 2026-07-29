@@ -1,4 +1,4 @@
-import type { AccessPolicy } from "@repo/sprites-client";
+import { AccessPolicySchema, type AccessPolicy } from "@repo/sprites-client";
 
 export type SessionConnectorStatus = "active" | "pending_revocation";
 
@@ -105,7 +105,8 @@ function rowToRecord(row: SessionConnectorRow): SessionConnectorRecord {
 
 function parsePolicySummary(json: string): AccessPolicy | null {
   try {
-    return JSON.parse(json) as AccessPolicy;
+    const result = AccessPolicySchema.safeParse(JSON.parse(json));
+    return result.success ? result.data : null;
   } catch {
     return null;
   }

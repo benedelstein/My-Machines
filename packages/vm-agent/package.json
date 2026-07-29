@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bun run src/index-ndjson.ts",
     "test": "vitest run --passWithNoTests",
-    "build": "bun build src/index-ndjson.ts --outfile=dist/vm-agent.bundle.js --target=bun --minify && bun build src/index-webhook.ts --outfile=dist/vm-agent-webhook.bundle.js --target=bun --minify",
+    "build": "bun build src/index-ndjson.ts --outfile=dist/vm-agent.bundle.js --target=bun --minify && bun build src/index-webhook.ts --outfile=dist/vm-agent-webhook.bundle.js --target=bun --minify && bun build src/git-credential-helper.ts --outfile=dist/git-credential-helper.bundle.js --target=bun --minify",
     "lint": "eslint src/ tests/",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",

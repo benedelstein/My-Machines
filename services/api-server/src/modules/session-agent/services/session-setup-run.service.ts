@@ -347,9 +347,9 @@ function ensureNetworkPolicyTaskPresent(
 }
 
 /**
- * Back-fills the session_connector task into runs created before the flag
- * was enabled. Inserted after cloud_container so a mid-provision restart
- * mints the connector before the repository and network-policy steps.
+ * Back-fills session_connector into running setup runs created before that
+ * task existed. It stays after cloud_container so a mid-provision restart
+ * mints the connector before repository and network-policy setup.
  */
 function ensureSessionConnectorTaskPresent(
   setupRun: SessionSetupRun,

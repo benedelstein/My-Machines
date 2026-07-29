@@ -726,6 +726,7 @@ describe("SpriteAgentProcessManager", () => {
       SESSION_ID: "user-session",
       DO_WEBHOOK_URL: "https://evil.test",
       DO_WEBHOOK_TOKEN: "user-token",
+      DO_WEBHOOK_AUTH: "gateway",
       AGENT_PROCESS_RUN_ID: "user-run",
     });
 
@@ -743,6 +744,7 @@ describe("SpriteAgentProcessManager", () => {
           SESSION_ID: "session-1",
           DO_WEBHOOK_URL: "https://worker.test/internal/session/session-1",
           DO_WEBHOOK_TOKEN: "webhook-token",
+          DO_WEBHOOK_AUTH: "bearer",
           AGENT_PROCESS_RUN_ID: expect.any(String),
         }),
       }),
@@ -797,7 +799,7 @@ describe("SpriteAgentProcessManager", () => {
     const spawnEnv = getSpawnEnv();
     expect(spawnEnv.DO_WEBHOOK_URL).toBe("https://worker.test/internal/session/session-1");
     expect(spawnEnv.DO_WEBHOOK_TOKEN).toBe("webhook-token");
-    expect(spawnEnv.DO_WEBHOOK_AUTH).toBeUndefined();
+    expect(spawnEnv.DO_WEBHOOK_AUTH).toBe("bearer");
     // The Sprite still holds the token on this legacy path; never silent.
     expect(loggerWarn).toHaveBeenCalledWith(
       "Session has no connector; using sprite-held webhook token",
@@ -825,7 +827,7 @@ describe("SpriteAgentProcessManager", () => {
     expect(spawnEnv.DO_WEBHOOK_URL).toBe(
       "https://api.sprites.test/v1/gateway/custom_api/conn-1/internal/session/session-1",
     );
-    expect(spawnEnv.DO_WEBHOOK_TOKEN).toBeUndefined();
+    expect(spawnEnv.DO_WEBHOOK_TOKEN).toBe("");
     expect(spawnEnv.DO_WEBHOOK_AUTH).toBe("gateway");
   });
 });

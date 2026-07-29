@@ -22,6 +22,7 @@ import { createLogger } from "@/shared/logging";
 import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
 import { ensureSpriteStartupToolchain } from "@/shared/integrations/sprite-startup-toolchain";
 import type { GitHubAppResult } from "@/shared/types/github";
+import EPHEMERAL_GIT_CREDENTIAL_HELPER from "@repo/vm-agent/dist/git-credential-helper.bundle.js";
 import type { ServerState } from "../repositories/server-state.repository";
 import { buildSessionSpriteLabels } from "./session-connector.service";
 import { isTerminalSetupTask } from "./session-setup-run.service";
@@ -528,17 +529,17 @@ export class SessionProvisionService {
     const helperPath = `/home/sprite/.local/bin/mm-git-credential-${sessionId}`;
     const mintUrl =
       `${connectorGatewayBase}/internal/session/${sessionId}/git-token`;
-    const helperSource = buildGitCredentialHelper({
-      remoteUrl: cloneUrl,
-      mintUrl,
-    });
-    const helperBase64 = btoa(helperSource);
+    const helperCommand = [helperPath, cloneUrl, mintUrl]
+      .map(shellQuote)
+      .join(" ");
+    await sprite.writeFile(
+      helperPath,
+      EPHEMERAL_GIT_CREDENTIAL_HELPER,
+      { mode: "0700" },
+    );
     const gitTokenSetupResult = await sprite.execWs(
       dedent`
       set -e
-      mkdir -p /home/sprite/.local/bin
-      echo ${shellQuote(helperBase64)} | base64 -d > ${shellQuote(helperPath)}
-      chmod 700 ${shellQuote(helperPath)}
       cd ${WORKSPACE_DIR}
       git remote set-url origin ${shellQuote(cloneUrl)}
       git remote set-url --push origin ${shellQuote(cloneUrl)}
@@ -548,7 +549,7 @@ export class SessionProvisionService {
       git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
       git config --unset-all credential.helper || true
       git config credential.helper ""
-      git config --add ${shellQuote(`credential.${cloneUrl}.helper`)} ${shellQuote(helperPath)}
+      git config --add ${shellQuote(`credential.${cloneUrl}.helper`)} ${shellQuote(helperCommand)}
       git config ${shellQuote(`credential.${cloneUrl}.username`)} x-ephemeral-git-token
       git config credential.useHttpPath true
       git config ${shellQuote(`http.${proxyBaseUrl}/.proactiveAuth`)} basic
@@ -585,46 +586,6 @@ export class SessionProvisionService {
       }),
     );
   }
-}
-
-function buildGitCredentialHelper(input: {
-  remoteUrl: string;
-  mintUrl: string;
-}): string {
-  const remote = new URL(input.remoteUrl);
-  return `#!/usr/bin/env bun
-const operation = process.argv[2] ?? "";
-const input = await Bun.stdin.text();
-if (operation !== "get") process.exit(0);
-const values = Object.fromEntries(input.trim().split("\\n").filter(Boolean).map((line) => {
-  const separator = line.indexOf("=");
-  return separator < 0 ? [line, ""] : [line.slice(0, separator), line.slice(separator + 1)];
-}));
-if (values.protocol !== ${JSON.stringify(remote.protocol.slice(0, -1))}
-  || values.host !== ${JSON.stringify(remote.host)}
-  || values.path !== ${JSON.stringify(remote.pathname.slice(1))}) process.exit(0);
-let response;
-for (let attempt = 0; attempt < 3; attempt++) {
-  try {
-    response = await fetch(${JSON.stringify(input.mintUrl)}, {
-      method: "POST",
-      headers: { Accept: "application/json" },
-    });
-    if (response.ok || response.status < 500) break;
-  } catch {}
-  if (attempt < 2) await Bun.sleep(100 * (attempt + 1));
-}
-if (!response?.ok) {
-  process.stderr.write("Git credential mint failed\\n");
-  process.exit(1);
-}
-const body = await response.json();
-if (typeof body?.token !== "string" || !body.token || !Number.isInteger(body.expiresAt)) {
-  process.stderr.write("Git credential mint returned an invalid response\\n");
-  process.exit(1);
-}
-process.stdout.write("username=x-ephemeral-git-token\\npassword=" + body.token + "\\n\\n");
-`;
 }
 
 function getErrorMessage(error: unknown): string {

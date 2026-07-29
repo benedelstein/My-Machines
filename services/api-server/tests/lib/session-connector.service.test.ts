@@ -261,19 +261,18 @@ describe("SessionConnectorService.ensureMinted", () => {
     ]);
   });
 
-  it("still mints when the sprite does not report labels back", async () => {
-    // Fly evaluates the label policy at the gateway, so an unreported label
-    // must not brick the session; a genuinely unlabelled Sprite simply loses
-    // connector access.
+  it("fails closed when the sprite does not report required labels back", async () => {
     const { service, spriteLifecycleClient, spritesClient } = createService({
       spriteLabels: [],
     });
     spriteLifecycleClient.updateSpriteLabels.mockResolvedValue([]);
 
-    await service.ensureMinted("sprite-1");
+    await expect(service.ensureMinted("sprite-1")).rejects.toThrow(
+      "Sprite label update did not persist required labels: session:session-1",
+    );
 
     expect(spriteLifecycleClient.updateSpriteLabels).toHaveBeenCalled();
-    expect(spritesClient.createdRequests).toHaveLength(1);
+    expect(spritesClient.createdRequests).toHaveLength(0);
   });
 
   it("is a no-op when the connector checkpoint exists", async () => {
