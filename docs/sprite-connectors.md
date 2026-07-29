@@ -4,6 +4,10 @@ The API server creates Sprites Custom API connectors through the Sprites REST
 API. A connector keeps an upstream credential outside the Sprite and injects it
 at the Sprites gateway after evaluating its access policy.
 
+For the overall Sprite security and authentication model — credential classes,
+the architecture diagram, and what is implemented vs planned — see
+`docs/sprite-security.md`.
+
 ## Ownership
 
 - `@repo/sprites-client` owns the REST request and response shapes.

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { shellQuote } from "../../src/shared/utils/git-branch";
 import {
   createClientState,
   createEnvironmentSnapshot,
@@ -82,6 +83,16 @@ describe("SessionProvisionService session connector", () => {
     );
     expect(remoteConfigCommand).toContain(
       "credential.https://worker.test/git-proxy/session-1/github.com/ben/repo.git.helper",
+    );
+    const expectedHelper = `!${[
+      "/home/sprite/.local/bin/mm-git-credential-session-1",
+      "https://worker.test/git-proxy/session-1/github.com/ben/repo.git",
+      "https://gateway.test/conn-1/internal/session/session-1/git-token",
+    ].map(shellQuote).join(" ")}`;
+    expect(remoteConfigCommand).toContain(
+      `git config --add ${
+        shellQuote("credential.https://worker.test/git-proxy/session-1/github.com/ben/repo.git.helper")
+      } ${shellQuote(expectedHelper)}`,
     );
     expect(mockState.writeFile).toHaveBeenCalledWith(
       "/home/sprite/.local/bin/mm-git-credential-session-1",

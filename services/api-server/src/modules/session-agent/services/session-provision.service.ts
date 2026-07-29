@@ -529,9 +529,11 @@ export class SessionProvisionService {
     const helperPath = `/home/sprite/.local/bin/mm-git-credential-${sessionId}`;
     const mintUrl =
       `${connectorGatewayBase}/internal/session/${sessionId}/git-token`;
-    const helperCommand = [helperPath, cloneUrl, mintUrl]
+    // The leading ! makes Git run the quoted helper command through the shell.
+    // Without it, Git treats the leading quote as part of a helper name.
+    const helperCommand = `!${[helperPath, cloneUrl, mintUrl]
       .map(shellQuote)
-      .join(" ");
+      .join(" ")}`;
     await sprite.writeFile(
       helperPath,
       EPHEMERAL_GIT_CREDENTIAL_HELPER,
