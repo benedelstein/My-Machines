@@ -197,6 +197,8 @@ extension AgentSessionView {
                 switch task.id {
                 case .cloudContainer:
                     cloudContainerLabel
+                case .sessionConnector:
+                    sessionConnectorLabel
                 case .repository:
                     repositoryLabel
                 case .setupScript:
@@ -214,6 +216,16 @@ extension AgentSessionView {
                 case .running: "Setting up cloud computer"
                 case .failed: "Cloud computer setup failed"
                 case .skipped: "Skipped cloud computer setup"
+                }
+            }
+
+            private var sessionConnectorLabel: String {
+                switch task.status {
+                case .pending, .unknown: "Secure session credentials"
+                case .running: "Securing session credentials"
+                case .completed: "Secured session credentials"
+                case .failed: "Session credential setup failed"
+                case .skipped: "Skipped session credential setup"
                 }
             }
 

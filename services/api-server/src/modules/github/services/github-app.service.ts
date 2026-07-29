@@ -261,12 +261,12 @@ export class GitHubAppService {
    * Checks D1 for installation, verifies repo access, and returns a cached or fresh token.
    */
   async getInstallationTokenForRepo(repoFullName: string): Promise<GitHubAppResult<string>> {
-    const repoParts = this.parseRepoFullName(repoFullName);
-    if (!repoParts.ok) {
-      return repoParts;
+    const repoPartsResult = this.parseRepoFullName(repoFullName);
+    if (!repoPartsResult.ok) {
+      return repoPartsResult;
     }
 
-    const { owner, repo } = repoParts.value;
+    const { owner, repo } = repoPartsResult.value;
     const installationResult = await this.findInstallationForRepo(owner, repo);
     if (!installationResult.ok) {
       return installationResult;

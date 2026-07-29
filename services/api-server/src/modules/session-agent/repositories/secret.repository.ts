@@ -2,8 +2,9 @@ import type { Migration, SqlFn, Repository } from "./repository.types";
 
 export type SecretKey =
   | "git_proxy_secret"
+  | "ephemeral_git_token"
   | "editor_token"
-  | "webhook_token";
+  | "webhook_token"; // todo rename to session_bearer_secret after migration
 
 interface SecretRow {
   key: SecretKey;

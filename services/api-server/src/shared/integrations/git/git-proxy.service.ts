@@ -17,6 +17,10 @@ export interface GitProxyResult {
   pushedBranch: string | null;
 }
 
+// HTTP Basic requires a realm. This stable value names the Worker git-proxy
+// protection space; it is not a credential or an upstream GitHub identifier.
+const GIT_PROXY_BASIC_REALM = "my-machines-git-proxy";
+
 export class GitProxyService {
   private readonly tokenProvider: GitProxyTokenProvider;
   private readonly secretProvider: GitProxySecretProvider;
@@ -35,17 +39,16 @@ export class GitProxyService {
       fields: { method: request.method, url: request.url },
     });
 
-    const gitProxySecret = this.secretProvider.getGitProxySecret();
     const authHeader = request.headers.get("Authorization");
-    if (!gitProxySecret || authHeader !== `Bearer ${gitProxySecret}`) {
+    if (!this.secretProvider.authenticateGitRequest(authHeader)) {
       this.logger.warn("[git-proxy] auth failed", {
         fields: {
-          hasSecret: gitProxySecret !== null,
           hasAuthorizationHeader: authHeader !== null,
-          authorizationMatched: authHeader === `Bearer ${gitProxySecret}`,
         },
       });
-      return this.result("unauthorized", 401);
+      return this.result("unauthorized", 401, {
+        "WWW-Authenticate": `Basic realm="${GIT_PROXY_BASIC_REALM}"`,
+      });
     }
 
     const githubPath = this.parseGitHubPath(path);
@@ -154,9 +157,13 @@ export class GitProxyService {
     }
   }
 
-  private result(message: string, status: number): GitProxyResult {
+  private result(
+    message: string,
+    status: number,
+    headers?: HeadersInit,
+  ): GitProxyResult {
     return {
-      response: new Response(message, { status }),
+      response: new Response(message, { status, headers }),
       pushedBranch: null,
     };
   }

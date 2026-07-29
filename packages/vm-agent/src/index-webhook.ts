@@ -82,9 +82,12 @@ const initialMessage = loadInitialMessage();
 
 const webhookUrl = process.env.DO_WEBHOOK_URL;
 const webhookToken = process.env.DO_WEBHOOK_TOKEN;
+// "gateway" means the webhook base is a connector gateway URL: the gateway
+// authenticates this VM and injects the credential, so no token is held here.
+const gatewayAuth = process.env.DO_WEBHOOK_AUTH === "gateway";
 const processRunId = process.env.AGENT_PROCESS_RUN_ID;
 if (!webhookUrl) { throw new Error("Missing DO_WEBHOOK_URL env var"); }
-if (!webhookToken) { throw new Error("Missing DO_WEBHOOK_TOKEN env var"); }
+if (!webhookToken && !gatewayAuth) { throw new Error("Missing DO_WEBHOOK_TOKEN env var"); }
 if (!processRunId) { throw new Error("Missing AGENT_PROCESS_RUN_ID env var"); }
 
 const args = {
@@ -119,7 +122,7 @@ const runner = new WebhookAgentRunner({
   config: providerConfig,
   settings,
   webhookUrl,
-  webhookToken,
+  webhookToken: gatewayAuth ? null : webhookToken!,
   processRunId,
   args,
   initialAgentMode,

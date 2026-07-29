@@ -22,6 +22,7 @@ import {
   type ServerState,
 } from "@/modules/session-agent/repositories/server-state.repository";
 import { SessionEnvironmentSnapshotRepository } from "@/modules/session-agent/repositories/session-environment-snapshot.repository";
+import { SessionConnectorsRepository } from "@/modules/session-agent/repositories/session-connectors.repository";
 import { SetupOutputRepository } from "@/modules/session-agent/repositories/setup-output.repository";
 import { migrateAll } from "@/modules/session-agent/repositories/schema-manager.repository";
 import { createLogger, initializeLogger } from "@/shared/logging";
@@ -49,6 +50,7 @@ import type {
   ChatMessageEvent,
 } from "@repo/shared";
 import { AgentTurnCoordinator } from "@/modules/session-agent/services/agent-turn-coordinator.service";
+import { SessionConnectorService } from "@/modules/session-agent/services/session-connector.service";
 import { SessionProvisionService } from "@/modules/session-agent/services/session-provision.service";
 import { SessionChatDispatchService } from "@/modules/session-agent/services/session-chat-dispatch.service";
 import { SessionSetupRunService } from "@/modules/session-agent/services/session-setup-run.service";
@@ -69,6 +71,7 @@ import { NotificationPublisher } from "@/modules/notifications/services/notifica
 import { SessionAgentAttachmentProvider } from "./session-agent-attachment-provider";
 import { SpriteAgentProcessManager } from "@/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
 import { normalizePullRequestState } from "@/modules/session-agent/utils/session-agent-pull-request-state.utils";
+import { synthesizeSessionStatus } from "@/modules/session-agent/utils/session-status.utils";
 import { SessionAutoPullRequestService } from "./session-auto-pull-request.service";
 import { SessionPullRequestLifecycleService } from "./session-pull-request-lifecycle.service";
 import { SessionRepoAccessLifecycleService } from "./session-repo-access-lifecycle.service";
@@ -98,6 +101,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private readonly setupRunService: SessionSetupRunService;
   private readonly setupOutputService: SessionSetupOutputService;
   private readonly providerConnectionService: SessionProviderConnectionService;
+  private readonly sessionConnectorService: SessionConnectorService;
   private readonly gitProxyService: SessionGitProxyService;
   private readonly queryService: SessionQueryService;
   private readonly sessionSummaryService: SessionSummaryService;
@@ -294,6 +298,19 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       getClientState: () => this.state,
       getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
       getProviderCredentialAdapter,
+      getConnectorGatewayBase: () => this.sessionConnectorService.getGatewayBase(),
+    });
+
+    this.sessionConnectorService = new SessionConnectorService({
+      logger: this.logger,
+      env: this.env,
+      spriteLifecycleClient: this.spriteLifecycleClient,
+      repository: new SessionConnectorsRepository(this.env.DB),
+      getServerState: () => this.serverState,
+      setSessionConnectorId: (gatewayConnectionId) =>
+        this.updateServerState({ sessionConnectorId: gatewayConnectionId }),
+      getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
+      ensureWebhookToken: () => this.processManager.ensureWebhookToken(),
     });
 
     this.provisionService = new SessionProvisionService({
@@ -306,7 +323,11 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       updateServerState: (partial) => this.updateServerState(partial),
       updatePartialState: (partial) => this.updatePartialState(partial),
       synthesizeStatus: () => this.synthesizeStatus(),
-      ensureGitProxySecret: () => this.gitProxyService.ensureGitProxySecret(),
+      retireGitProxySecret: () => this.gitProxyService.retireGitProxySecret(),
+      ensureSessionConnector: (spriteName) =>
+        this.sessionConnectorService.ensureMinted(spriteName),
+      getSessionConnectorGatewayBase: () =>
+        this.sessionConnectorService.getGatewayBase(),
       githubTokenProvider: this.githubAppService,
       setupReporter: {
         startTask: (taskId) => this.setupRunService.startTask(taskId),
@@ -429,24 +450,10 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   private synthesizeStatus(setupRun?: SessionSetupRun | null): SessionStatus {
-    const effectiveSetupRun = setupRun === undefined
-      ? this.state.sessionSetupRun
-      : setupRun;
-    if (!this.serverState.initialized || !effectiveSetupRun) {
-      return "preparing";
-    }
-    switch (effectiveSetupRun.status) {
-      case "running":
-        return "preparing";
-      case "failed":
-        return "setup_failed";
-      case "completed":
-        return "ready";
-      default: {
-        const exhaustiveCheck: never = effectiveSetupRun.status;
-        throw new Error(`Unhandled setup run status: ${exhaustiveCheck}`);
-      }
-    }
+    return synthesizeSessionStatus({
+      initialized: this.serverState.initialized,
+      setupRun: setupRun === undefined ? this.state.sessionSetupRun : setupRun,
+    });
   }
 
   private async publishTurnFinishedNotification(message: UIMessage): Promise<void> {
@@ -537,6 +544,12 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     return true;
   }
 
+  mintEphemeralGitToken(webhookToken: string): { token: string; expiresAt: number } | null {
+    if (!this.isWebhookTokenValid(webhookToken)) {
+      return null;
+    }
+    return this.gitProxyService.mintEphemeralGitToken();
+  }
   // HTTP/RPC Handlers
 
   /**
@@ -815,6 +828,15 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     } catch (error) {
       this.logger.warn("Failed to kill vm-agent on session delete", { error });
     }
+
+    // Revoke short-lived Git authority and connector mint authority before
+    // potentially slow external cleanup.
+    this.gitProxyService.revokeEphemeralGitTokens();
+    this.secretRepository.delete("webhook_token");
+
+    // Delete the session's internal connector. Never throws; a failed delete
+    // leaves the D1 record in pending_revocation for reconciliation.
+    await this.sessionConnectorService.deleteForTeardown();
 
     // Clean up sprite
     if (this.serverState.spriteName) {

@@ -73,7 +73,13 @@ Only one user turn may be active per session. A second `chat.message` while `act
 4. If attach fails before writing, fall back to a fresh spawn.
 5. If writing happened but the ack never arrives, fence the uncertain process before deciding whether a new spawn is safe.
 
-Fresh spawn writes the webhook bundle to `~/.cloude/agent-webhook.js`, stages the initial message under `~/.cloude/turns/`, passes `DO_WEBHOOK_URL` and `DO_WEBHOOK_TOKEN`, and captures the Sprite process id from the setup session.
+Fresh spawn writes the webhook bundle to `~/.cloude/agent-webhook.js`, stages
+the initial message under `~/.cloude/turns/`, and captures the Sprite process id
+from the setup session. New sessions receive the connector gateway in
+`DO_WEBHOOK_URL` with `DO_WEBHOOK_AUTH=gateway` and no bearer token; the gateway
+injects the session credential after verifying the Sprite label. Pre-connector
+sessions retain the explicit legacy fallback: the Worker URL plus
+`DO_WEBHOOK_AUTH=bearer` and `DO_WEBHOOK_TOKEN`.
 
 If provisioning runs a startup script, `SessionProvisionService` sends stdout/stderr through `SessionSetupOutputService`. The service persists full output in `SetupOutputRepository`, broadcasts batched `setup.output.chunks` messages to connected clients, and leaves only output metadata on the public setup task. `GET /sessions/{sessionId}/setup-output` reads the full accumulated output on demand through `SessionQueryService`.
 

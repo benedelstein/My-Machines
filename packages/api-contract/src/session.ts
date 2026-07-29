@@ -70,6 +70,13 @@ export const CloudContainerSetupTask = BaseSessionSetupTask.extend({
 });
 export type CloudContainerSetupTask = z.infer<typeof CloudContainerSetupTask>;
 
+export const SessionConnectorSetupTask = BaseSessionSetupTask.extend({
+  id: z.literal("session_connector"),
+  isBlocking: z.literal(true),
+  canRetry: z.literal(true),
+});
+export type SessionConnectorSetupTask = z.infer<typeof SessionConnectorSetupTask>;
+
 export const RepositorySetupTask = BaseSessionSetupTask.extend({
   id: z.literal("repository"),
   isBlocking: z.literal(true),
@@ -95,6 +102,7 @@ export type NetworkPolicySetupTask = z.infer<typeof NetworkPolicySetupTask>;
 
 export const SessionSetupTask = z.discriminatedUnion("id", [
   CloudContainerSetupTask,
+  SessionConnectorSetupTask,
   RepositorySetupTask,
   StartupScriptSetupTask,
   NetworkPolicySetupTask,

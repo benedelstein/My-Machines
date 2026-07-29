@@ -25,6 +25,7 @@ function setupTask(id: SessionSetupTask["id"], status: SessionSetupTask["status"
 
   switch (id) {
     case "cloud_container":
+    case "session_connector":
     case "repository":
     case "network_policy":
       return { ...base, id, isBlocking: true, canRetry: true };

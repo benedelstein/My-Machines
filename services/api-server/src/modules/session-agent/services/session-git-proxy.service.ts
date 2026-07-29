@@ -7,6 +7,9 @@ import type {
   SessionRepoAccessResult,
 } from "@/shared/types/repo-access";
 import type { GitHubAppResult } from "@/shared/types/github";
+import { z } from "zod";
+import { timingSafeCompare } from "@/shared/utils/crypto";
+import { parseBasicAuthorization } from "@/shared/utils/http-auth";
 import { GitProxyService } from "@/shared/integrations/git/git-proxy.service";
 import type {
   GitProxyProviderError,
@@ -31,10 +34,26 @@ export interface SessionGitProxyServiceDeps {
   };
 }
 
+const EPHEMERAL_GIT_TOKEN_TTL_MS = 5 * 60 * 1000;
+const EPHEMERAL_GIT_TOKEN_ROTATION_WINDOW_MS = 60 * 1000;
+const EPHEMERAL_GIT_TOKEN_USERNAME = "x-ephemeral-git-token";
+
+const EphemeralGitTokenEntrySchema = z.object({
+  token: z.string().min(1),
+  expiresAt: z.number().int().positive(),
+});
+
+const StoredEphemeralGitTokenSchema = z.object({
+  current: EphemeralGitTokenEntrySchema,
+  previous: EphemeralGitTokenEntrySchema.optional(),
+});
+
+export type MintedEphemeralGitToken = z.infer<typeof EphemeralGitTokenEntrySchema>;
+
 /**
  * Session-scoped adapter around the agnostic `GitProxyService`.
- * Owns the git-proxy shared secret (persisted via `SecretRepository`),
- * and access-control/pushed-branch state mutation. Installation tokens stay
+ * Resolves the expected request bearer from `SecretRepository` and owns
+ * access-control/pushed-branch state mutation. Installation tokens stay
  * in the GitHub module's D1 token cache.
  */
 export class SessionGitProxyService implements
@@ -53,8 +72,6 @@ export class SessionGitProxyService implements
   private readonly enforceSessionAccessBlocked: () => Promise<void>;
   private readonly githubTokenProvider: SessionGitProxyServiceDeps["githubTokenProvider"];
   private readonly gitProxyService: GitProxyService;
-  /** Shared secret for authenticating sprite → worker git-proxy requests. */
-  private gitProxySecret: string | null;
 
   constructor(deps: SessionGitProxyServiceDeps) {
     this.logger = deps.logger.scope("session-git-proxy");
@@ -67,7 +84,6 @@ export class SessionGitProxyService implements
     this.assertSessionRepoAccess = deps.assertSessionRepoAccess;
     this.enforceSessionAccessBlocked = deps.enforceSessionAccessBlocked;
     this.githubTokenProvider = deps.githubTokenProvider;
-    this.gitProxySecret = this.secretRepository.get("git_proxy_secret");
     this.gitProxyService = new GitProxyService({
       tokenProvider: this,
       secretProvider: this,
@@ -76,13 +92,43 @@ export class SessionGitProxyService implements
     });
   }
 
-  /** Returns the cached git-proxy secret, generating and persisting it if missing. */
-  ensureGitProxySecret(): string {
-    if (!this.gitProxySecret) {
-      this.gitProxySecret = crypto.randomUUID();
-      this.secretRepository.set("git_proxy_secret", this.gitProxySecret);
+  /** Removes the legacy session-long Git bearer after ephemeral-token cutover. */
+  retireGitProxySecret(): void {
+    this.secretRepository.delete("git_proxy_secret");
+  }
+
+  /**
+   * Mints or reuses the session's ephemeral Git token.
+   * The read/rotate/write sequence is synchronous inside the Durable Object.
+   */
+  mintEphemeralGitToken(): MintedEphemeralGitToken | null {
+    if (this.getServerState().gitAuthMode !== "ephemeral_token") {
+      return null;
     }
-    return this.gitProxySecret;
+
+    const now = Date.now();
+    const stored = this.readEphemeralGitToken();
+    if (stored && stored.current.expiresAt - now > EPHEMERAL_GIT_TOKEN_ROTATION_WINDOW_MS) {
+      return stored.current;
+    }
+
+    const current = {
+      token: randomBase64Url(32),
+      expiresAt: now + EPHEMERAL_GIT_TOKEN_TTL_MS,
+    };
+    const previous = stored?.current.expiresAt && stored.current.expiresAt > now
+      ? stored.current
+      : undefined;
+    this.secretRepository.set(
+      "ephemeral_git_token",
+      JSON.stringify({ current, ...(previous ? { previous } : {}) }),
+    );
+    return current;
+  }
+
+  /** Revokes all outstanding ephemeral Git tokens for the session. */
+  revokeEphemeralGitTokens(): void {
+    this.secretRepository.delete("ephemeral_git_token");
   }
 
   /**
@@ -109,8 +155,39 @@ export class SessionGitProxyService implements
     return result.response;
   }
 
-  getGitProxySecret(): string | null {
-    return this.gitProxySecret;
+  authenticateGitRequest(authorization: string | null): boolean {
+    const mode = this.getServerState().gitAuthMode;
+    if (mode === "legacy_secret") {
+      const expected = this.secretRepository.get("git_proxy_secret");
+      const presented = authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+      return Boolean(expected && presented && timingSafeCompare(expected, presented));
+    }
+
+    const basic = parseBasicAuthorization(authorization);
+    if (!basic || basic.username !== EPHEMERAL_GIT_TOKEN_USERNAME) {
+      return false;
+    }
+    const now = Date.now();
+    const stored = this.readEphemeralGitToken();
+    if (!stored) {
+      return false;
+    }
+
+    const currentValid = stored.current.expiresAt > now
+      && timingSafeCompare(stored.current.token, basic.password);
+    const previousValid = stored.previous !== undefined
+      && stored.previous.expiresAt > now
+      && timingSafeCompare(stored.previous.token, basic.password);
+
+    const previous = stored.previous?.expiresAt && stored.previous.expiresAt > now
+      ? stored.previous
+      : undefined;
+    if (stored.current.expiresAt <= now) {
+      this.secretRepository.delete("ephemeral_git_token");
+    } else if (stored.previous && !previous) {
+      this.secretRepository.set("ephemeral_git_token", JSON.stringify({ current: stored.current }));
+    }
+    return currentValid || previousValid;
   }
 
   getAllowedRepoFullName(): string | null {
@@ -157,6 +234,23 @@ export class SessionGitProxyService implements
       default:
         return { code: "TOKEN_UNAVAILABLE", status: 503, message: error.message };
     }
+  }
+
+  private readEphemeralGitToken(): z.infer<typeof StoredEphemeralGitTokenSchema> | null {
+    const raw = this.secretRepository.get("ephemeral_git_token");
+    if (!raw) {
+      return null;
+    }
+    try {
+      const parsed = StoredEphemeralGitTokenSchema.safeParse(JSON.parse(raw));
+      if (parsed.success) {
+        return parsed.data;
+      }
+    } catch {
+      // Invalid persisted secret is revoked below.
+    }
+    this.secretRepository.delete("ephemeral_git_token");
+    return null;
   }
 
   private async respondToAccessFailure(
@@ -216,4 +310,13 @@ export class SessionGitProxyService implements
       }
     }
   }
+}
+
+function randomBase64Url(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
 }

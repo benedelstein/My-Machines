@@ -11,6 +11,7 @@ import type { ServerState } from "../repositories/server-state.repository";
 
 const SETUP_TASK_DEFINITIONS = {
   cloud_container: { isBlocking: true, canRetry: true },
+  session_connector: { isBlocking: true, canRetry: true },
   repository: { isBlocking: true, canRetry: true },
   setup_script: { isBlocking: false, canRetry: false },
   network_policy: { isBlocking: true, canRetry: true },
@@ -151,7 +152,11 @@ export class SessionSetupRunService {
     this.updateRun(nextRun);
   }
 
-  /** Recovers setup run state from saved state when the DO restarts. */
+  /**
+   * Recovers setup run state from saved state when the DO restarts. Only a
+   * running run is repaired; terminal runs are never reopened, so tasks added
+   * after a session finished provisioning are not applied retroactively.
+   */
   repairOnStart(): void {
     const setupRun = this.getClientState().sessionSetupRun;
     if (!setupRun) { return; }
@@ -165,12 +170,16 @@ export class SessionSetupRunService {
 
     const serverState = this.getServerState();
     const now = new Date().toISOString();
-    const repairableRun = ensureNetworkPolicyTaskPresent(currentRun, serverState, now);
+    const repairableRun = ensureBackfilledTasksPresent(currentRun, serverState, now);
     const repairedTasks = repairableRun.tasks.map((task): SessionSetupTask => {
       if (isTerminalSetupTask(task)) { return task; }
       switch (task.id) {
         case "cloud_container":
           return serverState.spriteName && serverState.startupToolchain
+            ? completeSetupTaskForRepair(task, now)
+            : task;
+        case "session_connector":
+          return serverState.sessionConnectorId
             ? completeSetupTaskForRepair(task, now)
             : task;
         case "repository":
@@ -298,6 +307,7 @@ function updateSetupTask(
 ): SessionSetupTask {
   switch (task.id) {
     case "cloud_container":
+    case "session_connector":
     case "repository":
     case "network_policy":
     case "setup_script":
@@ -307,6 +317,16 @@ function updateSetupTask(
       throw new Error(`Unhandled setup task: ${JSON.stringify(exhaustiveCheck)}`);
     }
   }
+}
+
+/** Inserts setup tasks added after this run was built, in their run positions. */
+function ensureBackfilledTasksPresent(
+  setupRun: SessionSetupRun,
+  serverState: ServerState,
+  now: string,
+): SessionSetupRun {
+  const withNetworkPolicy = ensureNetworkPolicyTaskPresent(setupRun, serverState, now);
+  return ensureSessionConnectorTaskPresent(withNetworkPolicy, serverState, now);
 }
 
 function ensureNetworkPolicyTaskPresent(
@@ -323,6 +343,29 @@ function ensureNetworkPolicyTaskPresent(
     : createSetupTask("network_policy");
   const tasks = [...setupRun.tasks];
   tasks.push(networkPolicyTask);
+  return { ...setupRun, tasks };
+}
+
+/**
+ * Back-fills session_connector into running setup runs created before that
+ * task existed. It stays after cloud_container so a mid-provision restart
+ * mints the connector before repository and network-policy setup.
+ */
+function ensureSessionConnectorTaskPresent(
+  setupRun: SessionSetupRun,
+  serverState: ServerState,
+  now: string,
+): SessionSetupRun {
+  if (setupRun.tasks.some((task) => task.id === "session_connector")) {
+    return setupRun;
+  }
+
+  const connectorTask = serverState.sessionConnectorId
+    ? completeSetupTaskForRepair(createSetupTask("session_connector"), now)
+    : createSetupTask("session_connector");
+  const tasks = [...setupRun.tasks];
+  const cloudContainerIndex = tasks.findIndex((task) => task.id === "cloud_container");
+  tasks.splice(cloudContainerIndex + 1, 0, connectorTask);
   return { ...setupRun, tasks };
 }
 

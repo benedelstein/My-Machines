@@ -1,24 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ClientState, Logger } from "@repo/shared";
+import { createTestLogger } from "./test-logger";
+import type { ClientState } from "@repo/shared";
 import { GitProxyService } from "../../src/shared/integrations/git/git-proxy.service";
 import type { GitProxyTokenProvider } from "../../src/shared/integrations/git/git.providers";
 import { SessionGitProxyService } from "../../src/modules/session-agent/services/session-git-proxy.service";
 import type { SecretRepository } from "../../src/modules/session-agent/repositories/secret.repository";
 import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
 import type { Env } from "../../src/shared/types";
-
-function createLogger(): Logger {
-  return {
-    log() {},
-    debug() {},
-    info() {},
-    warn() {},
-    error() {},
-    scope() {
-      return this;
-    },
-  };
-}
 
 function createService(params: {
   tokenProvider?: GitProxyTokenProvider;
@@ -35,14 +23,15 @@ function createService(params: {
       })),
     },
     secretProvider: {
-      getGitProxySecret: () => params.gitProxySecret ?? "secret",
+      authenticateGitRequest: (authorization) =>
+        authorization === `Bearer ${params.gitProxySecret ?? "secret"}`,
     },
     repoPolicyProvider: {
       getAllowedRepoFullName: () => params.repoFullName ?? "ben/repo",
       getSessionId: () => params.sessionId ?? "abcd-session",
       getPushedBranch: () => params.pushedBranch ?? null,
     },
-    logger: createLogger(),
+    logger: createTestLogger(),
   });
 }
 
@@ -163,6 +152,7 @@ describe("SessionGitProxyService", () => {
     const serverState = {
       sessionId: "abcd-session",
       userId: "user-1",
+      gitAuthMode: "legacy_secret",
     } as ServerState;
     const secretRepository = {
       get: vi.fn(() => "secret"),
@@ -174,7 +164,7 @@ describe("SessionGitProxyService", () => {
     });
     const updatePushedBranch = vi.fn();
     const service = new SessionGitProxyService({
-      logger: createLogger(),
+      logger: createTestLogger(),
       env: {} as Env,
       secretRepository,
       getServerState: () => serverState,
@@ -215,5 +205,141 @@ describe("SessionGitProxyService", () => {
       "github_token",
       expect.any(String),
     );
+  });
+});
+
+describe("SessionGitProxyService connector cutover", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("ok")));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function createCutoverService(gitAuthMode: ServerState["gitAuthMode"]) {
+    const secrets: Record<string, string> = {
+      git_proxy_secret: "legacy-sprite-secret",
+      webhook_token: "gateway-session-token",
+    };
+    const secretRepository = {
+      get: vi.fn((key: string) => secrets[key] ?? null),
+      set: vi.fn((key: string, value: string) => {
+        secrets[key] = value;
+      }),
+      delete: vi.fn((key: string) => {
+        delete secrets[key];
+      }),
+    } as unknown as SecretRepository;
+    const service = new SessionGitProxyService({
+      logger: createTestLogger(),
+      env: {} as Env,
+      secretRepository,
+      getServerState: () => ({
+        sessionId: "abcd-session",
+        userId: "user-1",
+        gitAuthMode,
+      }) as ServerState,
+      getClientState: () => ({
+        repoFullName: "ben/repo",
+        pushedBranch: null,
+      }) as ClientState,
+      updatePartialState: vi.fn(),
+      updatePushedBranch: vi.fn(),
+      assertSessionRepoAccess: vi.fn(async () => ({
+        ok: true,
+        value: {
+          userId: "user-1",
+          repoId: 1,
+          installationId: 2,
+          repoFullName: "ben/repo",
+        },
+      })),
+      enforceSessionAccessBlocked: vi.fn(),
+      githubTokenProvider: {
+        getInstallationTokenForRepo: vi.fn(async () => ({
+          ok: true,
+          value: "github-module-token",
+        })),
+      },
+    });
+    return { service, secrets, secretRepository };
+  }
+
+  function fetchRefs(service: SessionGitProxyService, token: string): Promise<Response> {
+    return service.handleRequest(
+      createRequest("/git-proxy/abcd-session/github.com/ben/repo.git/info/refs", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+  }
+
+  it("accepts the legacy sprite secret before the cutover", async () => {
+    const { service } = createCutoverService("legacy_secret");
+
+    expect(service.mintEphemeralGitToken()).toBeNull();
+    await expect(fetchRefs(service, "legacy-sprite-secret")).resolves.toMatchObject({
+      status: 200,
+    });
+    const unauthorized = await fetchRefs(service, "gateway-session-token");
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers.get("WWW-Authenticate"))
+      .toBe('Basic realm="my-machines-git-proxy"');
+  });
+
+  it("accepts only Basic ephemeral tokens in ephemeral-token mode", async () => {
+    const { service } = createCutoverService("ephemeral_token");
+    const minted = service.mintEphemeralGitToken();
+    expect(minted).not.toBeNull();
+    const basic = btoa(`x-ephemeral-git-token:${minted!.token}`);
+
+    await expect(service.handleRequest(
+      createRequest("/git-proxy/abcd-session/github.com/ben/repo.git/info/refs", {
+        headers: { Authorization: `Basic ${basic}` },
+      }),
+    )).resolves.toMatchObject({ status: 200 });
+    await expect(fetchRefs(service, "legacy-sprite-secret")).resolves.toMatchObject({
+      status: 401,
+    });
+    await expect(fetchRefs(service, "gateway-session-token")).resolves.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it("rotates near expiry while accepting the previous token until expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-28T00:00:00Z"));
+    const { service } = createCutoverService("ephemeral_token");
+    const first = service.mintEphemeralGitToken()!;
+    expect(service.mintEphemeralGitToken()).toEqual(first);
+
+    vi.advanceTimersByTime(4 * 60 * 1000 + 1);
+    const second = service.mintEphemeralGitToken()!;
+    expect(second.token).not.toBe(first.token);
+    expect(service.authenticateGitRequest(
+      `Basic ${btoa(`x-ephemeral-git-token:${first.token}`)}`,
+    )).toBe(true);
+
+    vi.advanceTimersByTime(60 * 1000);
+    expect(service.authenticateGitRequest(
+      `Basic ${btoa(`x-ephemeral-git-token:${first.token}`)}`,
+    )).toBe(false);
+    expect(service.authenticateGitRequest(
+      `Basic ${btoa(`x-ephemeral-git-token:${second.token}`)}`,
+    )).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("revokes ephemeral tokens and rejects malformed persisted JSON", () => {
+    const { service, secrets } = createCutoverService("ephemeral_token");
+    const minted = service.mintEphemeralGitToken()!;
+    service.revokeEphemeralGitTokens();
+    expect(service.authenticateGitRequest(
+      `Basic ${btoa(`x-ephemeral-git-token:${minted.token}`)}`,
+    )).toBe(false);
+
+    secrets.ephemeral_git_token = "{invalid";
+    expect(service.mintEphemeralGitToken()).not.toBeNull();
   });
 });

@@ -270,23 +270,36 @@ export function getDefaultNetworkAllowlistDomains(): string[] {
 
 export function buildBootstrapNetworkPolicy(args: {
   workerHostname: string;
+  connectorGatewayHostname?: string;
 }): NetworkPolicyRule[] {
-  return buildNetworkPolicy([allow(args.workerHostname)]);
+  return buildNetworkPolicy([
+    allow(args.workerHostname),
+    ...(args.connectorGatewayHostname ? [allow(args.connectorGatewayHostname)] : []),
+  ]);
 }
 
 export function buildFinalNetworkPolicy(args: {
   workerHostname: string;
   providerId: ProviderId;
   network: NetworkAccessConfig;
+  /**
+   * Connector gateway hostname to keep reachable in restricted modes so
+   * class-A connector traffic (webhook, git) works. `open` is unaffected.
+   */
+  connectorGatewayHostname?: string;
 }): NetworkPolicyRule[] {
+  const gatewayRule = args.connectorGatewayHostname
+    ? [allow(args.connectorGatewayHostname)]
+    : [];
   switch (args.network.mode) {
     case "open":
       return [{ domain: "*", action: "allow" }];
     case "default":
-      return buildNetworkPolicy([allow(args.workerHostname)]);
+      return buildNetworkPolicy([allow(args.workerHostname), ...gatewayRule]);
     case "custom": {
       const customRules = [
         allow(args.workerHostname),
+        ...gatewayRule,
         ...args.network.extraAllowlist.map(allow),
       ];
       return args.network.includeDefaultAllowlist
@@ -299,6 +312,7 @@ export function buildFinalNetworkPolicy(args: {
     case "locked":
       return appendDenyAll([
         allow(args.workerHostname),
+        ...gatewayRule,
         ...getProviderNetworkPolicyRules(args.providerId),
       ]);
     default: {

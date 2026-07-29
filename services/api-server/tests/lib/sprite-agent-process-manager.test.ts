@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as SpritesClientModule from "@repo/sprites-client";
-import type { AgentSettings, ClientState, Logger, SessionSetupRun } from "@repo/shared";
+import type { AgentSettings, ClientState, SessionSetupRun } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
 import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
 
@@ -49,6 +49,7 @@ vi.mock("../../src/modules/session-agent/services/agent-attachment.service", () 
 }));
 
 import { encodeAgentInput, encodeAgentOutput } from "@repo/shared";
+import { createTestLogger } from "./test-logger";
 import { SpriteAgentProcessManager } from "../../src/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
 
 // The barrel is mocked above with its own SpritesError class; importActual
@@ -56,19 +57,6 @@ import { SpriteAgentProcessManager } from "../../src/modules/session-agent/servi
 const { SpritesError } = await vi.importActual<typeof SpritesClientModule>(
   "@repo/sprites-client",
 );
-
-function createLogger(): Logger {
-  return {
-    log() {},
-    debug() {},
-    info() {},
-    warn() {},
-    error() {},
-    scope() {
-      return this;
-    },
-  };
-}
 
 const agentSettings: AgentSettings = {
   provider: "openai-codex",
@@ -136,6 +124,8 @@ function createManager(
   envOverrides: Partial<Env> = {},
   snapshotPlainEnvVars: Record<string, string> = {},
   clientState: ClientState = createClientState(),
+  connectorGatewayBase: string | null = null,
+  loggerWarn: ReturnType<typeof vi.fn> = vi.fn(),
 ) {
   const updateAgentProcessState = vi.fn(
     (partial: Pick<ServerState, "agentProcessId" | "agentProcessRunId">) => {
@@ -157,7 +147,7 @@ function createManager(
       WORKER_URL: "https://worker.test",
       ...envOverrides,
     } as Env,
-    logger: createLogger(),
+    logger: createTestLogger({ warn: loggerWarn }),
     secretRepository: {
       get: vi.fn(() => "webhook-token"),
       set: vi.fn(),
@@ -179,9 +169,16 @@ function createManager(
     getProviderCredentialAdapter: () => ({
       getCredentialSnapshot: mockState.getCredentialSnapshot,
     }),
+    getConnectorGatewayBase: () => connectorGatewayBase,
   });
 
-  return { clearProcessState, manager, spawnedProcessState, updateAgentProcessState };
+  return {
+    clearProcessState,
+    manager,
+    spawnedProcessState,
+    updateAgentProcessState,
+    loggerWarn,
+  };
 }
 
 function createSpawnSession(args: {
@@ -729,6 +726,7 @@ describe("SpriteAgentProcessManager", () => {
       SESSION_ID: "user-session",
       DO_WEBHOOK_URL: "https://evil.test",
       DO_WEBHOOK_TOKEN: "user-token",
+      DO_WEBHOOK_AUTH: "gateway",
       AGENT_PROCESS_RUN_ID: "user-run",
     });
 
@@ -746,6 +744,7 @@ describe("SpriteAgentProcessManager", () => {
           SESSION_ID: "session-1",
           DO_WEBHOOK_URL: "https://worker.test/internal/session/session-1",
           DO_WEBHOOK_TOKEN: "webhook-token",
+          DO_WEBHOOK_AUTH: "bearer",
           AGENT_PROCESS_RUN_ID: expect.any(String),
         }),
       }),
@@ -786,4 +785,55 @@ describe("SpriteAgentProcessManager", () => {
     }
     expect(mockState.createSession).not.toHaveBeenCalled();
   });
+
+  it("falls back to sprite-held token delivery for sessions without a connector", async () => {
+    mockState.createSession.mockReturnValue(createSpawnSession());
+    const serverState = createServerState();
+    const { manager, loggerWarn } = createManager(serverState);
+
+    const result = await manager.dispatchMessage({
+      userMessage: { id: "user-message-1", content: "turn", attachmentIds: [] },
+    });
+
+    expect(result.ok).toBe(true);
+    const spawnEnv = getSpawnEnv();
+    expect(spawnEnv.DO_WEBHOOK_URL).toBe("https://worker.test/internal/session/session-1");
+    expect(spawnEnv.DO_WEBHOOK_TOKEN).toBe("webhook-token");
+    expect(spawnEnv.DO_WEBHOOK_AUTH).toBe("bearer");
+    // The Sprite still holds the token on this legacy path; never silent.
+    expect(loggerWarn).toHaveBeenCalledWith(
+      "Session has no connector; using sprite-held webhook token",
+      { fields: { sessionId: "session-1", delivery: "sprite_held_token" } },
+    );
+  });
+
+  it("hands the VM the connector gateway base when a connector exists", async () => {
+    mockState.createSession.mockReturnValue(createSpawnSession());
+    const serverState = createServerState({ sessionConnectorId: "conn-1" });
+    const { manager } = createManager(
+      serverState,
+      {},
+      {},
+      createClientState(),
+      "https://api.sprites.test/v1/gateway/custom_api/conn-1",
+    );
+
+    const result = await manager.dispatchMessage({
+      userMessage: { id: "user-message-1", content: "turn", attachmentIds: [] },
+    });
+
+    expect(result.ok).toBe(true);
+    const spawnEnv = getSpawnEnv();
+    expect(spawnEnv.DO_WEBHOOK_URL).toBe(
+      "https://api.sprites.test/v1/gateway/custom_api/conn-1/internal/session/session-1",
+    );
+    expect(spawnEnv.DO_WEBHOOK_TOKEN).toBe("");
+    expect(spawnEnv.DO_WEBHOOK_AUTH).toBe("gateway");
+  });
 });
+
+function getSpawnEnv(): Record<string, string | undefined> {
+  const spawnCall = mockState.createSession.mock.calls[0];
+  expect(spawnCall).toBeDefined();
+  return (spawnCall?.[2] as { env: Record<string, string | undefined> }).env;
+}

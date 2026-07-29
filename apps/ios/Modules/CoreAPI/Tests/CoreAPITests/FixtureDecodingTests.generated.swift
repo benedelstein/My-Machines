@@ -151,6 +151,14 @@ struct FixtureDecodingTests {
         try assertAutoRoundTrip(RepositorySetupTask.self, key: "RepositorySetupTask.autoMinimal")
     }
 
+    @Test func sessionConnectorSetupTaskAutoFull() throws {
+        try assertAutoRoundTrip(SessionConnectorSetupTask.self, key: "SessionConnectorSetupTask.autoFull")
+    }
+
+    @Test func sessionConnectorSetupTaskAutoMinimal() throws {
+        try assertAutoRoundTrip(SessionConnectorSetupTask.self, key: "SessionConnectorSetupTask.autoMinimal")
+    }
+
     @Test func sessionPlanMetadataAutoFull() throws {
         try assertAutoRoundTrip(SessionPlanMetadata.self, key: "SessionPlanMetadata.autoFull")
     }
@@ -169,6 +177,10 @@ struct FixtureDecodingTests {
 
     @Test func sessionSetupTaskAutoCloudContainer() throws {
         try assertAutoRoundTrip(SessionSetupTask.self, key: "SessionSetupTask.autoCloudContainer")
+    }
+
+    @Test func sessionSetupTaskAutoSessionConnector() throws {
+        try assertAutoRoundTrip(SessionSetupTask.self, key: "SessionSetupTask.autoSessionConnector")
     }
 
     @Test func sessionSetupTaskAutoRepository() throws {

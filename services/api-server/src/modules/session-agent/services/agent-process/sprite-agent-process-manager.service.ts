@@ -70,6 +70,8 @@ export interface SpriteAgentProcessManagerDeps {
     env: Env,
     logger: Logger,
   ): ProviderCredentialAdapter;
+  /** Session connector gateway base, or null before/without a minted connector. */
+  getConnectorGatewayBase: () => string | null;
 }
 
 export type DispatchMessageResult = Result<
@@ -108,6 +110,7 @@ export class SpriteAgentProcessManager {
   private readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
   private readonly attachmentService: AgentAttachmentService;
   private readonly getProviderCredentialAdapter: SpriteAgentProcessManagerDeps["getProviderCredentialAdapter"];
+  private readonly getConnectorGatewayBase: SpriteAgentProcessManagerDeps["getConnectorGatewayBase"];
 
   /** In-flight spawn promise, or null if no spawn is running. */
   private startMutex: Promise<DispatchMessageResult> | null = null;
@@ -124,6 +127,7 @@ export class SpriteAgentProcessManager {
     this.getEnvironmentSnapshot = deps.getEnvironmentSnapshot;
     this.attachmentService = new AgentAttachmentService(deps.env, this.logger);
     this.getProviderCredentialAdapter = deps.getProviderCredentialAdapter;
+    this.getConnectorGatewayBase = deps.getConnectorGatewayBase;
   }
 
   /**
@@ -380,8 +384,7 @@ export class SpriteAgentProcessManager {
         VM_AGENT_WEBHOOK_SCRIPT,
         await this.getBundleHash(),
       );
-      const webhookToken = this.ensureWebhookToken();
-      const webhookUrl = this.buildWebhookUrl(sessionId);
+      const webhookDelivery = this.buildWebhookDelivery(sessionId);
       const processRunId = crypto.randomUUID();
       const environmentSnapshot = this.getEnvironmentSnapshot();
 
@@ -437,8 +440,11 @@ export class SpriteAgentProcessManager {
               ? { CODEX_MIN_VERSION: this.env.CODEX_MIN_VERSION }
               : {}),
             SESSION_ID: sessionId,
-            DO_WEBHOOK_URL: webhookUrl,
-            DO_WEBHOOK_TOKEN: webhookToken,
+            DO_WEBHOOK_URL: webhookDelivery.url,
+            DO_WEBHOOK_AUTH: webhookDelivery.token ? "bearer" : "gateway",
+            ...(webhookDelivery.token
+              ? { DO_WEBHOOK_TOKEN: webhookDelivery.token }
+              : { DO_WEBHOOK_TOKEN: "" }),
             AGENT_PROCESS_RUN_ID: processRunId,
           },
           idleTimeoutMs: 45_000,
@@ -754,8 +760,33 @@ export class SpriteAgentProcessManager {
     return cliArgs;
   }
 
-  private buildWebhookUrl(sessionId: string): string {
-    return `${this.env.WORKER_URL}/internal/session/${sessionId}`;
+  /**
+   * Chooses how the vm-agent authenticates its webhook posts. With a minted
+   * connector the VM gets the gateway base and no token — the gateway
+   * authenticates the Sprite and injects the DO's webhook token.
+   *
+   * A session provisioned before connectors existed has none and keeps
+   * Sprite-held token delivery for the rest of its life (its setup run is
+   * terminal and never re-runs the mint task). That legacy path still exposes
+   * the token to the Sprite, so it is logged until those sessions age out.
+   */
+  private buildWebhookDelivery(sessionId: string): {
+    url: string;
+    token: string | null;
+  } {
+    const gatewayBase = this.getConnectorGatewayBase();
+    if (gatewayBase) {
+      // The token already exists: minting created it and handed it to the
+      // connector, and the DO reads it from the repository at webhook time.
+      return { url: `${gatewayBase}/internal/session/${sessionId}`, token: null };
+    }
+    this.logger.warn("Session has no connector; using sprite-held webhook token", {
+      fields: { sessionId, delivery: "sprite_held_token" },
+    });
+    return {
+      url: `${this.env.WORKER_URL}/internal/session/${sessionId}`,
+      token: this.ensureWebhookToken(),
+    };
   }
 
   private async startAndWaitForReady(

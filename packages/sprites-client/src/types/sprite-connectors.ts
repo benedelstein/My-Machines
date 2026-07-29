@@ -1,12 +1,15 @@
 import type { Result } from "@repo/shared";
+import { z } from "zod";
 
-export interface AccessPolicy {
-  allowAll: boolean;
-  spriteLabels: string[];
-  namePrefix?: string;
-  allowedEndpoints?: string[];
-  blockedEndpoints?: string[];
-}
+export const AccessPolicySchema = z.object({
+  allowAll: z.boolean(),
+  spriteLabels: z.array(z.string()),
+  namePrefix: z.string().optional(),
+  allowedEndpoints: z.array(z.string()).optional(),
+  blockedEndpoints: z.array(z.string()).optional(),
+}).strict();
+
+export type AccessPolicy = z.infer<typeof AccessPolicySchema>;
 
 export interface SpritesConnection {
   id: string;

@@ -674,6 +674,21 @@ function getSetupTaskLabel(task: SessionSetupTask): string {
       }
       return "Set up cloud computer";
     }
+    case "session_connector": {
+      switch (task.status) {
+        case "pending":
+          return "Secure session credentials";
+        case "running":
+          return "Securing session credentials";
+        case "completed":
+          return "Secured session credentials";
+        case "failed":
+          return "Session credential setup failed";
+        case "skipped":
+          return "Skipped session credential setup";
+      }
+      return "Secure session credentials";
+    }
     case "repository": {
       switch (task.status) {
         case "pending":

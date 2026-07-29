@@ -21,7 +21,7 @@ export interface GitProxyTokenProvider {
 }
 
 export interface GitProxySecretProvider {
-  getGitProxySecret(): string | null;
+  authenticateGitRequest(authorization: string | null): boolean;
 }
 
 export interface GitProxyRepoPolicyProvider {

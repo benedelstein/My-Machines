@@ -22,7 +22,9 @@ import { createLogger } from "@/shared/logging";
 import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
 import { ensureSpriteStartupToolchain } from "@/shared/integrations/sprite-startup-toolchain";
 import type { GitHubAppResult } from "@/shared/types/github";
+import EPHEMERAL_GIT_CREDENTIAL_HELPER from "@repo/vm-agent/dist/git-credential-helper.bundle.js";
 import type { ServerState } from "../repositories/server-state.repository";
+import { buildSessionSpriteLabels } from "./session-connector.service";
 import { isTerminalSetupTask } from "./session-setup-run.service";
 import {
   SessionStartupScriptService,
@@ -71,7 +73,9 @@ export interface SessionProvisionServiceDeps {
   updateServerState: (partial: Partial<ServerState>) => void;
   updatePartialState: (partial: ProvisionClientStateUpdate) => void;
   synthesizeStatus: () => SessionStatus;
-  ensureGitProxySecret: () => string;
+  retireGitProxySecret: () => void;
+  ensureSessionConnector: (spriteName: string) => Promise<void>;
+  getSessionConnectorGatewayBase: () => string | null;
   githubTokenProvider: {
     getReadOnlyTokenForRepo(
       repoFullName: string,
@@ -100,7 +104,10 @@ export class SessionProvisionService {
   private readonly updateServerState: SessionProvisionServiceDeps["updateServerState"];
   private readonly updatePartialState: SessionProvisionServiceDeps["updatePartialState"];
   private readonly synthesizeStatus: () => SessionStatus;
-  private readonly ensureGitProxySecret: () => string;
+  private readonly retireGitProxySecret: () => void;
+  private readonly ensureSessionConnector: SessionProvisionServiceDeps["ensureSessionConnector"];
+  private readonly getSessionConnectorGatewayBase:
+    SessionProvisionServiceDeps["getSessionConnectorGatewayBase"];
   private readonly githubTokenProvider: SessionProvisionServiceDeps["githubTokenProvider"];
   private readonly setupReporter: SessionProvisionServiceDeps["setupReporter"];
   private readonly setupOutputCollector: SessionProvisionServiceDeps["setupOutputCollector"];
@@ -120,7 +127,9 @@ export class SessionProvisionService {
     this.updateServerState = deps.updateServerState;
     this.updatePartialState = deps.updatePartialState;
     this.synthesizeStatus = deps.synthesizeStatus;
-    this.ensureGitProxySecret = deps.ensureGitProxySecret;
+    this.retireGitProxySecret = deps.retireGitProxySecret;
+    this.ensureSessionConnector = deps.ensureSessionConnector;
+    this.getSessionConnectorGatewayBase = deps.getSessionConnectorGatewayBase;
     this.githubTokenProvider = deps.githubTokenProvider;
     this.setupReporter = deps.setupReporter;
     this.setupOutputCollector = deps.setupOutputCollector;
@@ -167,6 +176,9 @@ export class SessionProvisionService {
           case "cloud_container":
             await this.ensureCloudContainerTask();
             break;
+          case "session_connector":
+            await this.ensureSessionConnectorTask(this.requireSpriteName());
+            break;
           case "repository":
             await this.ensureRepositoryTask(
               this.requireSpriteName(),
@@ -208,8 +220,6 @@ export class SessionProvisionService {
         });
       }
     }
-
-    this.updatePartialState({ status: this.synthesizeStatus() });
   }
 
   private recordProvisioningError(error: unknown): void {
@@ -222,7 +232,6 @@ export class SessionProvisionService {
   }
 
   private async ensureCloudContainerTask(): Promise<void> {
-    this.updatePartialState({ status: this.synthesizeStatus() });
     if (!this.spriteName) {
       const sessionId = this.getServerState().sessionId;
       if (!sessionId) {
@@ -231,8 +240,13 @@ export class SessionProvisionService {
       this.logger.debug("creating sprite", {
         fields: { sessionId },
       });
+      const labels = buildSessionSpriteLabels(
+        sessionId,
+        this.getEnvironmentSnapshot().sourceEnvironmentId,
+      );
       const spriteResponse = await this.spriteLifecycleClient.createSprite({
         name: sessionId,
+        labels,
       });
       this.spriteName = spriteResponse.name;
       // For provisioning, allow network access to known-good domains.
@@ -243,28 +257,40 @@ export class SessionProvisionService {
         createLogger("sprite-websocket.session.ts"),
       );
       const workerHostname = new URL(this.env.WORKER_URL).hostname;
-      const networkPolicy = buildBootstrapNetworkPolicy({ workerHostname });
+      const networkPolicy = buildBootstrapNetworkPolicy({
+        workerHostname,
+        connectorGatewayHostname: this.connectorGatewayHostname(),
+      });
       await sprite.setNetworkPolicy(networkPolicy);
-      this.updateServerState({ spriteName: this.spriteName });
-      this.updatePartialState({ status: this.synthesizeStatus() });
+      this.updateServerState({
+        spriteName: this.spriteName,
+        spriteLabelsApplied: labels.every((label) =>
+          (spriteResponse.labels ?? []).includes(label),
+        ),
+      });
     }
     if (!this.getServerState().startupToolchain) {
       await this.ensureStartupToolchain(this.spriteName);
     }
   }
 
+  private async ensureSessionConnectorTask(spriteName: string): Promise<void> {
+    await this.ensureSessionConnector(spriteName);
+  }
+
+  /** Gateway hostname kept reachable in restricted network modes. */
+  private connectorGatewayHostname(): string {
+    return new URL(this.env.SPRITES_API_URL).hostname;
+  }
+
   private async ensureRepositoryTask(
     spriteName: string,
   ): Promise<void> {
-    this.updatePartialState({ status: this.synthesizeStatus() });
     if (!this.getServerState().repoCloned) {
       await this.cloneRepo(spriteName);
       this.updateServerState({ repoCloned: true });
     }
-    this.updatePartialState({
-      status: this.synthesizeStatus(),
-      lastError: null,
-    });
+    this.updatePartialState({ lastError: null });
   }
 
   private async ensureSetupScriptTask(
@@ -336,12 +362,10 @@ export class SessionProvisionService {
   private async ensureNetworkPolicyTask(
     spriteName: string,
   ): Promise<void> {
-    this.updatePartialState({ status: this.synthesizeStatus() });
     if (!this.getServerState().finalNetworkPolicyApplied) {
       await this.applyFinalNetworkPolicy(spriteName);
       this.updateServerState({ finalNetworkPolicyApplied: true });
     }
-    this.updatePartialState({ status: this.synthesizeStatus() });
   }
 
   private requireSpriteName(): string {
@@ -495,28 +519,51 @@ export class SessionProvisionService {
       this.updatePartialState({ baseBranch: actualBaseBranch });
     }
 
-    const gitProxySecret = this.ensureGitProxySecret();
-    const environmentSnapshot = this.getEnvironmentSnapshot();
-    const fetchUrl =
-      environmentSnapshot.network.mode === "locked"
-        ? cloneUrl
-        : githubRemoteUrl;
-
-    // Configure remote URLs, git identity, and proxy auth header
-    await sprite.execWs(
+    // The session_connector task is blocking and ordered before this one
+    // (including back-filled pre-connector runs), so a missing gateway base
+    // is an invariant violation, not a fallback case.
+    const connectorGatewayBase = this.getSessionConnectorGatewayBase();
+    if (!connectorGatewayBase) {
+      throw new Error("Session connector gateway base is missing");
+    }
+    const helperPath = `/home/sprite/.local/bin/mm-git-credential-${sessionId}`;
+    const mintUrl =
+      `${connectorGatewayBase}/internal/session/${sessionId}/git-token`;
+    const helperCommand = [helperPath, cloneUrl, mintUrl]
+      .map(shellQuote)
+      .join(" ");
+    await sprite.writeFile(
+      helperPath,
+      EPHEMERAL_GIT_CREDENTIAL_HELPER,
+      { mode: "0700" },
+    );
+    const gitTokenSetupResult = await sprite.execWs(
       dedent`
       set -e
       cd ${WORKSPACE_DIR}
-      git remote set-url origin ${fetchUrl}
-      git remote set-url --push origin ${cloneUrl}
+      git remote set-url origin ${shellQuote(cloneUrl)}
+      git remote set-url --push origin ${shellQuote(cloneUrl)}
       git config user.email "agent@mymachines.dev"
       git config user.name "My Machines"
       git config --unset-all http.extraHeader || true
       git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
-      git config --add "http.${proxyBaseUrl}/.extraHeader" "Authorization: Bearer ${gitProxySecret}"
+      git config --unset-all credential.helper || true
+      git config credential.helper ""
+      git config --add ${shellQuote(`credential.${cloneUrl}.helper`)} ${shellQuote(helperCommand)}
+      git config ${shellQuote(`credential.${cloneUrl}.username`)} x-ephemeral-git-token
+      git config credential.useHttpPath true
+      git config ${shellQuote(`http.${proxyBaseUrl}/.proactiveAuth`)} basic
     `,
       {},
     );
+    if (gitTokenSetupResult.exitCode !== 0) {
+      throw new Error(
+        `Ephemeral git token setup failed (exit ${gitTokenSetupResult.exitCode}): `
+        + gitTokenSetupResult.stderr,
+      );
+    }
+    this.retireGitProxySecret();
+    this.updateServerState({ gitAuthMode: "ephemeral_token" });
   }
 
   private async applyFinalNetworkPolicy(spriteName: string): Promise<void> {
@@ -535,6 +582,7 @@ export class SessionProvisionService {
         workerHostname,
         providerId,
         network: environmentSnapshot.network,
+        connectorGatewayHostname: this.connectorGatewayHostname(),
       }),
     );
   }

@@ -25,7 +25,8 @@ export interface WebhookAgentRunnerOptions<S extends AgentSettings = AgentSettin
   config: AgentProviderConfig<S>;
   settings: S;
   webhookUrl: string;
-  webhookToken: string;
+  /** Bearer for webhook posts; null when the gateway injects the credential. */
+  webhookToken: string | null;
   processRunId?: string;
   args?: { sessionId?: string };
   initialAgentMode?: AgentMode;

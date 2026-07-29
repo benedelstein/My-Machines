@@ -146,6 +146,24 @@
     "isBlocking": true,
     "canRetry": true
   },
+  "SessionConnectorSetupTask.autoFull": {
+    "status": "pending",
+    "startedAt": "sample",
+    "completedAt": "sample",
+    "error": "sample",
+    "id": "session_connector",
+    "isBlocking": true,
+    "canRetry": true
+  },
+  "SessionConnectorSetupTask.autoMinimal": {
+    "status": "pending",
+    "startedAt": null,
+    "completedAt": null,
+    "error": null,
+    "id": "session_connector",
+    "isBlocking": true,
+    "canRetry": true
+  },
   "SessionPlanMetadata.autoFull": {
     "lastUpdated": "sample"
   },
@@ -192,6 +210,15 @@
     "completedAt": "sample",
     "error": "sample",
     "id": "cloud_container",
+    "isBlocking": true,
+    "canRetry": true
+  },
+  "SessionSetupTask.autoSessionConnector": {
+    "status": "pending",
+    "startedAt": "sample",
+    "completedAt": "sample",
+    "error": "sample",
+    "id": "session_connector",
     "isBlocking": true,
     "canRetry": true
   },
