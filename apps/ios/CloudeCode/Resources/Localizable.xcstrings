@@ -267,6 +267,9 @@
     "Include default allowlist" : {
 
     },
+    "Infinite, on-demand computers for all your work." : {
+
+    },
     "Initializing session" : {
 
     },
@@ -990,6 +993,9 @@
 
     },
     "Working for %@" : {
+
+    },
+    "Works on" : {
 
     },
     "Write %@" : {
