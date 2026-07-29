@@ -102,7 +102,7 @@ describe("mintConnector", () => {
       accessToken: "dummy-secret-that-must-not-leak",
       testUrl: "https://httpbin.org/headers",
       authHeaderPrefix: "Bearer",
-      description: "Provisioned by Cloude",
+      description: "Provisioned by My Machines",
       accessPolicy,
     }]);
   });

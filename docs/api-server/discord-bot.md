@@ -5,12 +5,12 @@ This repo supports external-client session creation in two pieces:
 1. `apps/discord-bot` is a Cloudflare Worker Discord Interactions adapter.
 2. `services/api-server` owns generic integration auth, account linking, repo routing, and session creation.
 
-The Discord Worker stays thin: it verifies Discord signatures, acknowledges `/cloude`, adapts Discord's user shape into the generic integration request payload, calls the API, and edits the original Discord interaction response.
+The Discord Worker stays thin: it verifies Discord signatures, acknowledges `/session`, adapts Discord's user shape into the generic integration request payload, calls the API, and edits the original Discord interaction response.
 
 ## Current command
 
 ```text
-/cloude prompt: make a change to the auth in the birthday repo
+/session prompt: make a change to the auth in the birthday repo
 ```
 
 Discord normal `@botname ...` message mentions are not delivered to Interactions endpoints. Those require a Gateway connection. The API endpoint is reusable by a future Gateway bot or other external clients: call `POST /integrations/session-requests` with an integration API token.

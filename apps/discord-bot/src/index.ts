@@ -72,7 +72,7 @@ export default {
     const applicationId = interaction.application_id;
     const interactionToken = interaction.token;
     if (!prompt || !user || !applicationId || !interactionToken) {
-      return jsonResponse(channelMessage("Use `/cloude prompt:<what to change>` to create a session."));
+      return jsonResponse(channelMessage("Use `/session prompt:<what to change>` to create a session."));
     }
 
     ctx.waitUntil(createSessionAndEditResponse({ env, prompt, user, applicationId, interactionToken }));
@@ -200,7 +200,7 @@ function parseInteraction(body: string): DiscordInteraction | null {
 }
 
 function getPrompt(interaction: DiscordInteraction): string | null {
-  if (interaction.data?.name !== "cloude") {
+  if (interaction.data?.name !== "session") {
     return null;
   }
   const option = interaction.data.options?.find((item) => item.name === "prompt");

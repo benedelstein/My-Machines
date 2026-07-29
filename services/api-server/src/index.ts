@@ -55,7 +55,7 @@ app.use(
 );
 
 app.get("/", (c) => {
-  return c.json({ name: "cloude-code-api", version: "0.0.1", status: "running" });
+  return c.json({ name: "my-machines-api", version: "0.0.1", status: "running" });
 });
 app.get("/health", (c) => {
   return c.json({ status: "ok" });
@@ -70,9 +70,9 @@ app.openAPIRegistry.registerComponent("securitySchemes", "Bearer", {
 app.doc("/doc", {
   openapi: "3.1.0",
   info: {
-    title: "cloude-code API",
+    title: "My Machines API",
     version: "0.0.1",
-    description: "Cloud-hosted agent service API.",
+    description: "My Machines API.",
   },
 });
 app.get("/ui", swaggerUI({ url: "/doc" }));

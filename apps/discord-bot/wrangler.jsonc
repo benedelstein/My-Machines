@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "cloude-code-discord-bot",
+  "name": "my-machines-discord-bot",
   "account_id": "fc436be76ce4378e78419c5f0c62e345",
   "main": "src/index.ts",
   "compatibility_date": "2024-12-18",

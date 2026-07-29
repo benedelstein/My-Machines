@@ -42,7 +42,7 @@ This is a typescript monorepo using pnpm and Turbo. The code is organized like s
 | Path                  | Package            | Purpose                                                                                     |
 | --------------------- | ------------------ | ------------------------------------------------------------------------------------------- |
 | `apps/web`            | `@repo/web`        | Next.js web client for auth, repo selection, session creation, and chat                     |
-| `apps/discord-bot`    | `@repo/discord-bot`| Cloudflare Worker Discord Interactions adapter for the `/cloude` slash command              |
+| `apps/discord-bot`    | `@repo/discord-bot`| Cloudflare Worker Discord Interactions adapter for the `/session` slash command              |
 | `services/api-server` | `@repo/api-server` | Cloudflare Worker API, Durable Object runtime, GitHub auth, Sprites orchestration, webhooks |
 | `packages/vm-agent`   | `@repo/vm-agent`   | Bun-based agent runner bundled into the Sprite VM execution path                            |
 | `packages/shared`     | `@repo/shared`     | Shared types, schemas, logging contracts, and protocol definitions                          |

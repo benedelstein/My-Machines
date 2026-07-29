@@ -85,11 +85,6 @@
     {
       "pattern": "api.mymachines.dev",
       "custom_domain": true
-    },
-    // Existing iOS releases still use this hostname.
-    {
-      "pattern": "api.cloudecode.dev",
-      "custom_domain": true
     }
   ],
   "limits": {

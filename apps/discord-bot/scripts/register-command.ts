@@ -25,7 +25,7 @@ if (!applicationId || !botToken) {
 }
 
 const command: DiscordCommandBody = {
-  name: "cloude",
+  name: "session",
   description: "Create a My Machines session from a natural-language prompt.",
   type: APPLICATION_COMMAND_TYPE_CHAT_INPUT,
   options: [
@@ -56,6 +56,6 @@ if (!response.ok) {
   throw new Error(`Failed to register Discord command: ${response.status} ${await response.text()}`);
 }
 
-process.stdout.write(`Registered /cloude command: ${await response.text()}\n`);
+process.stdout.write(`Registered /session command: ${await response.text()}\n`);
 
 export {};

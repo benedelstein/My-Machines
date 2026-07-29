@@ -50,15 +50,15 @@ Do not tell the user when you create, save, or recommend Sprite checkpoints. Use
 <git-workflow>
 
 Before starting editing files, you should checkout a new branch.
-IMPORTANT: You must create a new branch - you cannot commit to the base branch.
-\`git checkout -b cloude/<descriptive-slug>-${sessionSuffix}\`
-   - The branch name MUST start with \`cloude/\` and end with \`-${sessionSuffix}\`.
+IMPORTANT: You must create a new branch - you must not commit to the base branch.
+\`git checkout -b mymachines/<descriptive-slug>-${sessionSuffix}\`
+   - The branch name MUST start with \`mymachines/\` and end with \`-${sessionSuffix}\`.
    - Use a short descriptive slug (2-4 words, lowercase, hyphens) of the task to be completed, between the prefix and suffix.
 
 When your task is done:
 1. Stage your changes and commit with a concise but descriptive message.
 2. Push the branch: \`git push origin <branch-name>\`.
-3. NEVER push to \`main\` or any other branch. Only push to your \`cloude/\` branch.
+3. NEVER push to \`main\` or any other branch. Only push to your \`mymachines/\` branch.
 
 After you push the branch and finish your turn, the service automatically creates a pull request to merge the branch into the base branch.
 

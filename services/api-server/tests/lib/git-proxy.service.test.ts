@@ -132,6 +132,23 @@ describe("GitProxyService", () => {
     expect(result.response.status).toBe(403);
     await expect(result.response.text()).resolves.toContain("branch must start");
   });
+
+  it.each([
+    "mymachines/change-abcd",
+    // Sessions created before the rename still push their locked cloude/ branch.
+    "cloude/change-abcd",
+  ])("allows pushes to %s", async (branch) => {
+    const result = await createService().handleRequest(
+      createRequest("/git-proxy/abcd-session/github.com/ben/repo.git/git-receive-pack", {
+        method: "POST",
+        body: createPushBody(branch),
+      }),
+      "/git-proxy/abcd-session/github.com/ben/repo.git/git-receive-pack",
+    );
+
+    expect(result.response.status).toBe(200);
+    expect(result.pushedBranch).toBe(branch);
+  });
 });
 
 describe("SessionGitProxyService", () => {

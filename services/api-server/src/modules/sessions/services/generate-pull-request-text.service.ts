@@ -95,6 +95,7 @@ export function fallbackPullRequestTitle(
 
   const titleSlug = headBranch
     .replace(/^cloude\//, "")
+    .replace(/^mymachines\//, "")
     .replace(/-[a-z0-9]{4}$/, "")
     .replace(/[-_/]/g, " ");
   const normalized = normalizeTitle(titleSlug);

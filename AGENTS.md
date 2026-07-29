@@ -4,7 +4,7 @@ This file provides guidance to ai agents when working with code in this reposito
 
 ## Project Overview
 
-cloude-code is a cloud-hosted agent service. Users create sessions through the API server; each session is coordinated by a Cloudflare Durable Object, runs agent work inside an isolated Fly.io Sprite VM, and receives VM output through webhooks.
+My Machines is a cloud-hosted agent service. Users create sessions through the API server; each session is coordinated by a Cloudflare Durable Object, runs agent work inside an isolated Fly.io Sprite VM, and receives VM output through webhooks.
 
 Before architecture, session lifecycle, Durable Object, Sprite VM, webhook, package-boundary, or external API changes, read `ARCHITECTURE.md`.
 

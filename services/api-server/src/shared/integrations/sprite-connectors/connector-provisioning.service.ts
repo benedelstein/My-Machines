@@ -78,7 +78,7 @@ export async function mintConnector(
       accessToken: request.token,
       testUrl: request.testUrl,
       authHeaderPrefix: request.headerPrefix,
-      description: "Provisioned by Cloude",
+      description: "Provisioned by My Machines",
       accessPolicy,
     });
   });

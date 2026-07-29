@@ -124,7 +124,7 @@ export class GitProxyService {
     const targetUrl = `https://github.com/${githubPath}${url.search}`;
     const basicAuth = btoa(`x-access-token:${tokenResult.value}`);
     const headers: Record<string, string> = {
-      "User-Agent": "cloude-code-git-proxy",
+      "User-Agent": "my-machines-git-proxy",
       "Authorization": `Basic ${basicAuth}`,
     };
 
@@ -169,6 +169,12 @@ export class GitProxyService {
   }
 }
 
+/**
+ * Branch prefixes the agent may push to. `cloude/` remains accepted so
+ * sessions created before the rename can still push their locked branch.
+ */
+const ALLOWED_BRANCH_PREFIXES = ["mymachines/", "cloude/"];
+
 function validatePush(
   body: Uint8Array,
   sessionId: string | null,
@@ -183,8 +189,8 @@ function validatePush(
   let detectedBranch: string | undefined;
   while ((match = refPattern.exec(preamble)) !== null) {
     const branch = match[1]!;
-    if (!branch.startsWith("cloude/")) {
-      return { allowed: false, reason: `branch must start with 'cloude/', got '${branch}'` };
+    if (!ALLOWED_BRANCH_PREFIXES.some((prefix) => branch.startsWith(prefix))) {
+      return { allowed: false, reason: `branch must start with 'mymachines/', got '${branch}'` };
     }
     if (sessionSuffix && !branch.endsWith(sessionSuffix)) {
       return { allowed: false, reason: `branch must end with '${sessionSuffix}', got '${branch}'` };

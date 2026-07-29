@@ -6,7 +6,7 @@ describe("buildSystemPromptAppend", () => {
     const prompt = buildSystemPromptAppend("abcd", "Sprite-specific context", "TaskCreate");
 
     expect(prompt).toContain("Sprite-specific context");
-    expect(prompt).toContain("cloude/<descriptive-slug>-abcd");
+    expect(prompt).toContain("mymachines/<descriptive-slug>-abcd");
     expect(prompt).toContain("NEVER push to `main`");
     expect(prompt).toContain("automatically creates a pull request");
     expect(prompt).toContain("Use checkpoint tooling silently");
