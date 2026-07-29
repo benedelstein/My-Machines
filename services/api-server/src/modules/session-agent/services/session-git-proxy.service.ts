@@ -33,21 +33,21 @@ export interface SessionGitProxyServiceDeps {
   };
 }
 
-const GIT_CAPABILITY_TTL_MS = 5 * 60 * 1000;
-const GIT_CAPABILITY_ROTATION_WINDOW_MS = 60 * 1000;
-const GIT_CAPABILITY_USERNAME = "x-capability";
+const EPHEMERAL_GIT_TOKEN_TTL_MS = 5 * 60 * 1000;
+const EPHEMERAL_GIT_TOKEN_ROTATION_WINDOW_MS = 60 * 1000;
+const EPHEMERAL_GIT_TOKEN_USERNAME = "x-ephemeral-git-token";
 
-const GitCapabilityEntrySchema = z.object({
+const EphemeralGitTokenEntrySchema = z.object({
   token: z.string().min(1),
   expiresAt: z.number().int().positive(),
 });
 
-const StoredGitCapabilitySchema = z.object({
-  current: GitCapabilityEntrySchema,
-  previous: GitCapabilityEntrySchema.optional(),
+const StoredEphemeralGitTokenSchema = z.object({
+  current: EphemeralGitTokenEntrySchema,
+  previous: EphemeralGitTokenEntrySchema.optional(),
 });
 
-export type MintedGitCapability = z.infer<typeof GitCapabilityEntrySchema>;
+export type MintedEphemeralGitToken = z.infer<typeof EphemeralGitTokenEntrySchema>;
 
 /**
  * Session-scoped adapter around the agnostic `GitProxyService`.
@@ -91,43 +91,43 @@ export class SessionGitProxyService implements
     });
   }
 
-  /** Removes the legacy session-long Git bearer after capability cutover. */
+  /** Removes the legacy session-long Git bearer after ephemeral-token cutover. */
   retireGitProxySecret(): void {
     this.secretRepository.delete("git_proxy_secret");
   }
 
   /**
-   * Mints or reuses the session's short-lived Git capability.
+   * Mints or reuses the session's ephemeral Git token.
    * The read/rotate/write sequence is synchronous inside the Durable Object.
    */
-  mintGitCapability(): MintedGitCapability | null {
-    if (this.getServerState().gitAuthMode !== "capability") {
+  mintEphemeralGitToken(): MintedEphemeralGitToken | null {
+    if (this.getServerState().gitAuthMode !== "ephemeral_token") {
       return null;
     }
 
     const now = Date.now();
-    const stored = this.readGitCapability();
-    if (stored && stored.current.expiresAt - now > GIT_CAPABILITY_ROTATION_WINDOW_MS) {
+    const stored = this.readEphemeralGitToken();
+    if (stored && stored.current.expiresAt - now > EPHEMERAL_GIT_TOKEN_ROTATION_WINDOW_MS) {
       return stored.current;
     }
 
     const current = {
       token: randomBase64Url(32),
-      expiresAt: now + GIT_CAPABILITY_TTL_MS,
+      expiresAt: now + EPHEMERAL_GIT_TOKEN_TTL_MS,
     };
     const previous = stored?.current.expiresAt && stored.current.expiresAt > now
       ? stored.current
       : undefined;
     this.secretRepository.set(
-      "git_capability",
+      "ephemeral_git_token",
       JSON.stringify({ current, ...(previous ? { previous } : {}) }),
     );
     return current;
   }
 
-  /** Revokes all outstanding Git capabilities for the session. */
-  revokeGitCapabilities(): void {
-    this.secretRepository.delete("git_capability");
+  /** Revokes all outstanding ephemeral Git tokens for the session. */
+  revokeEphemeralGitTokens(): void {
+    this.secretRepository.delete("ephemeral_git_token");
   }
 
   /**
@@ -163,11 +163,11 @@ export class SessionGitProxyService implements
     }
 
     const basic = parseBasicAuthorization(authorization);
-    if (!basic || basic.username !== GIT_CAPABILITY_USERNAME) {
+    if (!basic || basic.username !== EPHEMERAL_GIT_TOKEN_USERNAME) {
       return false;
     }
     const now = Date.now();
-    const stored = this.readGitCapability();
+    const stored = this.readEphemeralGitToken();
     if (!stored) {
       return false;
     }
@@ -182,9 +182,9 @@ export class SessionGitProxyService implements
       ? stored.previous
       : undefined;
     if (stored.current.expiresAt <= now) {
-      this.secretRepository.delete("git_capability");
+      this.secretRepository.delete("ephemeral_git_token");
     } else if (stored.previous && !previous) {
-      this.secretRepository.set("git_capability", JSON.stringify({ current: stored.current }));
+      this.secretRepository.set("ephemeral_git_token", JSON.stringify({ current: stored.current }));
     }
     return currentValid || previousValid;
   }
@@ -235,20 +235,20 @@ export class SessionGitProxyService implements
     }
   }
 
-  private readGitCapability(): z.infer<typeof StoredGitCapabilitySchema> | null {
-    const raw = this.secretRepository.get("git_capability");
+  private readEphemeralGitToken(): z.infer<typeof StoredEphemeralGitTokenSchema> | null {
+    const raw = this.secretRepository.get("ephemeral_git_token");
     if (!raw) {
       return null;
     }
     try {
-      const parsed = StoredGitCapabilitySchema.safeParse(JSON.parse(raw));
+      const parsed = StoredEphemeralGitTokenSchema.safeParse(JSON.parse(raw));
       if (parsed.success) {
         return parsed.data;
       }
     } catch {
       // Invalid persisted secret is revoked below.
     }
-    this.secretRepository.delete("git_capability");
+    this.secretRepository.delete("ephemeral_git_token");
     return null;
   }
 

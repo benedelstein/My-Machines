@@ -89,7 +89,7 @@ describe("SessionProvisionService session connector", () => {
     );
     expect(remoteConfigCommand).not.toContain("Authorization: Bearer git-proxy-secret");
     expect(retireGitProxySecret).toHaveBeenCalled();
-    expect(serverState.gitAuthMode).toBe("capability");
+    expect(serverState.gitAuthMode).toBe("ephemeral_token");
   });
 
   it("uses the worker proxy for fetch in locked network mode", async () => {
@@ -108,7 +108,7 @@ describe("SessionProvisionService session connector", () => {
     );
   });
 
-  it("fails closed before retiring legacy auth when capability setup fails", async () => {
+  it("fails closed before retiring legacy auth when ephemeral git token setup fails", async () => {
     const serverState = createServerState();
     const { service, retireGitProxySecret } = createService(
       serverState,
@@ -123,7 +123,7 @@ describe("SessionProvisionService session connector", () => {
     });
 
     await expect(service.ensureProvisioned()).rejects.toThrow(
-      "Git capability setup failed (exit 1): git config failed",
+      "Ephemeral git token setup failed (exit 1): git config failed",
     );
     expect(retireGitProxySecret).not.toHaveBeenCalled();
     expect(serverState.gitAuthMode).toBe("legacy_secret");

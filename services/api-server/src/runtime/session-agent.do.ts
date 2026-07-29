@@ -544,11 +544,11 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     return true;
   }
 
-  mintGitCapability(webhookToken: string): { token: string; expiresAt: number } | null {
+  mintEphemeralGitToken(webhookToken: string): { token: string; expiresAt: number } | null {
     if (!this.isWebhookTokenValid(webhookToken)) {
       return null;
     }
-    return this.gitProxyService.mintGitCapability();
+    return this.gitProxyService.mintEphemeralGitToken();
   }
   // HTTP/RPC Handlers
 
@@ -831,7 +831,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
 
     // Revoke short-lived Git authority and connector mint authority before
     // potentially slow external cleanup.
-    this.gitProxyService.revokeGitCapabilities();
+    this.gitProxyService.revokeEphemeralGitTokens();
     this.secretRepository.delete("webhook_token");
 
     // Delete the session's internal connector. Never throws; a failed delete

@@ -14,7 +14,7 @@ My Machines uses a GitHub App for repository access. Each session gets a scoped,
 3. Client creates session: POST /sessions { repoId: 123456789 }
 4. API resolves numeric repo id → installation and verifies user access
 5. Durable Object provisions the Sprite, clones with a read-only installation token, and points both git remotes at the Worker git proxy
-6. Git proxy requests authenticate with short-lived session capabilities, then mint or reuse scoped installation tokens through `GitHubAppService`
+6. Git proxy requests authenticate with short-lived ephemeral git tokens, then mint or reuse scoped installation tokens through `GitHubAppService`
 7. After a successful pushed branch and terminal agent turn, the Durable Object uses the same GitHub App service to create the pull request server-side
 ```
 
@@ -125,15 +125,15 @@ Git setup lives in `SessionProvisionService.cloneRepo(...)`:
   git -c http.extraHeader="Authorization: Basic <base64(x-access-token:TOKEN)>" clone ...
   ```
   The token exists only for the clone command and never persists on the VM.
-- **Fetch/push after clone**: both remotes point at `WORKER_URL/git-proxy/:sessionId/github.com/owner/repo.git` in every network mode (the Worker hostname is always allow-listed by `buildFinalNetworkPolicy(...)`). The Sprite holds no long-lived git credential. A per-session credential helper installed at `/home/sprite/.local/bin/mm-git-credential-<sessionId>` supplies a short-lived capability on demand:
+- **Fetch/push after clone**: both remotes point at `WORKER_URL/git-proxy/:sessionId/github.com/owner/repo.git` in every network mode (the Worker hostname is always allow-listed by `buildFinalNetworkPolicy(...)`). The Sprite holds no long-lived git credential. A per-session credential helper installed at `/home/sprite/.local/bin/mm-git-credential-<sessionId>` supplies an ephemeral git token on demand:
   1. Git invokes the helper — proactively via `http.<proxy>.proactiveAuth basic` on git >= 2.46, otherwise after the proxy's 401 Basic challenge.
-  2. The helper POSTs to `/internal/session/:sessionId/capabilities/git` through the session connector gateway. The gateway injects the session's webhook token, which is what binds the mint request to the calling Sprite's identity; the helper script itself carries no credential.
-  3. The Durable Object validates the token and returns `{ token, expiresAt }`: a 5-minute capability, reused while it has more than 60 seconds left, then rotated with a grace window that keeps the previous unexpired token valid.
-  4. Git presents the capability as HTTP Basic auth (`x-capability:<token>`). The Worker git proxy validates it in the DO (`SessionGitProxyService.authenticateGitRequest(...)`) and forwards to GitHub with a fresh or cached installation token from `getInstallationTokenForRepo(...)`. Push requests additionally enforce the session branch policy (session branch prefix plus the session's branch suffix).
+  2. The helper POSTs to `/internal/session/:sessionId/git-token` through the session connector gateway. The gateway injects the session's webhook token, which is what binds the mint request to the calling Sprite's identity; the helper script itself carries no credential.
+  3. The Durable Object validates the token and returns `{ token, expiresAt }`: a 5-minute ephemeral token, reused while it has more than 60 seconds left, then rotated with a grace window that keeps the previous unexpired token valid.
+  4. Git presents the token as HTTP Basic auth (`x-ephemeral-git-token:<token>`). The Worker git proxy validates it in the DO (`SessionGitProxyService.authenticateGitRequest(...)`) and forwards to GitHub with a fresh or cached installation token from `getInstallationTokenForRepo(...)`. Push requests additionally enforce the session branch policy (session branch prefix plus the session's branch suffix).
 
-The session connector task is blocking and ordered before repository setup, so a missing connector gateway fails provisioning (`cloneRepo` throws) instead of downgrading git auth. Session teardown revokes outstanding capabilities and the webhook token before external cleanup, so a stolen unexpired capability dies with the session.
+The session connector task is blocking and ordered before repository setup, so a missing connector gateway fails provisioning (`cloneRepo` throws) instead of downgrading git auth. Session teardown revokes outstanding ephemeral git tokens and the webhook token before external cleanup, so a stolen unexpired token dies with the session.
 
-**Legacy sessions** (provisioned before capability auth) have `gitAuthMode: "legacy_secret"` in DO server state. For those, the proxy accepts only the session's `git_proxy_secret` bearer, which their VM git config sends via `http.extraHeader`. Nothing mints new legacy secrets: new sessions are always `"capability"` mode, and the cutover deletes any leftover secret via `retireGitProxySecret()`.
+**Legacy sessions** (provisioned before ephemeral-token auth) have `gitAuthMode: "legacy_secret"` in DO server state. For those, the proxy accepts only the session's `git_proxy_secret` bearer, which their VM git config sends via `http.extraHeader`. Nothing mints new legacy secrets: new sessions are always `"ephemeral_token"` mode, and the cutover deletes any leftover secret via `retireGitProxySecret()`.
 
 ## Architecture
 
@@ -145,9 +145,9 @@ The session connector task is blocking and ordered before repository setup, so a
 | `services/api-server/src/modules/sessions/services/session-repo-access.service.ts` | Session repo access checks for create/read/connect/chat paths |
 | `services/api-server/src/modules/repo-environments/services/repo-environments.service.ts` | Repo environment ownership/access checks and session environment snapshot resolution |
 | `services/api-server/src/modules/session-agent/services/session-provision.service.ts` | Sprite provisioning, read-only clone, git remote setup |
-| `services/api-server/src/modules/session-agent/services/session-git-proxy.service.ts` | Session-scoped git proxy adapter: capability mint/rotation and request authentication |
+| `services/api-server/src/modules/session-agent/services/session-git-proxy.service.ts` | Session-scoped git proxy adapter: ephemeral git token mint/rotation and request authentication |
 | `services/api-server/src/shared/integrations/git/git-proxy.service.ts` | Session-agnostic git proxy: GitHub forwarding and push branch validation |
-| `services/api-server/src/modules/session-agent/routes/internal.routes.ts` | Gateway-facing internal routes, including the git capability mint endpoint |
+| `services/api-server/src/modules/session-agent/routes/internal.routes.ts` | Gateway-facing internal routes, including the ephemeral git token mint endpoint |
 | `services/api-server/src/modules/sessions/services/session-pull-request.service.ts` | GitHub pull request creation helper used by the DO lifecycle |
 | `services/api-server/src/runtime/session-pull-request-lifecycle.service.ts` | Manual and automatic pull request state, text generation context, and D1 persistence |
 | `services/api-server/src/runtime/session-auto-pull-request.service.ts` | Post-turn automatic pull request queueing from the Durable Object |

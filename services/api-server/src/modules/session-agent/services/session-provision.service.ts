@@ -527,13 +527,13 @@ export class SessionProvisionService {
     }
     const helperPath = `/home/sprite/.local/bin/mm-git-credential-${sessionId}`;
     const mintUrl =
-      `${connectorGatewayBase}/internal/session/${sessionId}/capabilities/git`;
+      `${connectorGatewayBase}/internal/session/${sessionId}/git-token`;
     const helperSource = buildGitCredentialHelper({
       remoteUrl: cloneUrl,
       mintUrl,
     });
     const helperBase64 = btoa(helperSource);
-    const capabilitySetupResult = await sprite.execWs(
+    const gitTokenSetupResult = await sprite.execWs(
       dedent`
       set -e
       mkdir -p /home/sprite/.local/bin
@@ -549,20 +549,20 @@ export class SessionProvisionService {
       git config --unset-all credential.helper || true
       git config credential.helper ""
       git config --add ${shellQuote(`credential.${cloneUrl}.helper`)} ${shellQuote(helperPath)}
-      git config ${shellQuote(`credential.${cloneUrl}.username`)} x-capability
+      git config ${shellQuote(`credential.${cloneUrl}.username`)} x-ephemeral-git-token
       git config credential.useHttpPath true
       git config ${shellQuote(`http.${proxyBaseUrl}/.proactiveAuth`)} basic
     `,
       {},
     );
-    if (capabilitySetupResult.exitCode !== 0) {
+    if (gitTokenSetupResult.exitCode !== 0) {
       throw new Error(
-        `Git capability setup failed (exit ${capabilitySetupResult.exitCode}): `
-        + capabilitySetupResult.stderr,
+        `Ephemeral git token setup failed (exit ${gitTokenSetupResult.exitCode}): `
+        + gitTokenSetupResult.stderr,
       );
     }
     this.retireGitProxySecret();
-    this.updateServerState({ gitAuthMode: "capability" });
+    this.updateServerState({ gitAuthMode: "ephemeral_token" });
   }
 
   private async applyFinalNetworkPolicy(spriteName: string): Promise<void> {
@@ -623,7 +623,7 @@ if (typeof body?.token !== "string" || !body.token || !Number.isInteger(body.exp
   process.stderr.write("Git credential mint returned an invalid response\\n");
   process.exit(1);
 }
-process.stdout.write("username=x-capability\\npassword=" + body.token + "\\n\\n");
+process.stdout.write("username=x-ephemeral-git-token\\npassword=" + body.token + "\\n\\n");
 `;
 }
 

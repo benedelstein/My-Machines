@@ -30,11 +30,11 @@ the session connector gateway:
 ```
 
 The CLIs append their normal protocol paths to those prefixes. The same connector
-also carries webhook and Git capability mint/refresh traffic. Post-clone Git
-smart-HTTP goes directly to the Worker using the short-lived capability. The
+also carries webhook and ephemeral Git token mint/refresh traffic. Post-clone Git
+smart-HTTP goes directly to the Worker using the ephemeral Git token. The
 connector policy remains immutable and scoped only to `session:<sessionId>`.
 After Fly's gateway passes the Git `Accept` probe, post-clone Git returns to this
-connector and the interim capability path is retired after older sessions drain.
+connector and the interim token path is retired after older sessions drain.
 
 Claude's final Anthropic request can leave directly from the Worker. Codex's final
 ChatGPT request is delegated to one shared native egress shim because the spike

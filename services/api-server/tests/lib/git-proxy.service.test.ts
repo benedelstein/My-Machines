@@ -278,7 +278,7 @@ describe("SessionGitProxyService connector cutover", () => {
   it("accepts the legacy sprite secret before the cutover", async () => {
     const { service } = createCutoverService("legacy_secret");
 
-    expect(service.mintGitCapability()).toBeNull();
+    expect(service.mintEphemeralGitToken()).toBeNull();
     await expect(fetchRefs(service, "legacy-sprite-secret")).resolves.toMatchObject({
       status: 200,
     });
@@ -288,11 +288,11 @@ describe("SessionGitProxyService connector cutover", () => {
       .toBe('Basic realm="my-machines-git-proxy"');
   });
 
-  it("accepts only Basic capabilities in capability mode", async () => {
-    const { service } = createCutoverService("capability");
-    const capability = service.mintGitCapability();
-    expect(capability).not.toBeNull();
-    const basic = btoa(`x-capability:${capability!.token}`);
+  it("accepts only Basic ephemeral tokens in ephemeral-token mode", async () => {
+    const { service } = createCutoverService("ephemeral_token");
+    const minted = service.mintEphemeralGitToken();
+    expect(minted).not.toBeNull();
+    const basic = btoa(`x-ephemeral-git-token:${minted!.token}`);
 
     await expect(service.handleRequest(
       createRequest("/git-proxy/abcd-session/github.com/ben/repo.git/info/refs", {
@@ -307,39 +307,39 @@ describe("SessionGitProxyService connector cutover", () => {
     });
   });
 
-  it("rotates near expiry while accepting the previous capability until expiry", async () => {
+  it("rotates near expiry while accepting the previous token until expiry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-28T00:00:00Z"));
-    const { service } = createCutoverService("capability");
-    const first = service.mintGitCapability()!;
-    expect(service.mintGitCapability()).toEqual(first);
+    const { service } = createCutoverService("ephemeral_token");
+    const first = service.mintEphemeralGitToken()!;
+    expect(service.mintEphemeralGitToken()).toEqual(first);
 
     vi.advanceTimersByTime(4 * 60 * 1000 + 1);
-    const second = service.mintGitCapability()!;
+    const second = service.mintEphemeralGitToken()!;
     expect(second.token).not.toBe(first.token);
     expect(service.authenticateGitRequest(
-      `Basic ${btoa(`x-capability:${first.token}`)}`,
+      `Basic ${btoa(`x-ephemeral-git-token:${first.token}`)}`,
     )).toBe(true);
 
     vi.advanceTimersByTime(60 * 1000);
     expect(service.authenticateGitRequest(
-      `Basic ${btoa(`x-capability:${first.token}`)}`,
+      `Basic ${btoa(`x-ephemeral-git-token:${first.token}`)}`,
     )).toBe(false);
     expect(service.authenticateGitRequest(
-      `Basic ${btoa(`x-capability:${second.token}`)}`,
+      `Basic ${btoa(`x-ephemeral-git-token:${second.token}`)}`,
     )).toBe(true);
     vi.useRealTimers();
   });
 
-  it("revokes capabilities and rejects malformed persisted JSON", () => {
-    const { service, secrets } = createCutoverService("capability");
-    const capability = service.mintGitCapability()!;
-    service.revokeGitCapabilities();
+  it("revokes ephemeral tokens and rejects malformed persisted JSON", () => {
+    const { service, secrets } = createCutoverService("ephemeral_token");
+    const minted = service.mintEphemeralGitToken()!;
+    service.revokeEphemeralGitTokens();
     expect(service.authenticateGitRequest(
-      `Basic ${btoa(`x-capability:${capability.token}`)}`,
+      `Basic ${btoa(`x-ephemeral-git-token:${minted.token}`)}`,
     )).toBe(false);
 
-    secrets.git_capability = "{invalid";
-    expect(service.mintGitCapability()).not.toBeNull();
+    secrets.ephemeral_git_token = "{invalid";
+    expect(service.mintEphemeralGitToken()).not.toBeNull();
   });
 });

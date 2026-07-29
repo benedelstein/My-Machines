@@ -35,7 +35,7 @@ export type ServerState = {
   /** True when sprite creation applied the session labels, skipping label repair. */
   spriteLabelsApplied: boolean;
   /** Authentication mode used by post-clone Git proxy requests. */
-  gitAuthMode: "legacy_secret" | "capability";
+  gitAuthMode: "legacy_secret" | "ephemeral_token";
 };
 
 function defaultServerState(): ServerState {

@@ -12,20 +12,20 @@ vi.mock(
 
 import { createInternalRoutes } from "../../src/modules/session-agent/routes/internal.routes";
 
-describe("Git capability mint route", () => {
+describe("Ephemeral git token mint route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("forwards the connector-injected bearer to the session DO", async () => {
-    const mintGitCapability = vi.fn(() => ({
-      token: "short-lived-capability",
+    const mintEphemeralGitToken = vi.fn(() => ({
+      token: "short-lived-git-token",
       expiresAt: 123456789,
     }));
-    getSessionAgentStub.mockResolvedValue({ mintGitCapability });
+    getSessionAgentStub.mockResolvedValue({ mintEphemeralGitToken });
 
     const response = await createInternalRoutes().request(
-      "/session/session-1/capabilities/git",
+      "/session/session-1/git-token",
       {
         method: "POST",
         headers: { Authorization: "Bearer connector-session-token" },
@@ -35,21 +35,21 @@ describe("Git capability mint route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      token: "short-lived-capability",
+      token: "short-lived-git-token",
       expiresAt: 123456789,
     });
-    expect(mintGitCapability).toHaveBeenCalledWith("connector-session-token");
+    expect(mintEphemeralGitToken).toHaveBeenCalledWith("connector-session-token");
   });
 
-  it("does not accept a Git capability as mint authority", async () => {
-    const mintGitCapability = vi.fn(() => null);
-    getSessionAgentStub.mockResolvedValue({ mintGitCapability });
+  it("does not accept an ephemeral git token as mint authority", async () => {
+    const mintEphemeralGitToken = vi.fn(() => null);
+    getSessionAgentStub.mockResolvedValue({ mintEphemeralGitToken });
 
     const response = await createInternalRoutes().request(
-      "/session/session-1/capabilities/git",
+      "/session/session-1/git-token",
       {
         method: "POST",
-        headers: { Authorization: "Bearer short-lived-capability" },
+        headers: { Authorization: "Bearer short-lived-git-token" },
       },
       {} as Env,
     );
@@ -59,7 +59,7 @@ describe("Git capability mint route", () => {
 
   it("requires a bearer credential", async () => {
     const response = await createInternalRoutes().request(
-      "/session/session-1/capabilities/git",
+      "/session/session-1/git-token",
       { method: "POST" },
       {} as Env,
     );

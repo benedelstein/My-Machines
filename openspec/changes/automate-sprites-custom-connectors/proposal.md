@@ -14,19 +14,19 @@ share one mechanism:
 1. **Caller-identity binding** — Fly verifies the calling Sprite against a
    connector's access policy before injecting the credential, so an extracted
    URL/upstream secret is useless to anyone who is not that Sprite. The interim
-   Git capability remains replayable for its five-minute TTL, but only the
+   ephemeral Git token remains replayable for its five-minute TTL, but only the
    authorized Sprite can mint or refresh it through the connector.
 2. **Protected upstream secrets out of the sandbox** — webhook, GitHub installation,
    provider, and environment credentials are injected downstream. While Fly rejects
    Git smart-HTTP content types, the session connector mints a narrow five-minute
-   Git-proxy capability which is stored and verified by the DO. Provider OAuth stays in
+   ephemeral Git-proxy token which is stored and verified by the DO. Provider OAuth stays in
    our encrypted credential store so the control plane can refresh it; the same
    per-session connector used by webhook and git authenticates provider requests to
    that control-plane proxy.
    Initial clone explicitly retains the existing short-lived, contents-read-only
    GitHub token to avoid adding proxy latency to the bulk transfer. The Git
-   capability is temporary: after a live probe confirms Fly forwards Git's media
-   types, post-clone Git returns to the per-session connector and the capability
+   ephemeral token is temporary: after a live probe confirms Fly forwards Git's media
+   types, post-clone Git returns to the per-session connector and the token
    mint/helper are retired after compatibility sessions drain.
 3. **Environment header credentials** — a Sprite-local transparent MITM proxy
    routes unmodified egress to one connector per environment and hostname, which
@@ -42,7 +42,7 @@ injection, and off-allowlist denial.
 - **Connector abstraction (identity-bound):** every upstream credential-bearing egress goes
   through a Sprites Custom API connector — Fly verifies Sprite identity, injects the
   connector credential, and forwards. Two kinds: an **internal per-session
-  connector** (webhook + Git capability mint + provider inference → our Worker, injects the
+  connector** (webhook + ephemeral Git token mint + provider inference → our Worker, injects the
   Durable Object's per-session control-plane token) and **environment connectors**
   (environment header credential → external upstream, injects the real
   Sprites-custodied secret, scoped by an immutable environment label). Provider
@@ -52,7 +52,7 @@ injection, and off-allowlist denial.
   CA + local resolver + destination-targeted iptables/nft REDIRECT, with one
   connector route per class-B protected hostname and fail-closed default. Every
   class-A client is explicitly configured to the gateway URL (vm-agent webhook
-  base, Git capability mint, provider CLI base URL) and never enters the proxy;
+  base, ephemeral Git token mint, provider CLI base URL) and never enters the proxy;
   the data plane is installed only for environments with class-B credentials.
   Class-C and gateway traffic never enter the proxy. Toolchain installed at
   provisioning via `sudo apt-get` (base image is fixed).
@@ -67,7 +67,7 @@ injection, and off-allowlist denial.
   isolated in `@repo/sprites-client`.
 - **Worker cutovers:** webhook requires the gateway-injected credential. New-session
   Git stops accepting the legacy bearer; an exact connector endpoint mints a
-  five-minute capability used directly against the Worker Git proxy. Once Fly
+  five-minute ephemeral token used directly against the Worker Git proxy. Once Fly
   fixes Git content negotiation and the live probe passes, new-session Git
   smart-HTTP switches back to the connector gateway and its injected session
   credential.
@@ -132,7 +132,7 @@ model, connector abstraction, and proxy — none redesigned later.
 - Secrets policy: webhook, upstream GitHub, provider, and environment credentials
   become identity-bound and stay downstream of the Sprite. Sprites injects the
   session-control-plane and environment connector credentials; the Worker injects
-  refreshable provider OAuth upstream. The interim Git capability is a narrow,
+  refreshable provider OAuth upstream. The interim ephemeral Git token is a narrow,
   five-minute exception while Fly rejects Git content types, with an explicit
   return-to-connector task once the gateway passes the Git `Accept` probe. Initial
   clone keeps its current short-lived, contents-read-only token as an explicit

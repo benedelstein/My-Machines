@@ -18,7 +18,7 @@ import {
  *     Body: { userMessageId: string, chunks: [{ sequence, chunk }, ...] }
  *   POST /internal/session/:sessionId/events
  *     Body: { event: AgentEvent }
- *   POST /internal/session/:sessionId/capabilities/git
+ *   POST /internal/session/:sessionId/git-token
  *     Response: { token: string, expiresAt: number }
  */
 export function createInternalRoutes(): Hono<{ Bindings: Env }> {
@@ -192,7 +192,7 @@ export function createInternalRoutes(): Hono<{ Bindings: Env }> {
     return new Response(null, { status: 204 });
   });
 
-  internalRoutes.post("/session/:sessionId/capabilities/git", async (c) => {
+  internalRoutes.post("/session/:sessionId/git-token", async (c) => {
     const sessionId = c.req.param("sessionId");
     const target = await getWebhookTarget(
       c.env,
@@ -202,14 +202,14 @@ export function createInternalRoutes(): Hono<{ Bindings: Env }> {
     if (!target.ok) {
       return c.json({ error: target.message }, target.status);
     }
-    const capability = await target.stub.mintGitCapability(target.token);
-    if (!capability) {
-      logger.warn("[/capabilities/git] auth failed", {
+    const minted = await target.stub.mintEphemeralGitToken(target.token);
+    if (!minted) {
+      logger.warn("[/git-token] auth failed", {
         fields: { sessionId },
       });
       return c.json({ error: "Invalid connector credential" }, 403);
     }
-    return c.json(capability, 200);
+    return c.json(minted, 200);
   });
 
   return internalRoutes;

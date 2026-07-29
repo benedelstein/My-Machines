@@ -222,7 +222,7 @@ describe("SessionConnectorService.ensureMinted", () => {
       allowedEndpoints: [
         "/internal/session/session-1/chunks",
         "/internal/session/session-1/events",
-        "/internal/session/session-1/capabilities/git",
+        "/internal/session/session-1/git-token",
         "/health",
       ],
     });
