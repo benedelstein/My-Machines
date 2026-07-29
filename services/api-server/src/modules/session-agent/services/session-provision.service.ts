@@ -72,7 +72,6 @@ export interface SessionProvisionServiceDeps {
   updateServerState: (partial: Partial<ServerState>) => void;
   updatePartialState: (partial: ProvisionClientStateUpdate) => void;
   synthesizeStatus: () => SessionStatus;
-  ensureGitProxySecret: () => string;
   retireGitProxySecret: () => void;
   ensureSessionConnector: (spriteName: string) => Promise<void>;
   getSessionConnectorGatewayBase: () => string | null;
@@ -104,7 +103,6 @@ export class SessionProvisionService {
   private readonly updateServerState: SessionProvisionServiceDeps["updateServerState"];
   private readonly updatePartialState: SessionProvisionServiceDeps["updatePartialState"];
   private readonly synthesizeStatus: () => SessionStatus;
-  private readonly ensureGitProxySecret: () => string;
   private readonly retireGitProxySecret: () => void;
   private readonly ensureSessionConnector: SessionProvisionServiceDeps["ensureSessionConnector"];
   private readonly getSessionConnectorGatewayBase:
@@ -128,7 +126,6 @@ export class SessionProvisionService {
     this.updateServerState = deps.updateServerState;
     this.updatePartialState = deps.updatePartialState;
     this.synthesizeStatus = deps.synthesizeStatus;
-    this.ensureGitProxySecret = deps.ensureGitProxySecret;
     this.retireGitProxySecret = deps.retireGitProxySecret;
     this.ensureSessionConnector = deps.ensureSessionConnector;
     this.getSessionConnectorGatewayBase = deps.getSessionConnectorGatewayBase;
@@ -521,67 +518,51 @@ export class SessionProvisionService {
       this.updatePartialState({ baseBranch: actualBaseBranch });
     }
 
+    // The session_connector task is blocking and ordered before this one
+    // (including back-filled pre-connector runs), so a missing gateway base
+    // is an invariant violation, not a fallback case.
     const connectorGatewayBase = this.getSessionConnectorGatewayBase();
-    if (connectorGatewayBase) {
-      const helperPath = `/home/sprite/.local/bin/mm-git-credential-${sessionId}`;
-      const mintUrl =
-        `${connectorGatewayBase}/internal/session/${sessionId}/capabilities/git`;
-      const helperSource = buildGitCredentialHelper({
-        remoteUrl: cloneUrl,
-        mintUrl,
-      });
-      const helperBase64 = btoa(helperSource);
-      const capabilitySetupResult = await sprite.execWs(
-        dedent`
-        set -e
-        mkdir -p /home/sprite/.local/bin
-        echo ${shellQuote(helperBase64)} | base64 -d > ${shellQuote(helperPath)}
-        chmod 700 ${shellQuote(helperPath)}
-        cd ${WORKSPACE_DIR}
-        git remote set-url origin ${shellQuote(cloneUrl)}
-        git remote set-url --push origin ${shellQuote(cloneUrl)}
-        git config user.email "agent@mymachines.dev"
-        git config user.name "My Machines"
-        git config --unset-all http.extraHeader || true
-        git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
-        git config --unset-all credential.helper || true
-        git config credential.helper ""
-        git config --add ${shellQuote(`credential.${cloneUrl}.helper`)} ${shellQuote(helperPath)}
-        git config ${shellQuote(`credential.${cloneUrl}.username`)} x-capability
-        git config credential.useHttpPath true
-      `,
-        {},
-      );
-      if (capabilitySetupResult.exitCode !== 0) {
-        throw new Error(
-          `Git capability setup failed (exit ${capabilitySetupResult.exitCode}): `
-          + capabilitySetupResult.stderr,
-        );
-      }
-      this.retireGitProxySecret();
-      this.updateServerState({ gitAuthMode: "capability" });
-      return;
+    if (!connectorGatewayBase) {
+      throw new Error("Session connector gateway base is missing");
     }
-
-    const gitProxySecret = this.ensureGitProxySecret();
-    const fetchUrl = this.getEnvironmentSnapshot().network.mode === "locked"
-      ? cloneUrl
-      : githubRemoteUrl;
-    await sprite.execWs(
+    const helperPath = `/home/sprite/.local/bin/mm-git-credential-${sessionId}`;
+    const mintUrl =
+      `${connectorGatewayBase}/internal/session/${sessionId}/capabilities/git`;
+    const helperSource = buildGitCredentialHelper({
+      remoteUrl: cloneUrl,
+      mintUrl,
+    });
+    const helperBase64 = btoa(helperSource);
+    const capabilitySetupResult = await sprite.execWs(
       dedent`
-        set -e
-        cd ${WORKSPACE_DIR}
-        git remote set-url origin ${shellQuote(fetchUrl)}
-        git remote set-url --push origin ${shellQuote(cloneUrl)}
-        git config user.email "agent@mymachines.dev"
-        git config user.name "My Machines"
-        git config --unset-all http.extraHeader || true
-        git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
-        git config --add "http.${proxyBaseUrl}/.extraHeader" "Authorization: Bearer ${gitProxySecret}"
-      `,
+      set -e
+      mkdir -p /home/sprite/.local/bin
+      echo ${shellQuote(helperBase64)} | base64 -d > ${shellQuote(helperPath)}
+      chmod 700 ${shellQuote(helperPath)}
+      cd ${WORKSPACE_DIR}
+      git remote set-url origin ${shellQuote(cloneUrl)}
+      git remote set-url --push origin ${shellQuote(cloneUrl)}
+      git config user.email "agent@mymachines.dev"
+      git config user.name "My Machines"
+      git config --unset-all http.extraHeader || true
+      git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
+      git config --unset-all credential.helper || true
+      git config credential.helper ""
+      git config --add ${shellQuote(`credential.${cloneUrl}.helper`)} ${shellQuote(helperPath)}
+      git config ${shellQuote(`credential.${cloneUrl}.username`)} x-capability
+      git config credential.useHttpPath true
+      git config ${shellQuote(`http.${proxyBaseUrl}/.proactiveAuth`)} basic
+    `,
       {},
     );
-    this.updateServerState({ gitAuthMode: "legacy_secret" });
+    if (capabilitySetupResult.exitCode !== 0) {
+      throw new Error(
+        `Git capability setup failed (exit ${capabilitySetupResult.exitCode}): `
+        + capabilitySetupResult.stderr,
+      );
+    }
+    this.retireGitProxySecret();
+    this.updateServerState({ gitAuthMode: "capability" });
   }
 
   private async applyFinalNetworkPolicy(spriteName: string): Promise<void> {

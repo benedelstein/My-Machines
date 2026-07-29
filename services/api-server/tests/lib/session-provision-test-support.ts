@@ -165,7 +165,6 @@ export function createService(
       return { name: "sprite-1", status: "running" };
     }),
   };
-  const ensureGitProxySecret = vi.fn(() => "git-proxy-secret");
   const retireGitProxySecret = vi.fn();
   const ensureSessionConnector = vi.fn(async () => {
     mockState.events.push("mintConnector");
@@ -186,7 +185,6 @@ export function createService(
     updateServerState,
     updatePartialState,
     synthesizeStatus: () => "preparing",
-    ensureGitProxySecret,
     retireGitProxySecret,
     ensureSessionConnector,
     getSessionConnectorGatewayBase: () =>
@@ -202,7 +200,6 @@ export function createService(
     service,
     updateServerState,
     spriteLifecycleClient,
-    ensureGitProxySecret,
     retireGitProxySecret,
     ensureSessionConnector,
   };

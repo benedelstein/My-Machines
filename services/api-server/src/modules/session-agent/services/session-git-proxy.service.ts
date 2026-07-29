@@ -91,17 +91,6 @@ export class SessionGitProxyService implements
     });
   }
 
-  /** Returns the git-proxy secret, generating and persisting it if missing. */
-  ensureGitProxySecret(): string {
-    const existing = this.secretRepository.get("git_proxy_secret");
-    if (existing) {
-      return existing;
-    }
-    const secret = crypto.randomUUID();
-    this.secretRepository.set("git_proxy_secret", secret);
-    return secret;
-  }
-
   /** Removes the legacy session-long Git bearer after capability cutover. */
   retireGitProxySecret(): void {
     this.secretRepository.delete("git_proxy_secret");

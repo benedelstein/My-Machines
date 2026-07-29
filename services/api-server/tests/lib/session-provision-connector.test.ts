@@ -66,7 +66,7 @@ describe("SessionProvisionService session connector", () => {
 
   it("configures direct Worker remotes with an exact-url credential helper", async () => {
     const serverState = createServerState();
-    const { service, ensureGitProxySecret, retireGitProxySecret } = createService(
+    const { service, retireGitProxySecret } = createService(
       serverState,
       createClientState(),
     );
@@ -84,8 +84,10 @@ describe("SessionProvisionService session connector", () => {
       "credential.https://worker.test/git-proxy/session-1/github.com/ben/repo.git.helper",
     );
     expect(remoteConfigCommand).toContain("git config credential.useHttpPath true");
+    expect(remoteConfigCommand).toContain(
+      "git config 'http.https://worker.test/git-proxy/session-1/.proactiveAuth' basic",
+    );
     expect(remoteConfigCommand).not.toContain("Authorization: Bearer git-proxy-secret");
-    expect(ensureGitProxySecret).not.toHaveBeenCalled();
     expect(retireGitProxySecret).toHaveBeenCalled();
     expect(serverState.gitAuthMode).toBe("capability");
   });
@@ -127,18 +129,21 @@ describe("SessionProvisionService session connector", () => {
     expect(serverState.gitAuthMode).toBe("legacy_secret");
   });
 
-  it("keeps legacy bearer configuration for pre-connector sessions", async () => {
+  it("fails the repository task when the connector gateway base is missing", async () => {
     const serverState = createServerState();
-    const { service, ensureGitProxySecret } = createService(
+    const { service, retireGitProxySecret } = createService(
       serverState,
       createClientState({ includeSessionConnector: false }),
     );
 
-    await service.ensureProvisioned();
+    await expect(service.ensureProvisioned()).rejects.toThrow(
+      "Session connector gateway base is missing",
+    );
 
-    const command = getRemoteConfigCommand();
-    expect(command).toContain("Authorization: Bearer git-proxy-secret");
-    expect(ensureGitProxySecret).toHaveBeenCalled();
+    const remoteConfigCall = mockState.execWs.mock.calls.find(([command]) =>
+      String(command).includes("git remote set-url origin"));
+    expect(remoteConfigCall).toBeUndefined();
+    expect(retireGitProxySecret).not.toHaveBeenCalled();
     expect(serverState.gitAuthMode).toBe("legacy_secret");
   });
 });
