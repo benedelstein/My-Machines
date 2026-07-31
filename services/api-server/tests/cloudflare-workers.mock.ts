@@ -7,3 +7,9 @@ export class DurableObject<Env = unknown, Props = unknown> {
     this.env = env;
   }
 }
+
+export class RpcTarget {}
+
+export class WorkflowEntrypoint {}
+
+export const env = {};
