@@ -19,16 +19,20 @@ How one user turn moves from the browser to the Sprite VM and back. The current 
 ```text
 Client WS
   -> SessionAgentDO.handleChatMessage
-  -> SessionChatDispatchService.dispatchChatMessage
+  -> SessionChatDispatchService.prepareChatMessage
   -> SessionAgentAttachmentProvider.getByIdsBoundToSession
-  -> MessageRepository.create(user message)
-  -> AgentTurnCoordinator.beginTurn(userMessageId)
+  -> RuntimeBoundaryMutex
+     -> SessionAgentDO._ensureReady(lease)
+     -> MessageRepository.create(user message)
+     -> AgentTurnCoordinator.beginTurn(userMessageId)
+  -> release RuntimeBoundaryMutex
+  -> SessionChatDispatchService.spawnClaimedTurn
   -> SpriteAgentProcessManager.dispatchMessage
      -> AgentAttachmentService.resolveAttachments
      -> try existing vm-agent process via stdin + stdin_ack
      -> otherwise write credentials, agent script, and initial message file
      -> spawn bun agent-webhook.js in a detachable Sprite session
-  -> AgentTurnCoordinator.attachProcessId(processId)
+  -> AgentTurnCoordinator.markTurnDispatched(userMessageId, processId)
 
 vm-agent
   -> WebhookAgentRunner queues turn into agent-harness
@@ -50,6 +54,7 @@ Active turn fields live in `server_state`:
 ```ts
 {
   activeUserMessageId: string | null;
+  activeTurnDispatchStatus: "claimed" | "dispatched" | null;
   agentProcessId: number | null;
   agentSessionId: string | null;
 }
@@ -59,9 +64,11 @@ Only one user turn may be active per session. A second `chat.message` while `act
 
 ## Dispatch
 
-`SessionChatDispatchService` resolves requested attachment ids with `SessionAgentAttachmentProvider.getByIdsBoundToSession(...)` before building the user `UIMessage`. The stored message keeps attachment parts with `/attachments/{attachmentId}/content` URLs for client display, plus width/height metadata when available. A message with only attachments is valid; empty content and no attachments is rejected.
+`SessionChatDispatchService` resolves requested attachment ids with `SessionAgentAttachmentProvider.getByIdsBoundToSession(...)` before building the user `UIMessage`. Preparation does not persist messages, update settings, or begin a turn. The stored message keeps attachment parts with `/attachments/{attachmentId}/content` URLs for client display, plus width/height metadata when available. A message with only attachments is valid; empty content and no attachments is rejected.
 
-`SessionChatDispatchService` persists the user `UIMessage` before spawning so the session history is durable even if process startup fails. It calls `AgentTurnCoordinator.beginTurn()` before process dispatch so webhooks racing in from a fast vm-agent are not treated as stale.
+The final readiness pass and synchronous turn claim share one FIFO `RuntimeBoundaryMutex` ownership interval. Direct chat calls private `_ensureReady(lease)`, checks for an active or pending message, persists the prepared message, and calls `AgentTurnCoordinator.beginTurn()` without another `await`. Pending initial messages use the same boundary. Process I/O starts only after the mutex is released, by which point `activeUserMessageId` and `activeTurnDispatchStatus="claimed"` are durable.
+
+The application mutex is selective. `handleInit` still uses `blockConcurrencyWhile` only for initialization; connection readiness and chat admission use `RuntimeBoundaryMutex`. Inbound chunk and event webhooks never acquire that mutex, so a terminal webhook can clear active state while another readiness caller is queued.
 
 `SpriteAgentProcessManager.dispatchMessage(...)` converts the turn input into an `AgentInputMessage` before either warm-process stdin or fresh spawn. `AgentAttachmentService.resolveAttachments(...)` re-reads the attachment ids bound to the session, downloads each R2 object, and produces `AgentInputAttachment` records with `filename`, `mediaType`, and `dataUrl`. The vm-agent harness turns those records into AI SDK image content parts.
 
@@ -127,6 +134,14 @@ The WAL invariant is: pending chunks imply an active or recently active turn. On
 3. Restores `lastSeenChunkSequence`.
 4. If an active process id exists, attempts to attach to that Sprite process.
 5. If the process is gone, commits the partial assistant message as aborted and clears active turn state.
+
+Readiness separately reconciles the claim-to-dispatch handoff. A durable
+`activeTurnDispatchStatus="claimed"` with no matching in-memory dispatch means
+the Worker stopped before dispatch was confirmed. Readiness aborts that claim
+and clears active/process state even if a reusable process id was already
+present. Once dispatch returns or the first chunk confirms delivery, the status
+becomes `dispatched`. Every terminal, abort, and spawn-failure path queues a new
+readiness pass after clearing active state.
 
 Duplicate webhook batches are deduped by the WAL sequence constraint. Missing chunks abort the active turn, surface `CHAT_MESSAGE_FAILED`, and terminate the active process.
 

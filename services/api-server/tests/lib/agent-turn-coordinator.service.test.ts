@@ -22,10 +22,12 @@ function createLogger(): Logger {
 
 function createHarness(params: {
   onTurnFinished?: (turn: FinishedAssistantTurn) => void;
+  onTurnSettled?: () => void;
 } = {}) {
   const serverState = {
     sessionId: "session-1",
     activeUserMessageId: "user-message-1",
+    activeTurnDispatchStatus: "dispatched",
     agentProcessId: 42,
     agentProcessRunId: "process-run-1",
   } as ServerState;
@@ -54,6 +56,7 @@ function createHarness(params: {
       updateWorkingState("idle");
     }
   });
+  const onTurnSettled = params.onTurnSettled ?? vi.fn();
 
   const coordinator = new AgentTurnCoordinator({
     logger: createLogger(),
@@ -70,6 +73,7 @@ function createHarness(params: {
     terminateActiveProcess: vi.fn(),
     updateWorkingState,
     onTurnFinished,
+    onTurnSettled,
   });
 
   return {
@@ -80,10 +84,27 @@ function createHarness(params: {
     pendingChunkRepository,
     serverState,
     updateWorkingState,
+    onTurnSettled,
   };
 }
 
 describe("AgentTurnCoordinator", () => {
+  it("persists claimed and dispatched handoff states synchronously", () => {
+    const { coordinator, serverState } = createHarness();
+
+    coordinator.beginTurn("user-message-2");
+
+    expect(serverState.activeUserMessageId).toBe("user-message-2");
+    expect(serverState.activeTurnDispatchStatus).toBe("claimed");
+
+    coordinator.markTurnDispatched("other-message", 99);
+    expect(serverState.activeTurnDispatchStatus).toBe("claimed");
+
+    coordinator.markTurnDispatched("user-message-2", 99);
+    expect(serverState.agentProcessId).toBe(99);
+    expect(serverState.activeTurnDispatchStatus).toBe("dispatched");
+  });
+
   it("assigns one message id before persisting, broadcasting, and finalizing a legacy stream", async () => {
     const {
       broadcastMessage,
@@ -144,6 +165,20 @@ describe("AgentTurnCoordinator", () => {
     });
     expect(updateWorkingState).not.toHaveBeenCalledWith("idle");
     expect(serverState.activeUserMessageId).toBeNull();
+  });
+
+  it("queues readiness after a terminal webhook clears the active turn", async () => {
+    const onTurnSettled = vi.fn();
+    const { coordinator, serverState } = createHarness({ onTurnSettled });
+
+    await coordinator.handleChunks("user-message-1", [
+      { sequence: 0, chunk: { type: "start", messageId: "assistant-message-1" } as UIMessageChunk },
+      { sequence: 1, chunk: { type: "finish", finishReason: "stop" } as UIMessageChunk },
+    ]);
+
+    expect(serverState.activeUserMessageId).toBeNull();
+    expect(serverState.activeTurnDispatchStatus).toBeNull();
+    expect(onTurnSettled).toHaveBeenCalledOnce();
   });
 
   it("runs the turn-finished hook with abort for aborted assistant messages", async () => {

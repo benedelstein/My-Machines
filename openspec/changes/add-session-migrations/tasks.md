@@ -20,11 +20,11 @@ Scope: task group 6's mutex/readiness/dispatch work only. Runtime migration
 types, tables, coordinator, registry, and definitions must not exist in the
 production path yet.
 
-- [ ] P2.1 Ship `RuntimeBoundaryMutex`, the branded lease, `_ensureReady(lease)`, and the readiness-to-`beginTurn()` race fix with zero registered runtime migrations.
-- [ ] P2.2 Keep Phase 2 `_ensureReady(lease)` limited to initialization, provisioning/setup, and pending-turn admission; do not pass prepared process-contract inputs or call a migration coordinator.
-- [ ] P2.3 Add crash-boundary coverage from synchronous turn claim through dispatch invocation so a Worker stop cannot leave an unrecoverable claimed turn that permanently blocks readiness.
-- [ ] P2.4 Prove webhooks remain outside the application mutex and can complete an active turn while readiness callers queue.
-- [ ] P2.5 Pass concurrency, non-reentrancy, claim/dispatch recovery, existing readiness, build, lint, typecheck, and strict OpenSpec validation suites.
+- [x] P2.1 Ship `RuntimeBoundaryMutex`, the branded lease, `_ensureReady(lease)`, and the readiness-to-`beginTurn()` race fix with zero registered runtime migrations.
+- [x] P2.2 Keep Phase 2 `_ensureReady(lease)` limited to initialization, provisioning/setup, and pending-turn admission; do not pass prepared process-contract inputs or call a migration coordinator.
+- [x] P2.3 Add crash-boundary coverage from synchronous turn claim through dispatch invocation so a Worker stop cannot leave an unrecoverable claimed turn that permanently blocks readiness.
+- [x] P2.4 Prove webhooks remain outside the application mutex and can complete an active turn while readiness callers queue.
+- [x] P2.5 Pass concurrency, non-reentrancy, claim/dispatch recovery, existing readiness, build, lint, typecheck, and strict OpenSpec validation suites.
 - [ ] P2.6 Observe dispatch latency, duplicate/blocked turn errors, stale active-turn recovery, and webhook completion before Phase 3.
 
 ## Phase 3 — Inert Runtime Migration Engine
@@ -151,25 +151,30 @@ marked against that decision.
 
 ## 6. Runtime Boundary Mutex and Readiness Pipeline — Phase 2, Extended in Phases 3 and 6
 
-- [ ] 6.1 Implement a rejection-safe FIFO `RuntimeBoundaryMutex` for application-level runtime transitions.
-- [ ] 6.1a In Phase 2, add a module-private branded `RuntimeBoundaryLease` yielded by `runExclusive` and require it on `_ensureReady`; in Phases 3–4 extend the same lease requirement to `ensureMigrations` and targeted `ensureMigration`, with no independently callable mutating coordinator RPC/entry point.
-- [ ] 6.2 Make every public `ensureReady()` call queue on the mutex and re-evaluate current state after acquisition; do not add a separate `ensureReadyPromise` in the initial implementation.
-- [ ] 6.3 Keep `ctx.blockConcurrencyWhile` limited to `initializeSessionState`; do not place long Sprite migrations under the Durable Object global concurrency block.
-- [ ] 6.4 In Phase 2 split public `ensureReady()` from private `_ensureReady(lease)`; `_ensureReady` requires proof that the runtime-boundary mutex is held and never acquires it. Phase 6 may extend it with paired prepared process inputs.
-- [ ] 6.5 Give Phase 2 readiness explicit `ready`, `setup_incomplete`, and tagged failure outcomes; when Phase 3 connects the coordinator, add `deferred_active_turn` and treat migration-range `current` and `applied` as ready.
-- [ ] 6.6 In Phase 2 order readiness as initialization, provision/resume setup, terminal-success gate, and pending initial-message admission; in Phase 3 insert awaited migrations after terminal setup success and before admission.
-- [ ] 6.7 Preserve `handleInit` latency by awaiting durable initialization only and queueing readiness through `keepAliveWhile`.
-- [ ] 6.8 Keep `onConnect` snapshot/history delivery and queue readiness on the shared mutex.
-- [ ] 6.9 Refactor direct chat into mutation-free preparation followed by acquisition of the shared runtime boundary, private `_ensureReady(lease)`, synchronous message persistence/`beginTurn`, boundary release, and spawn after claim.
-- [ ] 6.10 Ensure there is no `await` between the final ready decision and persistence of non-null `activeUserMessageId`.
-- [ ] 6.11 Allow the mutex to release after the active-turn write and before process spawn for both direct and pending turns; preserve spawn-failure cleanup of active state.
-- [ ] 6.12 Split `maybeDispatchPendingMessage()` into a synchronous pending-turn claim inside the readiness-held runtime boundary and asynchronous `spawnClaimedTurn()` after release.
-- [ ] 6.13 Keep inbound agent webhooks outside the application mutex so terminal chunks can clear active state; document that current regular readiness does not globally block webhooks and retain `blockConcurrencyWhile` only for initialization.
-- [ ] 6.14 In Phase 2 queue readiness from every turn-completion, abort, or failure path that may unblock pending admission; in Phase 3 use those same hooks to unblock deferred migrations.
-- [ ] 6.15 Preserve service-local provisioning single-flight guards as defensive direct-call protection until all call sites are proven to use the runtime boundary.
-- [ ] 6.16 In Phase 2 add concurrency tests for two connections, init plus connection, attachment preparation during queued readiness, pending initial dispatch versus direct chat, mutex release on failure, claim-to-dispatch crash recovery, and webhook progress; add chat-during-migration and turn-completion-after-deferral cases only in Phase 3.
-- [ ] 6.17 Add a regression test for the current await-sized race: no Sprite mutation may begin between direct-chat readiness and `beginTurn`.
-- [ ] 6.18 Add compile-time tests/fixtures rejecting ownership-requiring calls without a lease, plus runtime non-reentrancy tests proving setup targeted ensure and direct chat `_ensureReady(lease)` reuse the existing boundary rather than calling public `ensureReady()` or reacquiring the mutex.
+- [x] 6.1 Implement a rejection-safe FIFO `RuntimeBoundaryMutex` for application-level runtime transitions.
+- [x] 6.1a In Phase 2, add a module-private branded `RuntimeBoundaryLease` yielded by `runExclusive` and require it on `_ensureReady`.
+- [ ] 6.1b In Phases 3–4 extend the same lease requirement to `ensureMigrations` and targeted `ensureMigration`, with no independently callable mutating coordinator RPC/entry point.
+- [x] 6.2 Make every public `ensureReady()` call queue on the mutex and re-evaluate current state after acquisition; do not add a separate `ensureReadyPromise` in the initial implementation.
+- [x] 6.3 Keep `ctx.blockConcurrencyWhile` limited to `initializeSessionState`; do not place long Sprite migrations under the Durable Object global concurrency block.
+- [x] 6.4 In Phase 2 split public `ensureReady()` from private `_ensureReady(lease)`; `_ensureReady` requires proof that the runtime-boundary mutex is held and never acquires it. Phase 6 may extend it with paired prepared process inputs.
+- [x] 6.5a Give Phase 2 readiness explicit `ready`, `setup_incomplete`, and tagged failure outcomes.
+- [ ] 6.5b When Phase 3 connects the coordinator, add `deferred_active_turn` and treat migration-range `current` and `applied` as ready.
+- [x] 6.6a In Phase 2 order readiness as initialization, provision/resume setup, terminal-success gate, and pending initial-message admission.
+- [ ] 6.6b In Phase 3 insert awaited migrations after terminal setup success and before admission.
+- [x] 6.7 Preserve `handleInit` latency by awaiting durable initialization only and queueing readiness through `keepAliveWhile`.
+- [x] 6.8 Keep `onConnect` snapshot/history delivery and queue readiness on the shared mutex.
+- [x] 6.9 Refactor direct chat into mutation-free preparation followed by acquisition of the shared runtime boundary, private `_ensureReady(lease)`, synchronous message persistence/`beginTurn`, boundary release, and spawn after claim.
+- [x] 6.10 Ensure there is no `await` between the final ready decision and persistence of non-null `activeUserMessageId`.
+- [x] 6.11 Allow the mutex to release after the active-turn write and before process spawn for both direct and pending turns; preserve spawn-failure cleanup of active state.
+- [x] 6.12 Split `maybeDispatchPendingMessage()` into a synchronous pending-turn claim inside the readiness-held runtime boundary and asynchronous `spawnClaimedTurn()` after release.
+- [x] 6.13 Keep inbound agent webhooks outside the application mutex so terminal chunks can clear active state; document that current regular readiness does not globally block webhooks and retain `blockConcurrencyWhile` only for initialization.
+- [x] 6.14 In Phase 2 queue readiness from every turn-completion, abort, or failure path that may unblock pending admission; in Phase 3 use those same hooks to unblock deferred migrations.
+- [x] 6.15 Preserve service-local provisioning single-flight guards as defensive direct-call protection until all call sites are proven to use the runtime boundary.
+- [x] 6.16a In Phase 2 add concurrency tests for two connections, init plus connection, attachment preparation during queued readiness, pending initial dispatch versus direct chat, mutex release on failure, claim-to-dispatch crash recovery, and webhook progress.
+- [ ] 6.16b Add chat-during-migration and turn-completion-after-deferral cases in Phase 3.
+- [x] 6.17 Add a regression test for the current await-sized race: no Sprite mutation may begin between direct-chat readiness and `beginTurn`.
+- [x] 6.18a Add compile-time tests/fixtures rejecting Phase 2 ownership-requiring calls without a lease, plus runtime non-reentrancy tests proving direct chat `_ensureReady(lease)` reuses the existing boundary rather than calling public `ensureReady()` or reacquiring the mutex.
+- [ ] 6.18b In Phases 3–4 prove setup targeted ensure and coordinator ownership-requiring calls reuse the existing lease at compile time and runtime.
 
 ## 7. Immutable Setup and Targeted Ensure Integration — Foundation in Phase 4, Additional Call Sites in Phase 5
 

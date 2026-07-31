@@ -47,6 +47,7 @@ export interface AgentTurnCoordinatorDeps {
   terminateActiveProcess: () => Promise<void>;
   updateWorkingState: (state: SessionWorkingState) => void;
   onTurnFinished: (turn: FinishedAssistantTurn) => void;
+  onTurnSettled: () => void;
 }
 
 /**
@@ -73,6 +74,7 @@ export class AgentTurnCoordinator {
   private readonly terminateActiveProcess: () => Promise<void>;
   private readonly updateWorkingState: (state: SessionWorkingState) => void;
   private readonly onTurnFinished: (turn: FinishedAssistantTurn) => void;
+  private readonly onTurnSettled: () => void;
   /**
    * The highest chunk sequence applied within the active turn. `null` means
    * no chunks have been applied yet (fresh turn or post-clear). Lazily set
@@ -105,6 +107,7 @@ export class AgentTurnCoordinator {
     this.terminateActiveProcess = deps.terminateActiveProcess;
     this.updateWorkingState = deps.updateWorkingState;
     this.onTurnFinished = deps.onTurnFinished;
+    this.onTurnSettled = deps.onTurnSettled;
   }
 
   /**
@@ -186,12 +189,13 @@ export class AgentTurnCoordinator {
   /**
    * Marks `userMessageId` as the active turn before the sprite process is
    * spawned so any webhook racing in with chunks correlates correctly.
-   * `agentProcessId` is filled in later via `attachProcessId` once the spawn
-   * returns.
+   * Dispatch confirmation and `agentProcessId` are filled in later via
+   * `markTurnDispatched` once the process manager returns.
    */
   beginTurn(userMessageId: string): void {
     this.updateServerState({
       activeUserMessageId: userMessageId,
+      activeTurnDispatchStatus: "claimed",
     });
     this.updateWorkingState("responding");
     this.updatePartialState({
@@ -205,8 +209,14 @@ export class AgentTurnCoordinator {
    * Records the sprite exec process id for the active turn so cancel/kill
    * paths can target it. Called immediately after a successful spawn.
    */
-  attachProcessId(agentProcessId: number): void {
-    this.updateServerState({ agentProcessId });
+  markTurnDispatched(userMessageId: string, agentProcessId: number): void {
+    if (this.getServerState().activeUserMessageId !== userMessageId) {
+      return;
+    }
+    this.updateServerState({
+      agentProcessId,
+      activeTurnDispatchStatus: "dispatched",
+    });
   }
 
   /**
@@ -228,6 +238,9 @@ export class AgentTurnCoordinator {
         fields: { chunkCount: chunks.length, userMessageId },
       });
       return;
+    }
+    if (this.getServerState().activeTurnDispatchStatus === "claimed") {
+      this.updateServerState({ activeTurnDispatchStatus: "dispatched" });
     }
 
     // Buffer freshly-inserted chunks and emit one agent.chunks broadcast per
@@ -620,8 +633,10 @@ export class AgentTurnCoordinator {
     } = {},
   ): void {
     const serverState = this.getServerState();
+    const hadActiveTurn = serverState.activeUserMessageId !== null;
     this.updateServerState({
       activeUserMessageId: null,
+      activeTurnDispatchStatus: null,
       agentProcessId: options.preserveAgentProcessId
         ? serverState.agentProcessId
         : null,
@@ -634,6 +649,9 @@ export class AgentTurnCoordinator {
       this.updateWorkingState("idle");
     }
     this.lastSeenChunkSequence = null;
+    if (hadActiveTurn) {
+      this.onTurnSettled();
+    }
   }
 
   /**
