@@ -107,7 +107,7 @@ flowchart LR
 
 | Phase | Newly active behavior | Registry after deployment | Must remain inactive | Exit gate |
 | --- | --- | --- | --- | --- |
-| 1. Local foundation | Constructor-time DO repository migrations and migration-only Agents SDK row adapter | nonexistent | mutex, runtime migration repository, external reconciliation | historical fixtures, atomic rollback, and pre-hydration ordering pass |
+| 1. Local foundation | Pre-hydration `migrateAll()` ordering and the migration-only Agents SDK row adapter, with zero registered steps | nonexistent | mutex, runtime migration repository, external reconciliation, any data migration | historical fixtures, atomic rollback, and pre-hydration ordering pass against fixture migrations |
 | 2. Runtime boundary | FIFO mutex, branded lease, `_ensureReady(lease)`, readiness-to-turn claim serialization, pending-claim split | nonexistent | all runtime migration types, tables, definitions, and external migration effects | concurrency/crash tests pass and production shows no dispatch regression |
 | 3. Inert engine | revision API, canonical hashing, `RuntimeMigrationRepository`, coordinator, logs/metrics, readiness call into engine | exactly `[]` | every adopter and every setup `ensureMigration` call | empty-registry tests prove zero migration records and zero Sprite/connector/process calls |
 | 4. Toolchain adopter | immutable setup integration, targeted ensure, legacy checkpoint adoption, startup-toolchain contract | `[sprite.startup-toolchain]` | connector, Git, network, process definitions | new and legacy canaries adopt/reconcile without setup-history mutation |
@@ -119,10 +119,33 @@ flowchart LR
 Phase 1 changes only local, constructor-time persistence behavior:
 
 - add historical fixture support;
-- migrate DO-owned SQLite/JSON before normal reads;
-- add the migration-only `cf_agents_state` adapter;
-- validate migrated client state before SDK hydration;
+- run `migrateAll()` before ServerState load, service construction, and SDK
+  state hydration, so any future local migration lands pre-hydration;
+- add the migration-only `cf_agents_state` adapter as the registration seam;
+- derive local state shapes from schemas so a future step has a validator;
 - emit no client broadcast from migration code.
+
+Phase 1 deliberately ships **no data migration**. Every live session already
+stores ServerState and client state at the current shape, so there is nothing
+to backfill. Shipping a whole-shape normalization step would only persist what
+each read already computes, and would freeze live defaults into append-only
+history where their meaning drifts. The deliverable is the ordering guarantee
+and the seam; steps are appended surgically when a field actually changes.
+
+A surgical step reads the row, transforms only the fields that changed,
+validates the result against that state's current schema, and writes it back.
+A throw rolls the transaction back and leaves the version unrecorded, so the
+step retries on the next cold start rather than committing a row current code
+cannot read. Because no production step exists yet, transform, rollback,
+no-op, and skip behavior are proven by fixture migrations driven through the
+real `migrateAll` runner — the same "prove the engine, register nothing"
+approach Phase 3 uses for the runtime registry.
+
+Read paths deliberately do not validate. `ServerStateRepository.get()` merges
+onto defaults without parsing: a parse failure during construction would leave
+the session unreachable with no recovery path, since the Durable Object is the
+only way to reach its own state. Validation that can reject a row belongs in a
+migration, where failure is recoverable.
 
 All local changes in this phase are additive or dual-read compatible with the
 previous deployment. A rollback may ignore newly added tables/fields, but must
@@ -234,6 +257,16 @@ the rollback window.
 
 - Never activate the first definition from phase N and phase N+1 in the same
   production deployment.
+- Phases are authored as a stack of pull requests, each targeting the branch
+  below it. Stacking is a review tool, not a merge-batching one: merging is
+  deploying, because the api-server deploy workflow triggers on push to `main`.
+  Merge the bottom PR only, one phase at a time, with its observation window in
+  between. Do not use a stack-wide merge command, which lands every PR below the
+  target in one push and collapses several phase boundaries into one deployment.
+- Keep the stack shallow, around three layers. Phases 4 through 6 reconcile
+  external connector, Git, and process state, and their design depends on what
+  phases 2 and 3 show in production; authoring them earlier writes against
+  unvalidated assumptions and forces repeated rebases of the whole chain.
 - Registry snapshots are asserted exactly for phases 3 through 6; accidental
   early registration fails tests.
 - Every phase runs build, lint, typecheck, focused tests, strict OpenSpec
@@ -316,10 +349,15 @@ constructor(ctx: DurableObjectState, env: Env) {
 ```
 
 The SDK adapter directly accesses `cf_agents_state` and `cf_state_row_id` only
-at this pre-hydration boundary. Its migration parses historical state as
-`unknown`, transforms it, validates the final value with `ClientStateSchema`,
-and updates the row within the local migration transaction. Normal reads and
-writes continue through the Agents SDK.
+at this pre-hydration boundary. Any step it registers parses historical state as
+`unknown`, transforms only the fields that changed, validates the final value
+with `ClientStateSchema`, and updates the row within the local migration
+transaction. Normal reads and writes continue through the Agents SDK.
+
+The adapter ships with an empty migration array. It is registered in the
+constructor so that appending a step is the only work a future client-state
+migration requires; the pre-hydration ordering is already guaranteed and
+tested.
 
 ### 2. Normalize runtime migrations around a typed revision
 

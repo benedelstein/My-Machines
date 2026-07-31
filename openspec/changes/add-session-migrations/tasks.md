@@ -10,7 +10,7 @@ than numeric task-group order.
 Scope: task group 1 only.
 
 - [x] P1.1 Confirm the phase contains no runtime mutex, runtime migration repository, runtime registry, Sprite reconciliation, connector mutation, or process behavior change.
-- [x] P1.2 Deploy only additive/dual-read local schemas and state shapes that the previous deployment can safely ignore or parse.
+- [x] P1.2 Deploy only additive/dual-read local schemas and state shapes that the previous deployment can safely ignore or parse. Satisfied trivially: no row is rewritten and no version is recorded, so a rollback sees byte-identical local state.
 - [x] P1.3 Pass historical DO/SDK fixtures, atomic rollback, pre-hydration ordering, no-broadcast tests, build, lint, typecheck, and strict OpenSpec validation.
 - [ ] P1.4 Complete an observation window before Phase 2; do not remove any old persisted representation in this phase.
 
@@ -73,15 +73,27 @@ Scope: task group 9. Append `agent.reusable-process` last.
 
 ## 1. Transactional Local Migration Foundation — Phase 1
 
+Shipped in PR #176 on `codex/runtime-migrations-phase-1`, the bottom layer of
+the phase stack.
+
+Decision taken during implementation: Phase 1 registers **no data migration**.
+Every live session already stores ServerState and client state at the current
+shape, so a whole-shape normalization step would persist only what each read
+already computes, and would freeze live defaults into append-only history. The
+deliverable is the pre-hydration ordering guarantee plus the registration seam;
+steps are appended surgically when a field actually changes. Tasks below are
+marked against that decision.
+
 - [x] 1.1 Add historical Durable Object fixtures that can set repository versions, seed raw SQLite/JSON rows, construct `SessionAgentDO`, and inspect state before normal application access.
-- [ ] 1.2 Add an application-layer ServerState JSON migration example that parses a historical shape as `unknown`, transforms it, validates the current shape, updates the row, and rolls back on failure. NOTE: deferred until a real ServerState field transform exists. Every live session is already at the current shape, and `ServerStateRepository.get()` merges defaults onto older rows, so a normalization migration would only persist what every read already computes. `ServerState` is now a zod schema (`ServerStateSchema`) so a future surgical migration has a validator to roll back against.
-- [x] 1.3 Add a migration-only repository adapter for the Agents SDK `cf_agents_state` row at `cf_state_row_id`. NOTE: ships as the registration seam with an empty migration list — live sessions are already current, so there is nothing to backfill.
-- [x] 1.4 Make the adapter treat an absent SDK row as a no-op whose local repository version can still be recorded. NOTE: the documented step pattern returns early on an absent row; proven by fixture migration rather than a production step.
+- [x] 1.2 Give local JSON state a schema a future surgical migration can validate against and roll back on. `ServerState` and the startup-toolchain checkpoint are now derived from zod schemas. `ServerStateRepository.get()` deliberately keeps merging onto defaults **without** parsing: a parse failure during construction would leave the session unreachable, so row-rejecting validation belongs in a migration where a throw rolls the transaction back. (Supersedes the original "add a ServerState migration example" task; the example ships as a documented step pattern plus fixture tests instead of a production step.)
+- [x] 1.3 Add a migration-only repository adapter for the Agents SDK `cf_agents_state` row at `cf_state_row_id`, registered in the constructor with an empty migration array so appending a step is the only work a future client-state migration requires.
+- [x] 1.4 Make the adapter treat an absent SDK row as a no-op whose local repository version can still be recorded. The documented step pattern returns early on an absent row; proven by fixture migration.
 - [x] 1.5 Reorder `SessionAgentDO` construction so `migrateAll()` runs after `super()` but before ServerState load, service construction that reads state, socket snapshots, and explicit SDK state access.
 - [x] 1.6 Keep normal client-state reads/writes/broadcasts on the Agents SDK rather than the migration adapter.
-- [x] 1.7 Add tests for historical SDK state, absent state, invalid old data, atomic rollback, first read observing the migrated value, and no migration broadcast. NOTE: transform/rollback cases run a fixture migration through the real `migrateAll` runner, since production registers no client-state step.
+- [x] 1.7 Add tests for historical SDK state, absent state, invalid old data, atomic rollback, first read observing the migrated value, and no migration broadcast. Transform, rollback, no-op, and already-applied-skip cases run a fixture migration through the real `migrateAll` runner, since production registers no step.
 - [x] 1.8 Add an SDK contract test for expected table creation, row ID, and pinned-version constructor ordering.
 - [x] 1.9 Add a test proving existing repository migration arrays are append-only and document that array index is persisted history.
+- [x] 1.10 Add a fingerprint test pinning every existing migration step so the first appended client-state migration surfaces as a deliberate change.
 
 ## 2. Runtime Revision Types and Declaration API — Phase 3
 

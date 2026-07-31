@@ -5,13 +5,21 @@ The system SHALL apply versioned Durable Object-local schema and data migrations
 before normal application reads and SHALL record each repository version only in
 the same successful SQLite transaction as its effect.
 
-#### Scenario: Server-state JSON is transformed
-- **WHEN** stored ServerState JSON is at an older repository version
-- **THEN** the migration SHALL parse the historical shape, transform and validate the current shape, update the JSON, and record the new repository version atomically
+#### Scenario: A stored JSON shape is transformed
+- **WHEN** a registered local migration runs against a stored JSON row at an older repository version
+- **THEN** the migration SHALL parse the historical shape as `unknown`, transform only the fields that changed, validate the result against that state's current schema, update the row, and record the new repository version atomically
 
 #### Scenario: Local migration fails validation
 - **WHEN** a local JSON transformation cannot produce valid current state
 - **THEN** the system SHALL roll back the data update and SHALL NOT record that repository version
+
+#### Scenario: Stored state is already at the current shape
+- **WHEN** every live session already stores a given state at its current shape
+- **THEN** the system SHALL register no migration step for it and SHALL rely on that state's own schema and read-time defaults, rather than shipping a whole-shape normalization step that only persists what each read already computes
+
+#### Scenario: Reading a row that fails validation
+- **WHEN** application code reads a stored JSON row it cannot validate
+- **THEN** the read path SHALL NOT throw during Durable Object construction, because a constructor failure leaves the session unreachable and unrecoverable; validation that can reject a row belongs in a migration, where a throw rolls the transaction back
 
 #### Scenario: Repository migrations are reordered
 - **WHEN** an implementation attempts to remove or reorder an existing repository migration array entry
@@ -23,12 +31,20 @@ repository migration runner without using that adapter for normal client-state
 reads, writes, or broadcasts.
 
 #### Scenario: Historical client state exists
-- **WHEN** a Durable Object starts with an older client-state row in `cf_agents_state`
+- **WHEN** a Durable Object starts with an older client-state row in `cf_agents_state` and a client-state migration step is registered
 - **THEN** construction SHALL migrate and validate that row before code hydrates `this.state`, constructs services that read client state, or creates a socket snapshot
 
+#### Scenario: No client-state migration is registered
+- **WHEN** every live session already stores client state at its current shape
+- **THEN** the adapter SHALL register no migration step, SHALL rewrite no row and record no version, and SHALL exist as the registration point where a future surgical step is appended
+
 #### Scenario: New session has no SDK state row
-- **WHEN** a Durable Object starts without the SDK client-state row
-- **THEN** the client-state repository migration SHALL record its version without creating or broadcasting state, and the SDK SHALL initialize current state normally
+- **WHEN** a registered client-state migration runs on a Durable Object without the SDK client-state row
+- **THEN** that step SHALL no-op while its repository version is still recorded, without creating or broadcasting state, and the SDK SHALL initialize current state normally
+
+#### Scenario: Migration code broadcasts
+- **WHEN** a client-state migration step runs during construction
+- **THEN** it SHALL NOT write state through the SDK or broadcast, because migration precedes any connection
 
 #### Scenario: SDK storage contract changes
 - **WHEN** the pinned Agents SDK no longer creates the expected table, row ID, or compatible constructor ordering
