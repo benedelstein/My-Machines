@@ -74,6 +74,18 @@ Guidelines:
 - Some older methods still return wire types. Do not copy that pattern for
   new endpoints; migrate existing ones opportunistically when touching them.
 
+## Cursor pagination
+
+Map cursor-paginated responses to `CursorPage<Value>` in the API module. A
+page keeps its returned values and the cursor that fetches the following page;
+nested pagination uses nested pages. For example, the session list returns a
+`CursorPage<SessionRepoPage>`, and each repository contains a
+`CursorPage<SessionSummary>`.
+
+Keep cursor ownership with its page instead of flattening the response and
+storing cursors separately. This prevents repository and per-repository
+session cursors from being mixed up.
+
 ## Adding an endpoint checklist
 
 1. If the shape is new, add/adjust the schema in `packages/api-contract/src/`
