@@ -35,9 +35,11 @@ before application code hydrates or reads them.
 
 ## What Changes
 
-- Extend the existing Durable Object repository migration system to migrate
-  owned SQLite/JSON state and the Agents SDK-owned `cf_agents_state` row before
-  normal state hydration.
+- Extend the existing Durable Object repository migration system so it runs
+  before normal state hydration and can reach both owned SQLite/JSON state and
+  the Agents SDK-owned `cf_agents_state` row. Register migration steps
+  surgically, when a field actually changes; state already at its current shape
+  gets no step, since read-time defaults already cover it.
 - Add one per-session `RuntimeMigrationCoordinator` backed by a
   `RuntimeMigrationRepository` that stores records in
   `session_runtime_migrations`.
@@ -101,8 +103,9 @@ reviewable and remains deployed through an observation window before the next
 phase activates additional behavior:
 
 1. **Local migration foundation:** add constructor-time Durable Object and
-   Agents SDK state migration support only. No runtime mutex, runtime migration
-   repository, registry, or Sprite behavior changes.
+   Agents SDK state migration support only, registering no migration step
+   because live sessions are already at the current shape. No runtime mutex,
+   runtime migration repository, registry, or Sprite behavior changes.
 2. **Readiness and turn-admission boundary:** ship the runtime-boundary mutex,
    branded lease, `_ensureReady()` refactor, and atomic readiness-to-turn claim.
    Register zero runtime migrations and create no runtime migration records. This
