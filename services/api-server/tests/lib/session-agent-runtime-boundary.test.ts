@@ -82,6 +82,7 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
 }
 
 interface TestAgentAccess {
+  ensureReady(): Promise<{ ok: boolean }>;
   handleUserChatMessage(
     connection: Connection,
     payload: ChatMessageEvent,
@@ -96,9 +97,6 @@ interface TestAgentAccess {
     request: InitSessionAgentRequest,
   ): Promise<Result<void, object>>;
   onConnect(connection: Connection): void;
-  runtimeBoundaryService: {
-    ensureReady(): Promise<{ ok: boolean }>;
-  };
   provisionService: {
     ensureProvisioned(): Promise<void>;
   };
@@ -267,7 +265,7 @@ describe("SessionAgentDO runtime boundary", () => {
       }
       if (provisionCalls === 2) {
         queueMicrotask(() => {
-          competingReadiness = agent.runtimeBoundaryService.ensureReady();
+          competingReadiness = agent.ensureReady();
         });
       }
     });
@@ -301,7 +299,7 @@ describe("SessionAgentDO runtime boundary", () => {
       guardSessionRepoAccess: vi.fn(async () => ({ ok: true as const })),
     };
 
-    const readiness = agent.runtimeBoundaryService.ensureReady();
+    const readiness = agent.ensureReady();
     await readinessEntered.promise;
     const chat = agent.handleUserChatMessage(
       connection("connection-1"),
@@ -386,7 +384,7 @@ describe("SessionAgentDO runtime boundary", () => {
       send: vi.fn(),
     } as unknown as Connection;
 
-    const readiness = agent.runtimeBoundaryService.ensureReady();
+    const readiness = agent.ensureReady();
     await readinessEntered.promise;
     const chat = agent.handleUserChatMessage(
       directConnection,
@@ -417,7 +415,7 @@ describe("SessionAgentDO runtime boundary", () => {
       }),
     });
 
-    const readiness = await agent.runtimeBoundaryService.ensureReady();
+    const readiness = await agent.ensureReady();
 
     expect(readiness.ok).toBe(true);
     expect(agent.serverState.activeUserMessageId).toBeNull();
@@ -444,7 +442,7 @@ describe("SessionAgentDO runtime boundary", () => {
       boundaryEntered.resolve();
       await releaseBoundary.promise;
     });
-    const readiness = agent.runtimeBoundaryService.ensureReady();
+    const readiness = agent.ensureReady();
     await boundaryEntered.promise;
 
     const handled = await agent.handleWebhookChunks(
