@@ -77,11 +77,19 @@ import { SessionAutoPullRequestService } from "./session-auto-pull-request.servi
 import { SessionPullRequestLifecycleService } from "./session-pull-request-lifecycle.service";
 import { SessionRepoAccessLifecycleService } from "./session-repo-access-lifecycle.service";
 import { SessionTurnNotificationService } from "./session-turn-notification.service";
+import { createSessionAgentInitialState } from "./session-agent-initial-state";
+import {
+  RuntimeBoundaryMutex,
+  type RuntimeBoundaryLease,
+} from "./runtime-boundary-mutex";
+import {
+  SessionRuntimeBoundaryService,
+  type EnsureReadyResult,
+} from "./session-runtime-boundary.service";
 
 interface AgentStateInternalAccess {
   _setStateInternal(state: ClientState, source: Connection | "server"): unknown;
 }
-
 export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAgentRpc {
   private readonly logger: Logger;
   private readonly spriteLifecycleClient: SpriteLifecycleClient;
@@ -113,26 +121,11 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private readonly autoPullRequestService: SessionAutoPullRequestService;
   private readonly notificationPublisher: NotificationPublisher;
   private readonly turnNotificationService: SessionTurnNotificationService;
+  private readonly runtimeBoundaryMutex = new RuntimeBoundaryMutex();
+  private readonly runtimeBoundaryService: SessionRuntimeBoundaryService;
   private initializeSessionStatePromise: Promise<HandleInitResult> | null = null;
 
-  initialState: ClientState = {
-    repoFullName: null,
-    status: "preparing",
-    sessionSetupRun: null,
-    agentSettings: { ...DEFAULT_AGENT_SETTINGS },
-    agentMode: "edit",
-    pushedBranch: null,
-    pullRequest: null,
-    todos: null,
-    plan: null,
-    pendingUserMessage: null,
-    activeTurn: null,
-    editorUrl: null,
-    providerConnection: null,
-    lastError: null,
-    baseBranch: null,
-    createdAt: new Date().toISOString(),
-  };
+  initialState = createSessionAgentInitialState();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -281,6 +274,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
           });
         this.autoPullRequestService.queueCreateAfterTurnFinish();
       },
+      onTurnSettled: () => this.queueEnsureReady(),
     });
     this.syncService = new SessionSyncService({
       messageRepository: this.messageRepository,
@@ -365,6 +359,24 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       publishSessionSummaryInvalidated: (userId, sessionId) =>
         userSessionsPublisher.invalidateSessionSummary({ userId, sessionId }),
     });
+    this.runtimeBoundaryService = new SessionRuntimeBoundaryService({
+      logger: this.logger,
+      mutex: this.runtimeBoundaryMutex,
+      isInitialized: () => this.serverState.initialized,
+      getInitializationPromise: () => this.initializeSessionStatePromise,
+      ensureReadyUnderLease: (lease) => this._ensureReady(lease),
+      ensureProvisioned: () => this.provisionService.ensureProvisioned(),
+      isSetupComplete: () => this.state.sessionSetupRun?.status === "completed",
+      hasActiveOrPendingTurn: () =>
+        Boolean(this.serverState.activeUserMessageId || this.state.pendingUserMessage),
+      recoverInterruptedClaim: () =>
+        this.chatDispatchService.recoverInterruptedClaim(),
+      claimPendingMessage: () => this.chatDispatchService.claimPendingMessage(),
+      claimPreparedMessage: (prepared) =>
+        this.chatDispatchService.claimPreparedMessage(prepared),
+      spawnClaimedTurn: (claimedTurn) =>
+        this.chatDispatchService.spawnClaimedTurn(claimedTurn),
+    });
 
     this.providerConnectionService = new SessionProviderConnectionService({
       logger: this.logger,
@@ -431,7 +443,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   // State helpers
-
   private updatePartialState(partial: Partial<ClientState>): void {
     this.setState({ ...this.state, ...partial });
   }
@@ -671,31 +682,28 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   // Provisioning
+  /** Serializes readiness and claims a pending initial turn before release. */
+  private async ensureReady(): Promise<EnsureReadyResult> {
+    return this.runtimeBoundaryService.ensureReady();
+  }
 
-  /**
-   * Single entry point for getting the session to a ready state.
-   * Called by both handleInit (HTTP) and onConnect (WebSocket).
-   * Uses mutexes so concurrent callers share one in-flight operation.
-   * Each step is idempotent — skipped if already completed via serverState checkpoints.
-   */
-  private async ensureReady(): Promise<void> {
-    if (!this.serverState.initialized) {
-      const initResult = await this.initializeSessionStatePromise;
-      if (!initResult) {
-        this.logger.error("Session not initialized — skipping ensureReady");
-        return;
-      }
-      if (!initResult.ok) {
-        return;
-      }
-    }
-    await this.provisionService.ensureProvisioned();
-    await this.chatDispatchService.maybeDispatchPendingMessage();
+  /** Runs readiness work while the caller owns the runtime boundary. */
+  private async _ensureReady(
+    lease: RuntimeBoundaryLease,
+  ): Promise<EnsureReadyResult> {
+    return this.runtimeBoundaryService.runReadinessStages(lease);
   }
 
   private queueEnsureReady(): void {
-    void this.keepAliveWhile(() => this.ensureReady()).catch((error) => {
-      this.logger.error("ensureReady failed", { error });
+    void this.keepAliveWhile(async () => {
+      const readiness = await this.ensureReady();
+      if (!readiness.ok) {
+        this.logger.warn("ensureReady did not complete", {
+          fields: { code: readiness.error.code },
+        });
+      }
+    }).catch((error) => {
+      this.logger.error("ensureReady failed unexpectedly", { error });
     });
   }
 
@@ -888,51 +896,32 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         return;
       }
 
+      const prepared = await this.chatDispatchService.prepareChatMessage(
+        payload,
+        connection.id,
+      );
+      if (!prepared.ok) {
+        this.sendChatFailure(connection, prepared.error.message);
+        return;
+      }
+
       await this.keepAliveWhile(async () => {
-        await this.ensureReady();
-
-        if (
-          this.serverState.activeUserMessageId &&
-          !this.serverState.agentProcessId &&
-          !this.state.pendingUserMessage
-        ) {
-          const staleUserMessageId = this.serverState.activeUserMessageId;
-          this.logger.warn(
-            "Clearing active turn with no agent process before chat dispatch",
-            { fields: { userMessageId: staleUserMessageId } },
-          );
-          this.turnCoordinator.handleTurnSpawnFailed(
-            staleUserMessageId,
-            "Previous agent turn did not start",
-          );
-        }
-
-        if (this.serverState.activeUserMessageId || this.state.pendingUserMessage) {
-          // TODO: message queuing
-          this.sendMessage(
-            {
-              type: "operation.error",
-              code: "CHAT_MESSAGE_FAILED",
-              message: "Agent is already handling a message",
-            },
-            connection,
-          );
+        const admission = await this.runtimeBoundaryService.claimPreparedMessage(
+          prepared.value,
+        );
+        if (!admission.ok) {
+          this.sendChatFailure(connection, admission.error.message);
           return;
         }
 
-        const result = await this.chatDispatchService.dispatchChatMessage(payload, connection.id);
+        const result = await this.chatDispatchService.spawnClaimedTurn(
+          admission.value,
+        );
         if (!result.ok) {
           this.logger.warn("Workflow chat message dispatch failed", {
             fields: { code: result.error.code },
           });
-          this.sendMessage(
-            {
-              type: "operation.error",
-              code: "CHAT_MESSAGE_FAILED",
-              message: result.error.message,
-            },
-            connection,
-          );
+          this.sendChatFailure(connection, result.error.message);
           return;
         }
       });
@@ -947,6 +936,17 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         connection,
       );
     }
+  }
+
+  private sendChatFailure(connection: Connection, message: string): void {
+    this.sendMessage(
+      {
+        type: "operation.error",
+        code: "CHAT_MESSAGE_FAILED",
+        message,
+      },
+      connection,
+    );
   }
 
   private async handleSyncRequest(connection: Connection): Promise<void> {

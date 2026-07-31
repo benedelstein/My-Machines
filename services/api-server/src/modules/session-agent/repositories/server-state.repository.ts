@@ -31,6 +31,8 @@ export const ServerStateSchema = z.object({
   agentProcessRunId: z.string().nullable(),
   /** User message id currently being handled by the agent, or null if idle. */
   activeUserMessageId: z.string().nullable(),
+  /** Durable handoff state between synchronous turn claim and asynchronous dispatch. */
+  activeTurnDispatchStatus: z.enum(["claimed", "dispatched"]).nullable(),
   /** Provider runtime toolchain checkpoints for this Sprite. */
   startupToolchain: StartupToolchainCheckpoint.nullable(),
   /** True after the selected environment startup script has completed, failed, or no-op'd. */
@@ -58,6 +60,7 @@ function defaultServerState(): ServerState {
     agentProcessId: null,
     agentProcessRunId: null,
     activeUserMessageId: null,
+    activeTurnDispatchStatus: null,
     startupToolchain: null,
     startupScriptCompleted: false,
     finalNetworkPolicyApplied: false,
