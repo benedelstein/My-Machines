@@ -4,6 +4,7 @@ import type { AgentSettings, ClientState, SessionSetupRun } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
 import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
 
+// FIXME - THESE TESTS TAKE VERY LONG.
 const mockState = vi.hoisted(() => ({
   attachSession: vi.fn(),
   createSession: vi.fn(),

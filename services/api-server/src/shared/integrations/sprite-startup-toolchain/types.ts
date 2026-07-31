@@ -29,6 +29,7 @@ export interface StartupToolchainCheckInput {
 
 export interface StartupToolchainCheck {
   id: string;
+  // TODO: ADD DOCUMENTATION ON THIS FIELD AND OTHERS. I DON'T KNOW WHAT THEY ARE.
   contract: Record<string, unknown>;
   ensureReady(
     _input: StartupToolchainCheckInput,
