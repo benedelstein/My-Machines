@@ -49,15 +49,15 @@ extension AgentSessionView {
         private let dismissCompletionDuration: TimeInterval = 0.2
 
         @Environment(\.dismiss) private var dismiss: DismissAction
-        @Environment(\.fetchImageAction) private var fetchImageAction
+        @Environment(\.fetchImageAction) private var fetchImageAction: FetchImageAction
 
         let image: SessionImageInfo
 
         @State private var uiImage: UIImage?
-        @State private var didFail = false
+        @State private var didFail: Bool = false
         @State private var dismissDragOffset: CGSize = .zero
-        @State private var isCompletingDragDismissal = false
-        @State private var isChromeHidden = false
+        @State private var isCompletingDragDismissal: Bool = false
+        @State private var isChromeHidden: Bool = false
 
         var body: some View {
             NavigationStack {

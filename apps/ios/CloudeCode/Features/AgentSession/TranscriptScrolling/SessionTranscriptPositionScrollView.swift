@@ -4,8 +4,8 @@ import Domain
 import Combine
 
 struct SessionTranscriptPositionScrollView<Row: View>: View {
-    @State private var scrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
-    @State private var scrollController = ScrollController()
+    @State private var scrollPosition: ScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+    @State private var scrollController: ScrollController = ScrollController()
     @State private var showScrollToBottom: Bool = false
     @State private var isScrollingToBottom: Bool = false
 

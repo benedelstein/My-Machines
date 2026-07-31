@@ -5,12 +5,12 @@ import UIKit
 
 /// Native OpenAI Codex device-code connection screen.
 struct OpenAIProviderConnectionView: View {
-    @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.showToast) private var showToast
-    @Environment(\.style) private var style
-    @Environment(\.theme) private var theme
-    @Environment(\.hapticFeedbackPlayer) var haptics
+    @Environment(\.openURL) private var openURL: OpenURLAction
+    @Environment(\.scenePhase) private var scenePhase: ScenePhase
+    @Environment(\.showToast) private var showToast: ShowToastAction?
+    @Environment(\.style) private var style: Style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.hapticFeedbackPlayer) var haptics: any HapticFeedbackPlaying
 
     @State var viewModel: OpenAIProviderConnectionViewModel
     let onConnected: () -> Void
@@ -216,5 +216,5 @@ struct OpenAIProviderConnectionView: View {
         }
     }
 
-    private static let securitySettingsURL = URL(string: "https://chatgpt.com/#settings/Security")
+    private static let securitySettingsURL: URL? = URL(string: "https://chatgpt.com/#settings/Security")
 }

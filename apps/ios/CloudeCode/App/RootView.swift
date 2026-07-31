@@ -5,7 +5,7 @@ struct RootView: View {
     private let sessionStore: SessionStore
     private let notificationRegistrationService: NotificationRegistrationService
     private let logStore: AppLogStore
-    @State private var isSettingsPresented = false
+    @State private var isSettingsPresented: Bool = false
 
     init(component: ApplicationComponent, logStore: AppLogStore) {
         self.component = component

@@ -20,9 +20,9 @@ extension AgentSessionView {
     }
 
     struct Destinations: ViewModifier {
-        @Environment(\.providerConnectionBuilder) private var providerConnectionBuilder
-        @Environment(\.showToast) private var showToast
-        @Environment(\.hapticFeedbackPlayer) private var haptics
+        @Environment(\.providerConnectionBuilder) private var providerConnectionBuilder: ProviderConnectionBuilder?
+        @Environment(\.showToast) private var showToast: ShowToastAction?
+        @Environment(\.hapticFeedbackPlayer) private var haptics: any HapticFeedbackPlaying
         @Binding var destination: Modal<Destination>?
         let onProviderConnected: (ProviderConnectionContext) -> Void
 

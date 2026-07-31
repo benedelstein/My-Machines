@@ -18,15 +18,16 @@ extension SessionTranscriptCollectionRepresentable {
         private(set) var initialAnchorState: SessionTranscriptInitialAnchorState = .waitingForItems
         private var lastItems: [SessionTranscriptItem] = []
         private var lastItemIDs: [String] = []
-        private let rowViewModelCache = SessionTranscriptRowViewModelCache()
+        private let rowViewModelCache: SessionTranscriptRowViewModelCache = SessionTranscriptRowViewModelCache()
         private var lastLayoutBoundsSize: CGSize?
         private var lastLayoutContentSize: CGSize?
         private var lastDistanceFromBottom: CGFloat?
-        private var contentInsetConfiguration = SessionTranscriptContentInsetConfiguration()
+        private var contentInsetConfiguration: SessionTranscriptContentInsetConfiguration =
+            SessionTranscriptContentInsetConfiguration()
         private var workingIndicatorLayoutFrameBeforeUpdate: CGRect?
-        private var isUserScrolling = false
-        var isFollowingBottom = true
-        var handledScrollRequestID = 0
+        private var isUserScrolling: Bool = false
+        var isFollowingBottom: Bool = true
+        var handledScrollRequestID: Int = 0
         let scrollCoordinator: SessionTranscriptScrollCoordinator
         private var rowContent: (SessionTranscriptItem) -> Row
 

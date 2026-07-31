@@ -61,9 +61,9 @@ final class EnvironmentEditorViewModel {
     var plainEnvVarsText: String
     var startupScript: String
     private(set) var defaultAllowlistDomains: [String]?
-    private(set) var isLoadingDefaultAllowlist = false
+    private(set) var isLoadingDefaultAllowlist: Bool = false
     private(set) var defaultAllowlistError: String?
-    private(set) var isSaving = false
+    private(set) var isSaving: Bool = false
     var errorMessage: String?
 
     private struct InitialState {

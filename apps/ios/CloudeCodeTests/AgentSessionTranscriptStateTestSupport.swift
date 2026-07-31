@@ -8,7 +8,7 @@ extension AgentSessionTranscriptStateTests {
         provider: AgentProviderID?,
         title: String? = nil,
         repoFullName: String = "octo/repo",
-        status: SessionStatus? = nil,
+        status: Domain.SessionStatus? = nil,
         workingState: String = "idle",
         pushedBranch: String? = nil,
         pullRequest: Domain.SessionSummary.PullRequest? = nil

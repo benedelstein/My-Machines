@@ -60,7 +60,7 @@ extension PromptComposerView {
 
     struct SendButton: View {
         @Environment(\.theme) private var theme: Theme
-        @Environment(\.hapticFeedbackPlayer) private var haptics
+        @Environment(\.hapticFeedbackPlayer) private var haptics: any HapticFeedbackPlaying
 
         let isSubmitDisabled: Bool
         let isSubmitting: Bool

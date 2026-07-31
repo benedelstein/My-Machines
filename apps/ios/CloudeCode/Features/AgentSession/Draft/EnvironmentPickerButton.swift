@@ -4,7 +4,7 @@ import SwiftUI
 /// Chip and navigation sheet for selecting, creating, or editing a repository environment.
 struct EnvironmentPickerButton: View {
     let draft: NewSessionDraft
-    @State private var isPickerPresented = false
+    @State private var isPickerPresented: Bool = false
 
     /// True until environments have been served from cache or network.
     private var isLoading: Bool {
@@ -45,9 +45,9 @@ extension EnvironmentPickerButton {
     }
 
     private struct PickerSheet: View {
-        @Environment(\.dismiss) private var dismiss
-        @Environment(\.theme) private var theme
-        @Environment(\.environmentEditorBuilder) private var editorBuilder
+        @Environment(\.dismiss) private var dismiss: DismissAction
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.environmentEditorBuilder) private var editorBuilder: EnvironmentEditorBuilder?
 
         let draft: NewSessionDraft
         @State private var path: [Route] = []
@@ -147,7 +147,7 @@ extension EnvironmentPickerButton {
     }
 
     private struct EnvironmentRow: View {
-        @Environment(\.theme) private var theme
+        @Environment(\.theme) private var theme: Theme
 
         let environment: Domain.RepoEnvironment
         let isSelected: Bool

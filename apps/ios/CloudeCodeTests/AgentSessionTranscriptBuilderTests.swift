@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Agent session transcript builder")
 struct AgentSessionTranscriptBuilderTests {
-    private let builder = AgentSessionTranscriptBuilder()
+    private let builder: AgentSessionTranscriptBuilder = AgentSessionTranscriptBuilder()
 
     @Test func groupsAdjacentCompatibleActions() {
         let items = builder.build(

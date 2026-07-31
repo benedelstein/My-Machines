@@ -3,7 +3,7 @@ import SwiftUI
 
 extension AgentSessionView {
     struct SetupRunView: View {
-        @Environment(\.style) private var style
+        @Environment(\.style) private var style: Style
 
         let state: SessionTranscriptSetupRun
         let onToggle: () -> Void
@@ -27,8 +27,8 @@ extension AgentSessionView {
         }
 
         private struct Header: View {
-            @Environment(\.theme) private var theme
-            @Environment(\.style) private var style
+            @Environment(\.theme) private var theme: Theme
+            @Environment(\.style) private var style: Style
 
             let state: SessionTranscriptSetupRun
             let onToggle: () -> Void
@@ -99,8 +99,8 @@ extension AgentSessionView {
         }
 
         private struct TaskRow: View {
-            @Environment(\.theme) private var theme
-            @Environment(\.style) private var style
+            @Environment(\.theme) private var theme: Theme
+            @Environment(\.style) private var style: Style
 
             let task: SessionClientState.SessionSetupTask
 

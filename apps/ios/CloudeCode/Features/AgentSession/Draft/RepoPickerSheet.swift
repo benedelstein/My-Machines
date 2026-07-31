@@ -4,15 +4,16 @@ import SwiftUI
 
 struct RepoPickerSheet: View {
     @Environment(\.style) var style: Style
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.theme) private var theme
-    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(\.dismiss) private var dismiss: DismissAction
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.webAuthenticationSession)
+    private var webAuthenticationSession: WebAuthenticationSession
 
     let draft: NewSessionDraft
-    @State private var query = ""
+    @State private var query: String = ""
     @State private var visibleRepos: [Repo] = []
     @State private var searchTask: Task<Void, Never>?
-    @State private var isSearching = false
+    @State private var isSearching: Bool = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -227,7 +228,7 @@ struct RepoPickerSheet: View {
     }
 
     private struct RepoRow: View {
-        @Environment(\.theme) private var theme
+        @Environment(\.theme) private var theme: Theme
 
         let fullName: String
         let isSelected: Bool

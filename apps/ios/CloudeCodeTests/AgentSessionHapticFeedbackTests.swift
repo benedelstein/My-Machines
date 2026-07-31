@@ -1,5 +1,6 @@
 @testable import API
 import CoreAPI
+import Foundation
 import Testing
 @testable import CloudeCode
 

@@ -3,8 +3,9 @@ import SwiftUI
 
 /// Login screen: app identity centered, GitHub sign-in pinned to the bottom.
 struct SignedOutView: View {
-    @Environment(\.showToast) private var showToast
-    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(\.showToast) private var showToast: ShowToastAction?
+    @Environment(\.webAuthenticationSession)
+    private var webAuthenticationSession: WebAuthenticationSession
 
     let sessionStore: SessionStore
 
@@ -56,11 +57,11 @@ struct SignedOutView: View {
 }
 
 private struct SignedOutHero: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var visibleKickerCharacterCount = 0
-    @State private var isSubtitleVisible = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion: Bool
+    @State private var visibleKickerCharacterCount: Int = 0
+    @State private var isSubtitleVisible: Bool = false
 
-    private let kicker = String(localized: "Works on")
+    private let kicker: String = String(localized: "Works on")
 
     var body: some View {
         ZStack {
@@ -159,19 +160,19 @@ private enum SignedOutStyle {
     static let subtitleHorizontalPadding: CGFloat = 20
     static let copyBlurRadius: CGFloat = 8
     static let copyHiddenVerticalOffset: CGFloat = 4
-    static let kickerRevealDelayMilliseconds = 100
-    static let kickerCharacterDelayMilliseconds = 70
-    static let subtitleRevealDelayMilliseconds = 1_225
-    static let copyRevealDuration = 0.25
+    static let kickerRevealDelayMilliseconds: Int = 100
+    static let kickerCharacterDelayMilliseconds: Int = 70
+    static let subtitleRevealDelayMilliseconds: Int = 1_225
+    static let copyRevealDuration: Double = 0.25
     static let horizontalPadding: CGFloat = 16
     static let signInButtonHeight: CGFloat = 56
     static let bottomPadding: CGFloat = 4
-    static let signInButtonTint = Color(hex: 0x102A5A)
-    static let signInFont = Font.semibold(20)
-    static let kickerFont = Font.custom("Schoolbell-Regular", size: 21)
-    static let subtitleFont = Font.system(size: 16)
-    static let subtitleColor = Color(hex: 0xAEB8CF)
-    static let backgroundGradient = LinearGradient(
+    static let signInButtonTint: Color = Color(hex: 0x102A5A)
+    static let signInFont: Font = Font.semibold(20)
+    static let kickerFont: Font = Font.custom("Schoolbell-Regular", size: 21)
+    static let subtitleFont: Font = Font.system(size: 16)
+    static let subtitleColor: Color = Color(hex: 0xAEB8CF)
+    static let backgroundGradient: LinearGradient = LinearGradient(
         colors: [Color(hex: 0x08122F), Color(hex: 0x040B22)],
         startPoint: .top,
         endPoint: .bottom

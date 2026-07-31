@@ -11,7 +11,7 @@ public final class RepoEnvironmentsStore {
     @ObservationIgnored private let entityStore: EntityStore<RepoEnvironmentModel>
     @ObservationIgnored private let listAPI: @Sendable (Int) async throws -> [Domain.RepoEnvironment]
     @ObservationIgnored private var loadTasksByRepoID: [Int: Task<Void, Error>] = [:]
-    @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private var loadGeneration: Int = 0
 
     /// Environments per repo id. `nil` for a repo means nothing has been
     /// served yet from either disk or network (drive loading UI off this).

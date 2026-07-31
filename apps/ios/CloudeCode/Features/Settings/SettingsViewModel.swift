@@ -56,7 +56,7 @@ final class SettingsViewModel {
             case error
         }
 
-        let id = UUID()
+        let id: UUID = UUID()
         let kind: Kind
         let message: String
     }

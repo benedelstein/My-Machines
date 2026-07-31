@@ -7,7 +7,7 @@ import SwiftUI
 /// *descendants*, while the active `Theme` must be chosen by a descendant that
 /// *reads* the resolved `\.colorScheme`.
 struct ThemedRootModifier: ViewModifier {
-    @AppStorage(AppStorageKey.themePreference) private var preferenceRaw = ThemePreference.system.rawValue
+    @AppStorage(AppStorageKey.themePreference) private var preferenceRaw: String = ThemePreference.system.rawValue
 
     private var preference: ThemePreference {
         ThemePreference(rawValue: preferenceRaw) ?? .system

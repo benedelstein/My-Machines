@@ -19,7 +19,7 @@ struct KeychainSessionPersistence: SessionPersisting {
         legacySharedGroupValet = Self.sharedGroupValet(appGroup: legacyAppGroup)
     }
 
-    private static let key = "auth.session"
+    private static let key: String = "auth.session"
 
     func load() throws -> Session? {
         if let data = try loadData(from: valet) {

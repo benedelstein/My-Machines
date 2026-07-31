@@ -18,11 +18,11 @@ final class NotificationRegistrationService: NSObject {
     private let authUserPublisher: AnyPublisher<String?, Never>
     private let notificationHandler: any NotificationHandling
     @Published private var fcmToken: String?
-    private var cancellables = Set<AnyCancellable>()
+    private var cancellables: Set<AnyCancellable> = Set<AnyCancellable>()
     private var uploadTask: Task<Void, Never>?
     private var lastUploadRequest: UploadRequest?
-    private var hasStarted = false
-    private var receivedNotificationIds = Set<String>()
+    private var hasStarted: Bool = false
+    private var receivedNotificationIds: Set<String> = Set<String>()
 
     init(
         notificationsAPI: any NotificationsAPIProviding,

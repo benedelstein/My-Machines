@@ -4,16 +4,16 @@ import SwiftUI
 
 /// Native form for creating or editing a repository environment.
 struct EnvironmentEditorView: View {
-    private static let defaultAllowlistSheetURL = URL(
+    private static let defaultAllowlistSheetURL: URL? = URL(
         string: "\(Constants.deepLinkScheme)://default-allowlist"
     )
 
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
     @State private var viewModel: EnvironmentEditorViewModel
     let onSaved: (Domain.RepoEnvironment) -> Void
     @FocusState private var isNameFocused: Bool
-    @State private var didFinishEditingName = false
-    @State private var isDefaultAllowlistPresented = false
+    @State private var didFinishEditingName: Bool = false
+    @State private var isDefaultAllowlistPresented: Bool = false
 
     init(
         viewModel: EnvironmentEditorViewModel,
@@ -227,7 +227,7 @@ struct EnvironmentEditorView: View {
 
 extension EnvironmentEditorView {
     struct DefaultAllowlistSheet: View {
-        @Environment(\.dismiss) private var dismiss
+        @Environment(\.dismiss) private var dismiss: DismissAction
         let viewModel: EnvironmentEditorViewModel
 
         var body: some View {
@@ -270,7 +270,7 @@ extension EnvironmentEditorView {
     }
 
     struct PlaceholderTextEditor: View {
-        @Environment(\.theme) private var theme
+        @Environment(\.theme) private var theme: Theme
         @Binding var text: String
         let placeholder: String
         let minHeight: CGFloat

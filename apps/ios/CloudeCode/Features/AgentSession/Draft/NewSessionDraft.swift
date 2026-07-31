@@ -35,8 +35,8 @@ final class NewSessionDraft {
     private var environmentsUnavailableRepoIDs: Set<Int> = []
 
     private(set) var repos: [Repo] = []
-    private(set) var isLoading = false
-    private(set) var isLoadingRepos = false
+    private(set) var isLoading: Bool = false
+    private(set) var isLoadingRepos: Bool = false
     private(set) var errorMessage: String?
 
     var isManagingGitHubRepositories: Bool {

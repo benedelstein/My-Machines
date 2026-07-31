@@ -38,12 +38,12 @@ final class AgentSessionViewModel {
     /// Whether the view is currently on screen (between `bind` and `unbind`).
     /// Session creation is allowed to finish after the view goes away, but we
     /// skip starting a socket for it so we don't leave an orphan connection.
-    var isBound = false
+    var isBound: Bool = false
     /// The user's explicit pick: the whole selection for a draft (no client
     /// state exists yet), or a staged next-turn override for an existing
     /// session that is cleared once live client state reports it as current.
     var localModelSelection: ModelSelection?
-    private var hasSeenServerActiveTurn = false
+    private var hasSeenServerActiveTurn: Bool = false
     private var lastMarkReadSentMessageId: String?
     // Keeps the local upload drafts for an optimistic message so they can be
     // restored if send fails after the composer has already been cleared.
@@ -63,36 +63,36 @@ final class AgentSessionViewModel {
     // message so collection view can update the existing cell in place.
     var streamingTranscriptRowID: String?
     @ObservationIgnored var messageThrottler: SchedulerLatestValueThrottler<SessionMessage>?
-    @ObservationIgnored let markdownRenderCache = MarkdownRenderCache()
+    @ObservationIgnored let markdownRenderCache: MarkdownRenderCache = MarkdownRenderCache()
     @ObservationIgnored var pullRequestPollingTask: Task<Void, Never>?
     let pullRequestPollInterval: Duration
     var streamAccumulator: SessionMessageStreamAccumulator?
     /// Guard so that we do not accumulate to a stream that is no longer active
-    var streamGeneration = 0
-    var streamStatus = SessionMessageStreamStatus()
+    var streamGeneration: Int = 0
+    var streamStatus: API.SessionMessageStreamStatus = SessionMessageStreamStatus()
     var clientState: SessionClientState
-    var clientStateIsResponding = false
-    var hasHydratedClientState = false
-    var hasDeletedSession = false
-    private(set) var isSetupRunExpanded = false
+    var clientStateIsResponding: Bool = false
+    var hasHydratedClientState: Bool = false
+    var hasDeletedSession: Bool = false
+    private(set) var isSetupRunExpanded: Bool = false
     var transcriptProvider: AgentProviderID {
         clientState.agentSettings.provider
     }
     /// Message send is in progress
-    var isSending = false
+    var isSending: Bool = false
     /// The initial request is creating a new session.
-    var isCreatingSession = false
+    var isCreatingSession: Bool = false
     /// Waiting for a message stream response from server.
     /// Set to true after we send a message
-    var isWaitingForResponse = false
+    var isWaitingForResponse: Bool = false
     /// A cancellation request has been sent for the active response.
-    var isCancelling = false
+    var isCancelling: Bool = false
     var hasLoadedMessages: Bool = false
-    var draftText = ""
+    var draftText: String = ""
     var errorMessage: String?
-    var isCreatingPullRequest = false
+    var isCreatingPullRequest: Bool = false
     var pullRequestOperationErrorMessage: String?
-    private(set) var isPerformingSessionAction = false
+    private(set) var isPerformingSessionAction: Bool = false
 
     var canSubmitDraft: Bool {
         let hasContent = !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

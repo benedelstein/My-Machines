@@ -13,7 +13,7 @@ public final class SessionMessageEntity: Entity {
     var sessionId: String
     var createdAt: Date
     var messageData: Data
-    var isStreaming = false
+    var isStreaming: Bool = false
 
     /// Creates a persistence row from a session message snapshot.
     public init(_ snapshot: SessionMessageData) {

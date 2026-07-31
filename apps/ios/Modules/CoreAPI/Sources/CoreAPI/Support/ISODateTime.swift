@@ -8,7 +8,7 @@ import Foundation
 public typealias ISODateTimeString = String
 
 public enum ISO8601 {
-    nonisolated(unsafe) private static let standard = ISO8601DateFormatter()
+    nonisolated(unsafe) private static let standard: ISO8601DateFormatter = ISO8601DateFormatter()
 
     nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()

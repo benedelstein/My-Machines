@@ -128,9 +128,9 @@ struct SessionStoreSignInTests {
         )
     }
 
-    nonisolated fileprivate static let attemptId = "attempt-1"
-    nonisolated fileprivate static let claimToken = "claim-token"
-    nonisolated fileprivate static let completionCode = "completion-code"
+    nonisolated fileprivate static let attemptId: String = "attempt-1"
+    nonisolated fileprivate static let claimToken: String = "claim-token"
+    nonisolated fileprivate static let completionCode: String = "completion-code"
 
     fileprivate static func callbackURLString(
         attemptId: String,
@@ -142,7 +142,7 @@ struct SessionStoreSignInTests {
         return "cloudecode://auth/callback?attemptId=\(attemptId)\(errorQuery)\(codeQuery)"
     }
 
-    private static let signInResult = SignInResult(
+    private static let signInResult: SignInResult = SignInResult(
         session: Session(
             accessToken: "access-token",
             accessTokenExpiresAt: Date.now.addingTimeInterval(3_600),

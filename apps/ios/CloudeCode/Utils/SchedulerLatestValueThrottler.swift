@@ -19,7 +19,7 @@ final class SchedulerLatestValueThrottler<Value>: LatestValueThrottling {
     private var latestValue: Value?
     private var lastEmitTime: DispatchQueue.SchedulerTimeType?
     private var scheduledToken: Int?
-    private var nextToken = 0
+    private var nextToken: Int = 0
 
     init(
         interval: DispatchQueue.SchedulerTimeType.Stride,

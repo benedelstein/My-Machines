@@ -2,7 +2,7 @@ import Domain
 import SwiftUI
 
 struct AgentSessionToolDetailSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) private var dismiss: DismissAction
     @State private var path: [ToolDetailRoute] = []
 
     let item: AgentSessionRenderItem
@@ -63,7 +63,7 @@ private enum ToolDetailRoute: Hashable {
 }
 
 private struct ToolActionGroupDetailView: View {
-    @Environment(\.style) private var style
+    @Environment(\.style) private var style: Style
 
     let group: AgentSessionRenderItem.ActionGroup
     @Binding var path: [ToolDetailRoute]
@@ -88,8 +88,8 @@ private struct ToolActionGroupDetailView: View {
 }
 
 private struct ToolActionNavigationRow: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let action: NormalizedToolAction
 
@@ -125,7 +125,7 @@ private struct ToolActionNavigationRow: View {
 }
 
 private struct ToolActionDetailView: View {
-    @Environment(\.style) private var style
+    @Environment(\.style) private var style: Style
 
     let action: NormalizedToolAction
 
@@ -177,8 +177,8 @@ private struct ToolActionDetailView: View {
 }
 
 private struct ToolActionHeader: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let action: NormalizedToolAction
 
@@ -293,8 +293,8 @@ private struct JSONDetailView: View {
 }
 
 private struct TextDetailView: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let title: String
     let text: String

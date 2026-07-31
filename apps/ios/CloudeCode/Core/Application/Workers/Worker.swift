@@ -10,7 +10,7 @@ protocol Working: AnyObject {
 /// Base lifecycle implementation for application workers.
 @MainActor
 class Worker: Working {
-    private(set) var isStarted = false
+    private(set) var isStarted: Bool = false
 
     func start() {
         guard !isStarted else { return }

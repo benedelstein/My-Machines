@@ -28,7 +28,7 @@ final class AppLogStore {
 }
 
 struct AppLogRecord: Identifiable, Equatable {
-    let id = UUID()
+    let id: UUID = UUID()
     let timestamp: Date
     let level: LogLevel
     let message: String

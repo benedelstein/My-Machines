@@ -288,7 +288,7 @@ extension AgentSessionTranscriptStateTests {
 private final class CountingModelsAPI: ModelsAPIProviding {
     private let response: ModelsResponse
     private var failuresBeforeSuccess: Int
-    private(set) var callCount = 0
+    private(set) var callCount: Int = 0
 
     init(response: ModelsResponse, failuresBeforeSuccess: Int = 0) {
         self.response = response

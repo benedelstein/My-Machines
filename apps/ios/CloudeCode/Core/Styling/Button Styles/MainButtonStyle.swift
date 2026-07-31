@@ -7,9 +7,9 @@ struct MainButtonStyle: ButtonStyle {
         case outline
     }
 
-    @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.style) private var style
-    @Environment(\.theme) private var theme
+    @Environment(\.isEnabled) private var isEnabled: Bool
+    @Environment(\.style) private var style: Style
+    @Environment(\.theme) private var theme: Theme
 
     let variant: Variant
     let isLoading: Bool

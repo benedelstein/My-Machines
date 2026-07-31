@@ -9,13 +9,13 @@ import SwiftUI
 import UIKit
 
 struct UserMessageView: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
-    @Environment(SessionTranscriptRowViewModel.self) private var rowViewModel
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
+    @Environment(SessionTranscriptRowViewModel.self) private var rowViewModel: SessionTranscriptRowViewModel
 
     private enum Constants {
-        static let collapsedLineLimit = 10
-        static let approximateCollapsedCharacterLimit = 400
+        static let collapsedLineLimit: Int = 10
+        static let approximateCollapsedCharacterLimit: Int = 400
     }
 
     let message: SessionMessage
@@ -143,16 +143,16 @@ private struct UserMessageRemoteImage: View {
         static let maxImageWidth: CGFloat = 260
     }
 
-    @Environment(\.fetchImageAction) private var fetchImageAction
-    @Environment(\.openAgentSessionImage) private var openImage
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.fetchImageAction) private var fetchImageAction: FetchImageAction
+    @Environment(\.openAgentSessionImage) private var openImage: OpenAgentSessionImageAction
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let image: SessionImageInfo
     let height: CGFloat
 
     @State private var uiImage: UIImage?
-    @State private var didFail = false
+    @State private var didFail: Bool = false
 
     var body: some View {
         content

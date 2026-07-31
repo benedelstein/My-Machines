@@ -5,7 +5,7 @@ import UIKit
 struct AssistantMessageView: View {
     @Environment(\.style) var style: Style
     @Environment(\.theme) private var theme: Theme
-    @Environment(SessionTranscriptRowViewModel.self) private var rowViewModel
+    @Environment(SessionTranscriptRowViewModel.self) private var rowViewModel: SessionTranscriptRowViewModel
 
     private let partSpacing: CGFloat = 12
 
@@ -140,9 +140,9 @@ struct AssistantMessageView: View {
 }
 
 private struct CopyFinalResponseButton: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.showToast) private var showToast
-    @Environment(\.hapticFeedbackPlayer) private var haptics
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.showToast) private var showToast: ShowToastAction?
+    @Environment(\.hapticFeedbackPlayer) private var haptics: any HapticFeedbackPlaying
 
     let text: String
 

@@ -32,14 +32,15 @@ final class SessionStore {
         }
     }
     private(set) var user: UserModel?
-    private(set) var isSigningIn = false
+    private(set) var isSigningIn: Bool = false
     private(set) var signInError: String?
     private let coordinator: TokenCoordinator
     private let userStore: UserStore
     private let signInAPI: any SignInProviding
     private let oauthRedirectURI: String
-    private let authStateSubject = CurrentValueSubject<State, Never>(.loading)
-    private let didSignOutSubject = PassthroughSubject<Void, Never>()
+    private let authStateSubject: CurrentValueSubject<SessionStore.State, Never> =
+        CurrentValueSubject<State, Never>(.loading)
+    private let didSignOutSubject: PassthroughSubject<Void, Never> = PassthroughSubject<Void, Never>()
     private var initialRefreshTask: Task<Void, Never>?
 
     var authStatePublisher: AnyPublisher<State, Never> {

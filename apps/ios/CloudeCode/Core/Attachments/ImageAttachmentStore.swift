@@ -47,8 +47,8 @@ struct ImageAttachmentDraft: Identifiable {
 @Observable
 final class ImageAttachmentStore {
     private enum Constants {
-        static let maxAttachments = 5
-        static let maxAttachmentBytes = 10 * 1024 * 1024
+        static let maxAttachments: Int = 5
+        static let maxAttachmentBytes: Int = 10 * 1024 * 1024
     }
 
     private var sessionId: String?

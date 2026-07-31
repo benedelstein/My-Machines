@@ -5,7 +5,7 @@ import UIKit
 extension PromptComposerView {
     struct InlinePhotoPickerContent: View {
         @Environment(\.composerStyle) private var composerStyle: ComposerStyle
-        @Environment(\.hapticFeedbackPlayer) var haptics
+        @Environment(\.hapticFeedbackPlayer) var haptics: any HapticFeedbackPlaying
         @Environment(\.theme) private var theme: Theme
         @Environment(\.style) private var style: Style
 

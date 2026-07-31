@@ -4,8 +4,8 @@ import SwiftUI
 
 struct ModelPickerButton: View {
     @Environment(\.composerStyle) var composerStyle: ComposerStyle
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let modelCatalog: ModelCatalogStore
     let selectedModel: ModelSelection?
@@ -16,7 +16,7 @@ struct ModelPickerButton: View {
     let onSelectModel: (ProviderCatalogEntry, ProviderCatalogModel) -> Void
     let onSelectEffort: (ProviderCatalogEntry, ProviderCatalogEffort) -> Void
     let onConnectProvider: (ProviderCatalogEntry) -> Void
-    @State private var isSheetPresented = false
+    @State private var isSheetPresented: Bool = false
     @State private var pendingConnectionProvider: ProviderCatalogEntry?
 
     var body: some View {

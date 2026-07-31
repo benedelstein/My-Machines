@@ -62,8 +62,8 @@ extension MarkdownPartsView {
 
     /// Renders a GitHub-flavored Markdown table as a horizontally scrollable grid.
     struct TableView: View {
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         /// Cells wrap instead of growing without bound inside the horizontal scroll view.
         private static let maximumCellWidth: CGFloat = 220

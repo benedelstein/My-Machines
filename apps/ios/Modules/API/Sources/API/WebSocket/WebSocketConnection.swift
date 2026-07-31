@@ -30,8 +30,8 @@ public actor WebSocketConnection {
 
     private var socketTask: URLSessionWebSocketTask?
     private var runTask: Task<Void, Never>?
-    private var retryCount = 0
-    private var isStopped = true
+    private var retryCount: Int = 0
+    private var isStopped: Bool = true
 
     private static let maxRetryDelaySeconds: Double = 30
 
@@ -142,7 +142,7 @@ public actor WebSocketConnection {
 }
 
 private final class WebSocketSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock: NSLock = NSLock()
     private var openContinuations: [ObjectIdentifier: CheckedContinuation<Void, any Error>] = [:]
 
     func registerOpenContinuation(

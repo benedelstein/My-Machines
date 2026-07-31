@@ -182,7 +182,7 @@ private final class ProviderAuthAPISpy: ProviderAuthAPIProviding {
 
     private var openAIPollResults: [Result<OpenAIDeviceAuthorizationStatus, any Error>]
     private(set) var claudeExchange: ClaudeExchange?
-    private(set) var openAIPollCount = 0
+    private(set) var openAIPollCount: Int = 0
     private(set) var lastOpenAIAttemptId: String?
     private(set) var lastOpenAISessionId: String?
 
@@ -227,7 +227,7 @@ private final class ProviderAuthAPISpy: ProviderAuthAPIProviding {
 
 @MainActor
 private final class ProviderConnectionModelsAPISpy: ModelsAPIProviding {
-    private(set) var callCount = 0
+    private(set) var callCount: Int = 0
 
     func models() async throws -> ModelsResponse {
         callCount += 1

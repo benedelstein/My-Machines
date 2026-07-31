@@ -11,9 +11,9 @@ public struct FetchScope: OptionSet, Sendable {
         self.rawValue = rawValue
     }
 
-    public static let memory = FetchScope(rawValue: 1 << 0)
-    public static let disk = FetchScope(rawValue: 1 << 1)
-    public static let network = FetchScope(rawValue: 1 << 2)
+    public static let memory: FetchScope = FetchScope(rawValue: 1 << 0)
+    public static let disk: FetchScope = FetchScope(rawValue: 1 << 1)
+    public static let network: FetchScope = FetchScope(rawValue: 1 << 2)
 
     public static let all: FetchScope = [.memory, .disk, .network]
 }

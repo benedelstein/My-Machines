@@ -17,10 +17,10 @@ struct CodePreviewChrome<Content: View>: View {
         }
     }
 
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
-    @Environment(\.showToast) private var showToast
-    @Environment(\.hapticFeedbackPlayer) private var haptics
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
+    @Environment(\.showToast) private var showToast: ShowToastAction?
+    @Environment(\.hapticFeedbackPlayer) private var haptics: any HapticFeedbackPlaying
 
     private let text: String
     private let copyAccessibilityLabel: String

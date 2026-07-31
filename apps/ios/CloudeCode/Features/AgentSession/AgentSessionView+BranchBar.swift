@@ -4,11 +4,11 @@ import UIKit
 
 extension AgentSessionView {
     struct BranchBar: View {
-        @Environment(\.hapticFeedbackPlayer) private var haptics
-        @Environment(\.openURL) private var openURL
-        @Environment(\.showToast) private var showToast
-        @Environment(\.style) private var style
-        @Environment(\.theme) private var theme
+        @Environment(\.hapticFeedbackPlayer) private var haptics: any HapticFeedbackPlaying
+        @Environment(\.openURL) private var openURL: OpenURLAction
+        @Environment(\.showToast) private var showToast: ShowToastAction?
+        @Environment(\.style) private var style: Style
+        @Environment(\.theme) private var theme: Theme
 
         let vm: AgentSessionViewModel
 

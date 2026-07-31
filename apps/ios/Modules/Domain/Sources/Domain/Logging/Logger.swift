@@ -58,9 +58,9 @@ public struct ConsoleLogDestination: LogDestination {
 /// target (API, Entities, …) can log through the same destinations.
 /// All mutable state is lock-guarded; safe to call from any isolation.
 public final class Logger: @unchecked Sendable {
-    public static let shared = Logger()
+    public static let shared: Logger = Logger()
 
-    private let lock = NSLock()
+    private let lock: NSLock = NSLock()
     private var _minimumLogLevel: LogLevel = .info
     private var destinations: [any LogDestination] = []
 

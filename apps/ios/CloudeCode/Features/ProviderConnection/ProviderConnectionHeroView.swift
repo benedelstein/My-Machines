@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Shared provider identity and introductory copy for connection screens.
 struct ProviderConnectionHeroView: View {
-    @Environment(\.style) private var style
-    @Environment(\.theme) private var theme
+    @Environment(\.style) private var style: Style
+    @Environment(\.theme) private var theme: Theme
 
     let providerId: ProviderId
     let title: LocalizedStringKey

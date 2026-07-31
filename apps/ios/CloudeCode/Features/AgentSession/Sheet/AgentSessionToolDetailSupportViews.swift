@@ -3,8 +3,8 @@ import Foundation
 import SwiftUI
 
 struct DetailSection<Content: View>: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let title: String
     @ViewBuilder let content: Content
@@ -24,8 +24,8 @@ struct DetailSection<Content: View>: View {
 }
 
 struct CodePreview: View {
-    @Environment(\.style) private var style
-    @Environment(\.theme) private var theme
+    @Environment(\.style) private var style: Style
+    @Environment(\.theme) private var theme: Theme
 
     let text: String
     private let layout: CodePreviewLayout
@@ -187,8 +187,8 @@ private struct CodePreviewLine: Equatable {
 }
 
 struct ValueList: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let values: [String]
 

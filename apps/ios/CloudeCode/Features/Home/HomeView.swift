@@ -5,15 +5,15 @@ import SwiftUI
 
 struct HomeView: View {
     @Environment(\.theme) var theme: Theme
-    @Environment(\.style) private var style
-    @Environment(\.openSettings) private var openSettings
-    @Environment(\.showToast) private var showToast
+    @Environment(\.style) private var style: Style
+    @Environment(\.openSettings) private var openSettings: OpenSettingsAction?
+    @Environment(\.showToast) private var showToast: ShowToastAction?
     @Environment(\.notificationRegistrationService)
     private var notificationRegistrationService: NotificationRegistrationService?
 
     @State private var viewModel: HomeViewModel
     @State private var router: HomeRouter
-    @State private var collapsedRepoIDs = Set<Int>()
+    @State private var collapsedRepoIDs: Set<Int> = Set<Int>()
     @State private var sessionPendingDelete: SessionSummaryModel?
     let sessionBuilder: AgentSessionBuilder
 
@@ -244,8 +244,8 @@ struct HomeView: View {
 }
 
 private struct RepoSectionHeader: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let group: HomeSessionGroup
     @Binding var isExpanded: Bool
@@ -290,8 +290,8 @@ private struct RepoSectionHeader: View {
 }
 
 private struct SessionRow: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let session: SessionSummaryModel
 
@@ -349,8 +349,8 @@ private struct SessionRow: View {
 }
 
 private struct SessionArtifactIcon: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let session: SessionSummaryModel
     var width: CGFloat
@@ -400,8 +400,8 @@ private struct ArtifactIcon {
 }
 
 private struct SessionAttentionSlot: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let session: SessionSummaryModel
 
@@ -446,7 +446,7 @@ private enum SessionTimestampFormatter {
         return formatter
     }()
 
-    private static let isoFormatter = ISO8601DateFormatter()
+    private static let isoFormatter: ISO8601DateFormatter = ISO8601DateFormatter()
 
     static func relativeString(for timestamp: String, relativeTo now: Date = Date()) -> String {
         guard let date = fractionalISOFormatter.date(from: timestamp) ?? isoFormatter.date(from: timestamp) else {

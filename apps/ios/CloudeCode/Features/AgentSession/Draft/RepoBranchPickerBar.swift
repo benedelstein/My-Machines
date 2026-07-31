@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct RepoBranchPickerBar: View {
-    @Environment(\.style) private var style
+    @Environment(\.style) private var style: Style
 
     let draft: NewSessionDraft
-    @State private var isRepositorySheetPresented = false
-    @State private var isBranchSheetPresented = false
+    @State private var isRepositorySheetPresented: Bool = false
+    @State private var isBranchSheetPresented: Bool = false
 
     var body: some View {
         HStack(spacing: style.gridSize) {

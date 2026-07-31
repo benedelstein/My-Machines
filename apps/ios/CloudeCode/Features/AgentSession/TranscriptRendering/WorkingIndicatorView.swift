@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct WorkingIndicatorView: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let isActive: Bool
 
     @State private var morphProgress: CGFloat = 0
-    @State private var floatPulse = false
-    @State private var squigglePulse = false
+    @State private var floatPulse: Bool = false
+    @State private var squigglePulse: Bool = false
 
     var body: some View {
         HStack {
@@ -246,7 +246,7 @@ private struct WorkingCloudCubic {
 }
 
 private extension WorkingCloudOutline {
-    static let base = WorkingCloudOutline(
+    static let base: WorkingCloudOutline = WorkingCloudOutline(
         start: CGPoint(x: 12.4, y: 30.1),
         curves: [
             WorkingCloudCubic(
@@ -306,7 +306,7 @@ private extension WorkingCloudOutline {
         ]
     )
 
-    static let undulating = WorkingCloudOutline(
+    static let undulating: WorkingCloudOutline = WorkingCloudOutline(
         start: CGPoint(x: 11.6, y: 29.2),
         curves: [
             WorkingCloudCubic(

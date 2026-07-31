@@ -4,9 +4,9 @@ import UIKit
 
 /// Native Claude account connection screen.
 struct ClaudeProviderConnectionView: View {
-    @Environment(\.openURL) private var openURL
-    @Environment(\.style) private var style
-    @Environment(\.theme) private var theme
+    @Environment(\.openURL) private var openURL: OpenURLAction
+    @Environment(\.style) private var style: Style
+    @Environment(\.theme) private var theme: Theme
 
     @State var viewModel: ClaudeProviderConnectionViewModel
     let onConnected: () -> Void

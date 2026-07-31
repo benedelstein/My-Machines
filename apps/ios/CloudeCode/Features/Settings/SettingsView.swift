@@ -5,11 +5,11 @@ import SwiftUI
 import UIKit
 
 struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.hapticFeedbackPlayer) private var haptics
-    @Environment(\.showToast) private var showToast
-    @State private var isConfirmingSignOut = false
-    @State private var isConfirmingDisconnect = false
+    @Environment(\.dismiss) private var dismiss: DismissAction
+    @Environment(\.hapticFeedbackPlayer) private var haptics: any HapticFeedbackPlaying
+    @Environment(\.showToast) private var showToast: ShowToastAction?
+    @State private var isConfirmingSignOut: Bool = false
+    @State private var isConfirmingDisconnect: Bool = false
     @State private var pendingDisconnect: SettingsViewModel.Provider?
     @State private var connectionRequest: ConnectionRequest?
     @State private var viewModel: SettingsViewModel
@@ -190,15 +190,15 @@ struct SettingsView: View {
     }
 
     private struct ConnectionRequest: Identifiable {
-        let id = UUID()
+        let id: UUID = UUID()
         let provider: SettingsViewModel.Provider
     }
 }
 
 private extension SettingsView {
     struct ProviderConnectionRow: View {
-        @Environment(\.style) private var style
-        @Environment(\.theme) private var theme
+        @Environment(\.style) private var style: Style
+        @Environment(\.theme) private var theme: Theme
 
         let provider: SettingsViewModel.Provider
         let state: SettingsViewModel.ConnectionState
@@ -293,8 +293,8 @@ private extension SettingsView {
 }
 
 private struct LogsView: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
     @Environment(\.showToast) var showToast: ShowToastAction?
 
     let logStore: AppLogStore
@@ -334,8 +334,8 @@ private struct LogsView: View {
 }
 
 private struct LogRow: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let entry: AppLogRecord
 

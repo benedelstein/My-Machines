@@ -2,8 +2,8 @@ import Domain
 import SwiftUI
 
 struct TurnWorkHeaderView: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let expanded: Bool
     let startedAt: Date?
@@ -68,7 +68,7 @@ struct TurnWorkHeaderView: View {
 }
 
 private struct WorkingDurationLabel: View {
-    private let durationTickAnimation = Animation.easeInOut(duration: 0.2)
+    private let durationTickAnimation: Animation = Animation.easeInOut(duration: 0.2)
 
     let startedAt: Date
 
