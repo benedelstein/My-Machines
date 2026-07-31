@@ -1,7 +1,9 @@
+/* eslint-disable max-lines -- SessionAgentDO is the runtime aggregate root. */
 import { SpriteLifecycleClient } from "@repo/sprites-client";
 import {
   type ClientState,
   type Logger,
+  type Result,
   type SessionSetupRun,
   ClientMessage as ClientMessageSchema,
   type ClientMessage,
@@ -53,7 +55,11 @@ import type {
 import { AgentTurnCoordinator } from "@/modules/session-agent/services/agent-turn-coordinator.service";
 import { SessionConnectorService } from "@/modules/session-agent/services/session-connector.service";
 import { SessionProvisionService } from "@/modules/session-agent/services/session-provision.service";
-import { SessionChatDispatchService } from "@/modules/session-agent/services/session-chat-dispatch.service";
+import {
+  SessionChatDispatchService,
+  type ClaimedTurn,
+  type PreparedChatMessage,
+} from "@/modules/session-agent/services/session-chat-dispatch.service";
 import { SessionSetupRunService } from "@/modules/session-agent/services/session-setup-run.service";
 import { SessionSetupOutputService } from "@/modules/session-agent/services/session-setup-output.service";
 import { SessionProviderConnectionService } from "@/modules/session-agent/services/session-provider-connection.service";
@@ -77,7 +83,29 @@ import { SessionAutoPullRequestService } from "./session-auto-pull-request.servi
 import { SessionPullRequestLifecycleService } from "./session-pull-request-lifecycle.service";
 import { SessionRepoAccessLifecycleService } from "./session-repo-access-lifecycle.service";
 import { SessionTurnNotificationService } from "./session-turn-notification.service";
-import { SessionRuntimeBoundaryService } from "./session-runtime-boundary.service";
+import {
+  RuntimeBoundaryMutex,
+  type RuntimeBoundaryLease,
+} from "./runtime-boundary-mutex";
+
+type EnsureReadyOutcome =
+  | { outcome: "ready" }
+  | { outcome: "setup_incomplete" };
+
+type EnsureReadyError = {
+  code:
+    | "SESSION_NOT_INITIALIZED"
+    | "INITIALIZATION_FAILED"
+    | "PROVISIONING_FAILED";
+  message: string;
+};
+
+type EnsureReadyResult = Result<EnsureReadyOutcome, EnsureReadyError>;
+
+type ChatAdmissionError = {
+  code: "READINESS_FAILED" | "TURN_CONFLICT";
+  message: string;
+};
 
 interface AgentStateInternalAccess {
   _setStateInternal(state: ClientState, source: Connection | "server"): unknown;
@@ -113,7 +141,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private readonly autoPullRequestService: SessionAutoPullRequestService;
   private readonly notificationPublisher: NotificationPublisher;
   private readonly turnNotificationService: SessionTurnNotificationService;
-  private readonly runtimeBoundaryService: SessionRuntimeBoundaryService;
+  private readonly runtimeBoundaryMutex = new RuntimeBoundaryMutex();
   private initializeSessionStatePromise: Promise<HandleInitResult> | null = null;
 
   initialState: ClientState = {
@@ -367,20 +395,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       publishSessionSummaryInvalidated: (userId, sessionId) =>
         userSessionsPublisher.invalidateSessionSummary({ userId, sessionId }),
     });
-    this.runtimeBoundaryService = new SessionRuntimeBoundaryService({
-      logger: this.logger,
-      provisioner: this.provisionService,
-      turnDispatcher: this.chatDispatchService,
-      readState: () => ({
-        initialized: this.serverState.initialized,
-        setupComplete: this.state.sessionSetupRun?.status === "completed",
-        hasActiveOrPendingTurn: Boolean(
-          this.serverState.activeUserMessageId || this.state.pendingUserMessage,
-        ),
-      }),
-      getInitializationPromise: () => this.initializeSessionStatePromise,
-    });
-
     this.providerConnectionService = new SessionProviderConnectionService({
       logger: this.logger,
       env: this.env,
@@ -685,9 +699,98 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   // Provisioning
+  /** Serializes readiness and claims a pending initial turn before release. */
+  private async ensureReady(): Promise<EnsureReadyResult> {
+    const admission = await this.runtimeBoundaryMutex.runExclusive(async (lease) => {
+      const readiness = await this._ensureReady(lease);
+      const claimedTurn = readiness.ok && readiness.value.outcome === "ready"
+        ? this.chatDispatchService.claimPendingMessage()
+        : null;
+      return { readiness, claimedTurn };
+    });
+
+    if (admission.claimedTurn) {
+      const dispatchResult = await this.chatDispatchService.spawnClaimedTurn(
+        admission.claimedTurn,
+      );
+      if (!dispatchResult.ok) {
+        this.logger.error("Failed to dispatch pending message", {
+          fields: { code: dispatchResult.error.code },
+          error: dispatchResult.error.message,
+        });
+      }
+    }
+    return admission.readiness;
+  }
+
+  /** Runs readiness stages while the caller owns the runtime boundary. */
+  private async _ensureReady(
+    _lease: RuntimeBoundaryLease,
+  ): Promise<EnsureReadyResult> {
+    if (!this.serverState.initialized) {
+      const initResult = await this.initializeSessionStatePromise;
+      if (!initResult) {
+        return failure({
+          code: "SESSION_NOT_INITIALIZED",
+          message: "Session is not initialized",
+        });
+      }
+      if (!initResult.ok) {
+        return failure({
+          code: "INITIALIZATION_FAILED",
+          message: initResult.error.message,
+        });
+      }
+    }
+
+    this.chatDispatchService.recoverInterruptedClaim();
+    try {
+      await this.provisionService.ensureProvisioned();
+    } catch (error) {
+      return failure({
+        code: "PROVISIONING_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return success({
+      outcome: this.state.sessionSetupRun?.status === "completed"
+        ? "ready"
+        : "setup_incomplete",
+    });
+  }
+
+  /** Runs final readiness and synchronously claims a prepared direct turn. */
+  private async admitPreparedTurn(
+    prepared: PreparedChatMessage,
+  ): Promise<Result<ClaimedTurn, ChatAdmissionError>> {
+    return this.runtimeBoundaryMutex.runExclusive(async (lease) => {
+      const readiness = await this._ensureReady(lease);
+      if (!readiness.ok) {
+        return failure({
+          code: "READINESS_FAILED",
+          message: readiness.error.message,
+        });
+      }
+      if (readiness.value.outcome !== "ready") {
+        return failure({
+          code: "READINESS_FAILED",
+          message: "Session setup is not complete",
+        });
+      }
+      if (this.serverState.activeUserMessageId || this.state.pendingUserMessage) {
+        return failure({
+          code: "TURN_CONFLICT",
+          message: "Agent is already handling a message",
+        });
+      }
+      return success(this.chatDispatchService.claimPreparedMessage(prepared));
+    });
+  }
+
   private queueEnsureReady(): void {
     void this.keepAliveWhile(async () => {
-      const readiness = await this.runtimeBoundaryService.ensureReady();
+      const readiness = await this.ensureReady();
       if (!readiness.ok) {
         this.logger.warn("ensureReady did not complete", {
           fields: { code: readiness.error.code },
@@ -897,7 +1000,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       }
 
       await this.keepAliveWhile(async () => {
-        const admission = await this.runtimeBoundaryService.admitPreparedTurn(
+        const admission = await this.admitPreparedTurn(
           prepared.value,
         );
         if (!admission.ok) {

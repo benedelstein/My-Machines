@@ -2,7 +2,7 @@ import type {
   RuntimeBoundaryLease,
   RuntimeBoundaryMutex,
 } from "./runtime-boundary-mutex";
-import type { SessionRuntimeBoundaryService } from "./session-runtime-boundary.service";
+import type { SessionAgentDO } from "./session-agent.do";
 
 type Assert<Condition extends true> = Condition;
 type Equal<Left, Right> =
@@ -22,5 +22,5 @@ export type RuntimeBoundaryLeaseCannotBeForgedFromEmptyObject = Assert<
 >;
 
 export type ReadinessStagesAreNotPublic = Assert<
-  Equal<"_ensureReady" extends keyof SessionRuntimeBoundaryService ? true : false, false>
+  Equal<"_ensureReady" extends keyof SessionAgentDO ? true : false, false>
 >;
