@@ -9,7 +9,6 @@ import {
 import type { UIMessageChunk } from "ai";
 import type { Connection } from "agents";
 import { SessionAgentDO } from "../../src/runtime/session-agent.do";
-import type { RuntimeBoundaryMutex } from "../../src/runtime/runtime-boundary-mutex";
 import type { ClaimedTurn, PreparedChatMessage } from
   "../../src/modules/session-agent/services/session-chat-dispatch.service";
 import type { ServerState } from
@@ -83,7 +82,6 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
 }
 
 interface TestAgentAccess {
-  ensureReady(): Promise<{ ok: boolean }>;
   handleUserChatMessage(
     connection: Connection,
     payload: ChatMessageEvent,
@@ -98,7 +96,9 @@ interface TestAgentAccess {
     request: InitSessionAgentRequest,
   ): Promise<Result<void, object>>;
   onConnect(connection: Connection): void;
-  runtimeBoundaryMutex: RuntimeBoundaryMutex;
+  runtimeBoundaryService: {
+    ensureReady(): Promise<{ ok: boolean }>;
+  };
   provisionService: {
     ensureProvisioned(): Promise<void>;
   };
@@ -204,7 +204,7 @@ describe("SessionAgentDO runtime boundary", () => {
         await releaseFirst.promise;
       }
     });
-    agent.provisionService = { ensureProvisioned };
+    agent.provisionService.ensureProvisioned = ensureProvisioned;
 
     agent.onConnect(connection("connection-1"));
     await firstEntered.promise;
@@ -238,7 +238,7 @@ describe("SessionAgentDO runtime boundary", () => {
       return success(undefined);
     });
     const ensureProvisioned = vi.fn(async () => {});
-    agent.provisionService = { ensureProvisioned };
+    agent.provisionService.ensureProvisioned = ensureProvisioned;
 
     const init = agent.handleInit({} as InitSessionAgentRequest);
     await initializationEntered.promise;
@@ -258,21 +258,19 @@ describe("SessionAgentDO runtime boundary", () => {
     const events: string[] = [];
     let provisionCalls = 0;
     let competingReadiness: Promise<{ ok: boolean }> | null = null;
-    agent.provisionService = {
-      ensureProvisioned: vi.fn(async () => {
-        provisionCalls += 1;
-        events.push(`provision:${provisionCalls}`);
-        if (provisionCalls === 1) {
-          readinessEntered.resolve();
-          await releaseReadiness.promise;
-        }
-        if (provisionCalls === 2) {
-          queueMicrotask(() => {
-            competingReadiness = agent.ensureReady();
-          });
-        }
-      }),
-    };
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {
+      provisionCalls += 1;
+      events.push(`provision:${provisionCalls}`);
+      if (provisionCalls === 1) {
+        readinessEntered.resolve();
+        await releaseReadiness.promise;
+      }
+      if (provisionCalls === 2) {
+        queueMicrotask(() => {
+          competingReadiness = agent.runtimeBoundaryService.ensureReady();
+        });
+      }
+    });
 
     const prepareStarted = Promise.withResolvers<void>();
     const prepared = preparedChatMessage();
@@ -289,7 +287,7 @@ describe("SessionAgentDO runtime boundary", () => {
       events.push("spawn");
       return success(undefined);
     });
-    agent.chatDispatchService = {
+    Object.assign(agent.chatDispatchService, {
       prepareChatMessage: vi.fn(async () => {
         prepareStarted.resolve();
         return success(prepared);
@@ -298,12 +296,12 @@ describe("SessionAgentDO runtime boundary", () => {
       claimPendingMessage: vi.fn(() => null),
       claimPreparedMessage,
       spawnClaimedTurn,
-    };
+    });
     agent.repoAccessLifecycleService = {
       guardSessionRepoAccess: vi.fn(async () => ({ ok: true as const })),
     };
 
-    const readiness = agent.ensureReady();
+    const readiness = agent.runtimeBoundaryService.ensureReady();
     await readinessEntered.promise;
     const chat = agent.handleUserChatMessage(
       connection("connection-1"),
@@ -346,15 +344,13 @@ describe("SessionAgentDO runtime boundary", () => {
     const readinessEntered = Promise.withResolvers<void>();
     const releaseReadiness = Promise.withResolvers<void>();
     let provisionCalls = 0;
-    agent.provisionService = {
-      ensureProvisioned: vi.fn(async () => {
-        provisionCalls += 1;
-        if (provisionCalls === 1) {
-          readinessEntered.resolve();
-          await releaseReadiness.promise;
-        }
-      }),
-    };
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {
+      provisionCalls += 1;
+      if (provisionCalls === 1) {
+        readinessEntered.resolve();
+        await releaseReadiness.promise;
+      }
+    });
     const directPrepared = preparedChatMessage();
     const claimPreparedMessage = vi.fn((): ClaimedTurn => ({
       userMessageId: directPrepared.userMessage.id,
@@ -375,13 +371,13 @@ describe("SessionAgentDO runtime boundary", () => {
       };
     });
     const spawnClaimedTurn = vi.fn(async () => success(undefined));
-    agent.chatDispatchService = {
+    Object.assign(agent.chatDispatchService, {
       prepareChatMessage: vi.fn(async () => success(directPrepared)),
       recoverInterruptedClaim: vi.fn(() => null),
       claimPendingMessage,
       claimPreparedMessage,
       spawnClaimedTurn,
-    };
+    });
     agent.repoAccessLifecycleService = {
       guardSessionRepoAccess: vi.fn(async () => ({ ok: true as const })),
     };
@@ -390,7 +386,7 @@ describe("SessionAgentDO runtime boundary", () => {
       send: vi.fn(),
     } as unknown as Connection;
 
-    const readiness = agent.ensureReady();
+    const readiness = agent.runtimeBoundaryService.ensureReady();
     await readinessEntered.promise;
     const chat = agent.handleUserChatMessage(
       directConnection,
@@ -421,7 +417,7 @@ describe("SessionAgentDO runtime boundary", () => {
       }),
     });
 
-    const readiness = await agent.ensureReady();
+    const readiness = await agent.runtimeBoundaryService.ensureReady();
 
     expect(readiness.ok).toBe(true);
     expect(agent.serverState.activeUserMessageId).toBeNull();
@@ -444,10 +440,11 @@ describe("SessionAgentDO runtime boundary", () => {
     agent.secretRepository.set("webhook_token", "webhook-token");
     const boundaryEntered = Promise.withResolvers<void>();
     const releaseBoundary = Promise.withResolvers<void>();
-    const boundary = agent.runtimeBoundaryMutex.runExclusive(async () => {
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {
       boundaryEntered.resolve();
       await releaseBoundary.promise;
     });
+    const readiness = agent.runtimeBoundaryService.ensureReady();
     await boundaryEntered.promise;
 
     const handled = await agent.handleWebhookChunks(
@@ -464,6 +461,6 @@ describe("SessionAgentDO runtime boundary", () => {
     expect(agent.serverState.activeTurnDispatchStatus).toBeNull();
 
     releaseBoundary.resolve();
-    await boundary;
+    await readiness;
   });
 });

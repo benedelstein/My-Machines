@@ -1030,28 +1030,30 @@ tail handling, but retain this behavior.
 #### Plain readiness callers serialize and re-evaluate
 
 There is no separate `ensureReadyPromise`. Every public `ensureReady()` call
-queues on the same mutex, runs `_ensureReady(lease)` after the preceding owner
-releases it, and therefore evaluates the latest durable state. The second pass
-is intentionally cheap when the first pass already made every migration revision
-current.
+enters the same `SessionRuntimeBoundaryService`, which owns the mutex and calls
+its private `_ensureReady(lease)` after the preceding owner releases it. The
+service reads current Durable Object state through one live state port, so every
+caller re-evaluates rather than capturing constructor-time state. The second
+pass is intentionally cheap when the first pass already made every migration
+revision current.
 
 ```ts
-private async ensureReady(): Promise<EnsureReadyResult> {
-  const result = await this.runtimeBoundaryMutex.runExclusive(async (lease) => {
+async ensureReady(): Promise<EnsureReadyResult> {
+  const result = await this.mutex.runExclusive(async (lease) => {
     const readiness = await this._ensureReady(lease);
     if (!readiness.ok || readiness.value.outcome !== "ready") {
       return { readiness, pendingTurn: null };
     }
 
     // This claim is synchronous and occurs before the boundary is released.
-    const pendingTurn = this.chatDispatchService.claimPendingMessage();
+    const pendingTurn = this.turnDispatcher.claimPendingMessage();
     return { readiness, pendingTurn };
   });
 
   // Process I/O happens after activeUserMessageId is durable and after the
   // selective runtime boundary is released.
   if (result.pendingTurn) {
-    await this.chatDispatchService.spawnClaimedTurn(result.pendingTurn);
+    await this.turnDispatcher.spawnClaimedTurn(result.pendingTurn);
   }
   return result.readiness;
 }
@@ -1086,22 +1088,9 @@ async function handleUserChatMessage(
   // the message, mutate client/server state, or begin the turn.
   const preparedMessage = await chatDispatchService.prepareMessage(payload);
 
-  const claim = await runtimeBoundaryMutex.runExclusive(async (lease) => {
-    const readiness = await this._ensureReady(
-      lease,
-      preparedMessage.processInputs,
-    );
-    if (!readiness.ok || readiness.value.outcome !== "ready") {
-      return readinessToChatFailure(readiness);
-    }
-
-    if (serverState.activeUserMessageId || state.pendingUserMessage) {
-      return failure(chatAlreadyActiveError());
-    }
-
-    // These operations are synchronous. Do not insert an await here.
-    return chatDispatchService.claimPreparedMessage(preparedMessage);
-  });
+  // Internally acquires the one mutex, calls private `_ensureReady(lease)`,
+  // checks for a conflict, and synchronously claims without another await.
+  const claim = await runtimeBoundaryService.admitPreparedTurn(preparedMessage);
 
   if (!claim.ok) {
     sendChatFailure(connection, claim.error);
@@ -1126,9 +1115,10 @@ readiness event can retry pending migration work.
 Calling the public `ensureReady()` from inside `runExclusive` would try to
 acquire the same non-reentrant mutex and deadlock. Calling it only before
 `runExclusive` would still leave the post-resolution gap. Direct chat therefore
-uses the private `_ensureReady(lease)` body while it already owns the one runtime
-boundary. This is a second readiness comparison, not a second mutex; normally
-the migration record makes it a local no-op.
+enters `admitPreparedTurn()`, which reuses the boundary service's private
+`_ensureReady(lease)` body while it already owns the one runtime boundary. This
+is a second readiness comparison, not a second mutex; normally the migration
+record makes it a local no-op.
 
 #### Why inbound webhooks stay outside
 
@@ -1145,14 +1135,16 @@ is unable to make the session idle.
 
 #### Mutex ownership is orchestration-level and non-reentrant
 
-The coordinator does not acquire `RuntimeBoundaryMutex` internally. The mutex
-is private to the Durable Object orchestration layer; public `ensureReady()` and
-direct-chat admission are the only normal entry points that acquire it. The
-mutex yields an opaque branded lease, and every internal method that assumes
+The coordinator does not acquire `RuntimeBoundaryMutex` internally.
+`SessionRuntimeBoundaryService`, constructed and owned by the Durable Object,
+owns the mutex and the private `_ensureReady(lease)` implementation. The DO does
+not proxy readiness back into the boundary service. Public `ensureReady()` and
+`admitPreparedTurn()` are the only normal entry points that acquire the mutex.
+The mutex yields an opaque branded lease, and every internal method that assumes
 ownership requires that lease:
 
 ```ts
-await runtimeBoundaryMutex.runExclusive(async (lease) => {
+await this.mutex.runExclusive(async (lease) => {
   await this._ensureReady(lease);
 });
 ```
