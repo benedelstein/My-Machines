@@ -409,12 +409,14 @@ extension AgentSessionTranscriptStateTests {
         modelsAPI: any ModelsAPIProviding = StubModelsAPI(),
         sessionsAPI: any SessionsAPIProviding = StubSessionsAPI(),
         sessionMessageStore: SessionMessageStore? = nil,
-        sessionClientStateStore: SessionClientStateStore = SessionClientStateStore(),
+        sessionClientStateStore: SessionClientStateStore? = nil,
         transcriptBuilder: any AgentSessionTranscriptBuilding = StubTranscriptBuilder(),
-        hapticFeedback: any AgentSessionHapticFeedbackProviding = NoopHapticFeedback()
+        hapticFeedback: (any AgentSessionHapticFeedbackProviding)? = nil
     ) -> AgentSessionViewModel {
         let sessionMessageStore = sessionMessageStore ?? SessionMessageStore()
+        let sessionClientStateStore = sessionClientStateStore ?? SessionClientStateStore()
         let sessionSummaryStore = SessionSummaryStore()
+        let hapticFeedback = hapticFeedback ?? NoopHapticFeedback()
         return AgentSessionViewModel(
             context: context ?? .session(makeSession(provider: provider)),
             modelCatalogStore: ModelCatalogStore(modelsAPI: modelsAPI),
