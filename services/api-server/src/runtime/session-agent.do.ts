@@ -77,15 +77,7 @@ import { SessionAutoPullRequestService } from "./session-auto-pull-request.servi
 import { SessionPullRequestLifecycleService } from "./session-pull-request-lifecycle.service";
 import { SessionRepoAccessLifecycleService } from "./session-repo-access-lifecycle.service";
 import { SessionTurnNotificationService } from "./session-turn-notification.service";
-import { createSessionAgentInitialState } from "./session-agent-initial-state";
-import {
-  RuntimeBoundaryMutex,
-  type RuntimeBoundaryLease,
-} from "./runtime-boundary-mutex";
-import {
-  SessionRuntimeBoundaryService,
-  type EnsureReadyResult,
-} from "./session-runtime-boundary.service";
+import { SessionRuntimeBoundaryService } from "./session-runtime-boundary.service";
 
 interface AgentStateInternalAccess {
   _setStateInternal(state: ClientState, source: Connection | "server"): unknown;
@@ -121,11 +113,27 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private readonly autoPullRequestService: SessionAutoPullRequestService;
   private readonly notificationPublisher: NotificationPublisher;
   private readonly turnNotificationService: SessionTurnNotificationService;
-  private readonly runtimeBoundaryMutex = new RuntimeBoundaryMutex();
   private readonly runtimeBoundaryService: SessionRuntimeBoundaryService;
   private initializeSessionStatePromise: Promise<HandleInitResult> | null = null;
 
-  initialState = createSessionAgentInitialState();
+  initialState: ClientState = {
+    repoFullName: null,
+    status: "preparing",
+    sessionSetupRun: null,
+    agentSettings: { ...DEFAULT_AGENT_SETTINGS },
+    agentMode: "edit",
+    pushedBranch: null,
+    pullRequest: null,
+    todos: null,
+    plan: null,
+    pendingUserMessage: null,
+    activeTurn: null,
+    editorUrl: null,
+    providerConnection: null,
+    lastError: null,
+    baseBranch: null,
+    createdAt: new Date().toISOString(),
+  };
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -361,21 +369,16 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     });
     this.runtimeBoundaryService = new SessionRuntimeBoundaryService({
       logger: this.logger,
-      mutex: this.runtimeBoundaryMutex,
-      isInitialized: () => this.serverState.initialized,
+      provisioner: this.provisionService,
+      turnDispatcher: this.chatDispatchService,
+      readState: () => ({
+        initialized: this.serverState.initialized,
+        setupComplete: this.state.sessionSetupRun?.status === "completed",
+        hasActiveOrPendingTurn: Boolean(
+          this.serverState.activeUserMessageId || this.state.pendingUserMessage,
+        ),
+      }),
       getInitializationPromise: () => this.initializeSessionStatePromise,
-      ensureReadyUnderLease: (lease) => this._ensureReady(lease),
-      ensureProvisioned: () => this.provisionService.ensureProvisioned(),
-      isSetupComplete: () => this.state.sessionSetupRun?.status === "completed",
-      hasActiveOrPendingTurn: () =>
-        Boolean(this.serverState.activeUserMessageId || this.state.pendingUserMessage),
-      recoverInterruptedClaim: () =>
-        this.chatDispatchService.recoverInterruptedClaim(),
-      claimPendingMessage: () => this.chatDispatchService.claimPendingMessage(),
-      claimPreparedMessage: (prepared) =>
-        this.chatDispatchService.claimPreparedMessage(prepared),
-      spawnClaimedTurn: (claimedTurn) =>
-        this.chatDispatchService.spawnClaimedTurn(claimedTurn),
     });
 
     this.providerConnectionService = new SessionProviderConnectionService({
@@ -682,21 +685,9 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   // Provisioning
-  /** Serializes readiness and claims a pending initial turn before release. */
-  private async ensureReady(): Promise<EnsureReadyResult> {
-    return this.runtimeBoundaryService.ensureReady();
-  }
-
-  /** Runs readiness work while the caller owns the runtime boundary. */
-  private async _ensureReady(
-    lease: RuntimeBoundaryLease,
-  ): Promise<EnsureReadyResult> {
-    return this.runtimeBoundaryService.runReadinessStages(lease);
-  }
-
   private queueEnsureReady(): void {
     void this.keepAliveWhile(async () => {
-      const readiness = await this.ensureReady();
+      const readiness = await this.runtimeBoundaryService.ensureReady();
       if (!readiness.ok) {
         this.logger.warn("ensureReady did not complete", {
           fields: { code: readiness.error.code },
@@ -906,7 +897,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       }
 
       await this.keepAliveWhile(async () => {
-        const admission = await this.runtimeBoundaryService.claimPreparedMessage(
+        const admission = await this.runtimeBoundaryService.admitPreparedTurn(
           prepared.value,
         );
         if (!admission.ok) {

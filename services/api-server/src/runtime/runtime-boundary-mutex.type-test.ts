@@ -12,7 +12,6 @@ type Equal<Left, Right> =
     : false;
 
 type ExclusiveOperation = Parameters<RuntimeBoundaryMutex["runExclusive"]>[0];
-type ReadinessStages = SessionRuntimeBoundaryService["runReadinessStages"];
 
 export type RuntimeBoundaryLeaseIsRequired = Assert<
   Equal<Parameters<ExclusiveOperation>, [RuntimeBoundaryLease]>
@@ -22,6 +21,6 @@ export type RuntimeBoundaryLeaseCannotBeForgedFromEmptyObject = Assert<
   Equal<object extends RuntimeBoundaryLease ? true : false, false>
 >;
 
-export type ReadinessStagesRequireLease = Assert<
-  Equal<Parameters<ReadinessStages>, [RuntimeBoundaryLease]>
+export type ReadinessStagesAreNotPublic = Assert<
+  Equal<"_ensureReady" extends keyof SessionRuntimeBoundaryService ? true : false, false>
 >;
