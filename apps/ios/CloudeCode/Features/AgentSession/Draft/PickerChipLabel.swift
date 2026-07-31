@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Capsule chip label shared by the draft composer's picker buttons.
 struct PickerChipLabel: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let icon: ImageResource
     let title: String

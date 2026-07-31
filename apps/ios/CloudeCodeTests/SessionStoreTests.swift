@@ -164,7 +164,7 @@ struct SessionStoreTests {
         #expect(await authAPI.refreshCount == 2)
     }
 
-    private static let session = Session(
+    private static let session: Session = Session(
         accessToken: "access-token",
         accessTokenExpiresAt: Date.now.addingTimeInterval(3_600),
         refreshToken: "refresh-token",
@@ -172,7 +172,7 @@ struct SessionStoreTests {
         userId: "user-1"
     )
 
-    private static let staleSession = Session(
+    private static let staleSession: Domain.Session = Session(
         accessToken: "stale-access-token",
         accessTokenExpiresAt: Date.now.addingTimeInterval(-60),
         refreshToken: "refresh-token",
@@ -193,7 +193,7 @@ struct SessionStoreTests {
 
 @MainActor
 private final class SignOutCounter {
-    var count = 0
+    var count: Int = 0
 }
 
 private final class TestSessionPersistence: SessionPersisting, @unchecked Sendable {
@@ -222,7 +222,7 @@ private actor TestAuthAPI: SignInProviding, SessionRefreshing, SessionRevoking {
     private let rejectsRefresh: Bool
     private let refreshGate: RefreshGate?
     private var transientFailuresRemaining: Int
-    private(set) var refreshCount = 0
+    private(set) var refreshCount: Int = 0
 
     init(
         session: Session,
@@ -269,7 +269,7 @@ private actor TestAuthAPI: SignInProviding, SessionRefreshing, SessionRevoking {
 }
 
 private actor RefreshGate {
-    private(set) var isWaiting = false
+    private(set) var isWaiting: Bool = false
     private var continuation: CheckedContinuation<Void, Never>?
 
     func wait() async {

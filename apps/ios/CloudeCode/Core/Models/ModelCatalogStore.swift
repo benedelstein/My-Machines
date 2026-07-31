@@ -11,10 +11,10 @@ final class ModelCatalogStore {
     private let modelsAPI: any ModelsAPIProviding
 
     private(set) var catalog: ModelsResponse?
-    private(set) var isLoading = false
+    private(set) var isLoading: Bool = false
     private(set) var errorMessage: String?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
-    @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private var loadGeneration: Int = 0
 
     init(modelsAPI: any ModelsAPIProviding) {
         self.modelsAPI = modelsAPI

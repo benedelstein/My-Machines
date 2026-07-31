@@ -22,10 +22,10 @@ struct SessionTranscriptScrollRequest: Equatable {
 
 @Observable
 final class SessionTranscriptScrollCoordinator {
-    var showsScrollToBottom = false
+    var showsScrollToBottom: Bool = false
     private(set) var scrollRequest: SessionTranscriptScrollRequest?
-    private(set) var isScrollingToBottom = false
-    private var nextScrollRequestID = 0
+    private(set) var isScrollingToBottom: Bool = false
+    private var nextScrollRequestID: Int = 0
 
     func scroll(
         to destination: SessionTranscriptScrollDestination,

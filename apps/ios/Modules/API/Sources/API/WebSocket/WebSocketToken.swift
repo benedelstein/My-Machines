@@ -27,7 +27,7 @@ public struct WebSocketToken: Sendable {
 public actor WebSocketTokenCache {
     private let fetch: @Sendable () async throws -> WebSocketToken
     private var cached: WebSocketToken?
-    private var generation = 0
+    private var generation: Int = 0
 
     public init(fetch: @escaping @Sendable () async throws -> WebSocketToken) {
         self.fetch = fetch

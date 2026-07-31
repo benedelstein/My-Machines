@@ -3,7 +3,7 @@ import SwiftData
 public enum SchemaV1: VersionedSchema {
     // fixed at declaration time. if you need a new version,
     // create a new VersionedSchema
-    public static let versionIdentifier = Schema.Version(1, 0, 0)
+    public static let versionIdentifier: Schema.Version = Schema.Version(1, 0, 0)
 
     public static var models: [any PersistentModel.Type] {
         // Note - adding a new model does not require a new versioned schema.

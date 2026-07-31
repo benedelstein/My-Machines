@@ -1,8 +1,8 @@
 import Observation
 
 @Observable final class SessionTranscriptRowViewModel {
-    var workExpanded = false
-    var userMessageExpanded = false
+    var workExpanded: Bool = false
+    var userMessageExpanded: Bool = false
 }
 
 final class SessionTranscriptRowViewModelCache {

@@ -7,7 +7,7 @@ import Foundation
 final class CacheResetWorker: Worker {
     private let cacheResetAction: CacheResetAction
     private let didSignOutPublisher: AnyPublisher<Void, Never>
-    private var cancellables = Set<AnyCancellable>()
+    private var cancellables: Set<AnyCancellable> = Set<AnyCancellable>()
 
     init(
         cacheResetAction: CacheResetAction,

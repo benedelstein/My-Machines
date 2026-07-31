@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct Wordmark: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.hapticFeedbackPlayer) private var haptics
-    @State private var isVisible = false
-    @State private var extraEyeCount = 0
-    @State private var eyeSequenceID = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion: Bool
+    @Environment(\.hapticFeedbackPlayer) private var haptics: any HapticFeedbackPlaying
+    @State private var isVisible: Bool = false
+    @State private var extraEyeCount: Int = 0
+    @State private var eyeSequenceID: Int = 0
     @State private var toggleTargetEyeCount: Int?
 
     var body: some View {
@@ -198,13 +198,13 @@ private struct WordmarkI: View {
 }
 
 private enum WordmarkStyle {
-    static let schoolbellFontName = "Schoolbell-Regular"
-    static let machinesFontName = "DMSerifDisplay-Regular"
+    static let schoolbellFontName: String = "Schoolbell-Regular"
+    static let machinesFontName: String = "DMSerifDisplay-Regular"
     static let myFontSize: CGFloat = 50
     static let machinesFontSize: CGFloat = 55
-    static let maximumExtraEyeCount = 4
+    static let maximumExtraEyeCount: Int = 4
     static let spacing: CGFloat = 4
     static let dotSize: CGFloat = 10
     static let dotVerticalOffset: CGFloat = 14
-    static let dotColor = Color(hex: 0xD4A8FF)
+    static let dotColor: Color = Color(hex: 0xD4A8FF)
 }

@@ -6,7 +6,7 @@ enum TranscriptPerformanceSignpost {
         fileprivate let id: OSSignpostID
     }
 
-    private static let log = OSLog(
+    private static let log: OSLog = OSLog(
         subsystem: Bundle.main.bundleIdentifier ?? "llc.bze.CloudeCode",
         category: "TranscriptPerformance"
     )

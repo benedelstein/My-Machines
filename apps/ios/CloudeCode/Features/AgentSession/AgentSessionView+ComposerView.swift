@@ -18,7 +18,7 @@ extension AgentSessionView {
         let showsRepoBranchPicker: Bool
         let onConnectProvider: (ProviderCatalogEntry) -> Void
         let onComposerSizeChange: (CGSize) -> Void
-        @State private var composerFocused = false
+        @State private var composerFocused: Bool = false
 
         var body: some View {
             VStack(alignment: .leading, spacing: style.gridSize) {

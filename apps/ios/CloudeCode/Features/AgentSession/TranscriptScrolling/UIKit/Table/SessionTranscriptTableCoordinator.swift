@@ -26,7 +26,7 @@ extension SessionTranscriptTableRepresentable {
         private(set) var initialAnchorState: SessionTranscriptInitialAnchorState = .waitingForItems
         private var lastItems: [SessionTranscriptItem] = []
         private var lastItemIDs: [String] = []
-        private let rowViewModelCache = SessionTranscriptRowViewModelCache()
+        private let rowViewModelCache: SessionTranscriptRowViewModelCache = SessionTranscriptRowViewModelCache()
         // Measured row heights keyed by item id, served back to UIKit as row
         // height estimates. Valid only for rowHeightCacheWidth: the cache is
         // dropped whenever the table width changes (see
@@ -38,15 +38,15 @@ extension SessionTranscriptTableRepresentable {
         private var lastLayoutBoundsSize: CGSize?
         private var lastLayoutContentSize: CGSize?
         private var lastDistanceFromBottom: CGFloat?
-        private var contentInsetConfiguration = ContentInsetConfiguration()
+        private var contentInsetConfiguration: SessionTranscriptContentInsetConfiguration = ContentInsetConfiguration()
         // Working-indicator cell frame captured before a data update, compared
         // against its post-layout frame to drive the FLIP slide animation in
         // animateWorkingIndicatorLayoutTransition.
         var workingIndicatorLayoutFrameBeforeUpdate: CGRect?
-        private var isUserScrolling = false
-        var isFollowingBottom = true
-        var isAnimatingProgrammaticScroll = false
-        var handledScrollRequestID = 0
+        private var isUserScrolling: Bool = false
+        var isFollowingBottom: Bool = true
+        var isAnimatingProgrammaticScroll: Bool = false
+        var handledScrollRequestID: Int = 0
         let scrollCoordinator: SessionTranscriptScrollCoordinator
         private var rowContent: (SessionTranscriptItem) -> Row
         private let rowSpacing: CGFloat

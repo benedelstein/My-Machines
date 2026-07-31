@@ -7,7 +7,7 @@ struct PromptComposerView<TrailingAccessory: View>: View {
     @Environment(\.theme) private var theme: Theme
     @Environment(\.style) private var style: Style
     @Environment(\.showToast) private var showToast: ShowToastAction?
-    @Environment(\.hapticFeedbackPlayer) private var haptics
+    @Environment(\.hapticFeedbackPlayer) private var haptics: any HapticFeedbackPlaying
 
     @Binding private var text: String
     private var focused: Binding<Bool>

@@ -100,8 +100,8 @@ extension ErrorStateView where Action == EmptyView {
 
 /// A compact primary action designed for use inside an empty or error state.
 struct StatePillButton: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let title: LocalizedStringResource
     let action: () -> Void
@@ -120,8 +120,8 @@ struct StatePillButton: View {
 }
 
 private struct StateViewLayout<Icon: View, Action: View>: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let title: LocalizedStringResource
     let subtitle: StateViewText?

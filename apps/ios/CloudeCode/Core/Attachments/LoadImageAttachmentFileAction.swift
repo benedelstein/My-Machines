@@ -14,9 +14,9 @@ struct LoadedImageAttachmentFile {
 /// Converts picker and camera images into uploadable attachment files.
 actor LoadImageAttachmentFileAction {
     private enum Constants {
-        static let previewMaxPixelSize = 320
-        static let uploadMaxPixelSize = 2_000
-        static let uploadJPEGCompressionQuality = 0.75
+        static let previewMaxPixelSize: Int = 320
+        static let uploadMaxPixelSize: Int = 2_000
+        static let uploadJPEGCompressionQuality: Double = 0.75
     }
 
     /// Encodes a camera image as a bounded JPEG upload and separate preview thumbnail.

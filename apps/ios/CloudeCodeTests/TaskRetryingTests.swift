@@ -67,7 +67,7 @@ struct TaskRetryingTests {
 }
 
 private actor RetryAttemptCounter {
-    private(set) var count = 0
+    private(set) var count: Int = 0
 
     func record() {
         count += 1

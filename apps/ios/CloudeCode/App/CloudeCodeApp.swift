@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct CloudeCodeApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate: AppDelegate
     @State private var logStore: AppLogStore
     @State private var toastWindowController: ToastWindowController
 

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HighlightButtonStyle: ButtonStyle {
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
 
     var cornerRadius: CGFloat = 6
     var highlightColor: Color?
@@ -27,14 +27,14 @@ struct HighlightButtonStyle: ButtonStyle {
 }
 
 struct BounceHighlightButtonStyle: ButtonStyle {
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
 
     var pressedOpacity: CGFloat = 1
     var minimumScale: CGFloat = 0.95
     var highlightColor: Color?
-    var scaleBackground = true
+    var scaleBackground: Bool = true
 
-    private let highlightShape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+    private let highlightShape: RoundedRectangle = RoundedRectangle(cornerRadius: 6, style: .continuous)
     private var color: Color {
         highlightColor ?? theme.tertiaryBackgroundColor
     }

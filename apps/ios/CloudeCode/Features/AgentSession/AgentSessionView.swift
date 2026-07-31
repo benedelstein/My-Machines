@@ -7,16 +7,17 @@ import SwiftUI
 struct AgentSessionView: View {
     @Environment(\.theme) private var theme: Theme
     @Environment(\.style) private var style: Style
-    @Environment(\.showToast) private var showToast
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.showToast) private var showToast: ShowToastAction?
+    @Environment(\.dismiss) private var dismiss: DismissAction
 
     @State private var store: AgentSessionViewModel
     @State private var destination: Modal<Destination>?
     @State private var composerHeight: CGFloat = 0
-    @State private var transcriptScrollCoordinator = SessionTranscriptScrollCoordinator()
-    @State private var renamePromptPresented = false
-    @State private var deleteConfirmationPresented = false
-    @State private var proposedSessionTitle = ""
+    @State private var transcriptScrollCoordinator: SessionTranscriptScrollCoordinator =
+        SessionTranscriptScrollCoordinator()
+    @State private var renamePromptPresented: Bool = false
+    @State private var deleteConfirmationPresented: Bool = false
+    @State private var proposedSessionTitle: String = ""
 
     init(store: AgentSessionViewModel) {
         _store = State(initialValue: store)
@@ -277,7 +278,7 @@ extension AgentSessionView {
 
 private extension AgentSessionView {
     struct SessionScrollView: View {
-        @Environment(\.style) private var style
+        @Environment(\.style) private var style: Style
 
         let store: AgentSessionViewModel
         @Binding var destination: Modal<AgentSessionView.Destination>?

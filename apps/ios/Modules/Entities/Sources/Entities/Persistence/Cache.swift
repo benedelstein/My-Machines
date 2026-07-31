@@ -52,8 +52,8 @@ public final class Cache: Sendable {
 
     private let container: ModelContainer
     private let metadataStore: CacheMetadataStore
-    private let startCoordinator = CacheStartCoordinator()
-    private let backgroundQueue = DispatchQueue(label: "llc.bze.CloudeCode.cache")
+    private let startCoordinator: CacheStartCoordinator = CacheStartCoordinator()
+    private let backgroundQueue: DispatchQueue = DispatchQueue(label: "llc.bze.CloudeCode.cache")
 
     /// Creates a cache around a SwiftData container.
     public init(

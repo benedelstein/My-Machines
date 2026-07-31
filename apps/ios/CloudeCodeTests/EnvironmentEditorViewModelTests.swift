@@ -219,8 +219,8 @@ private actor FakeRepoEnvironmentsAPI: RepoEnvironmentsAPIProviding {
     let environment: Domain.RepoEnvironment
     let delayNanoseconds: UInt64
     let shouldFail: Bool
-    private(set) var createCount = 0
-    private(set) var defaultAllowlistRequestCount = 0
+    private(set) var createCount: Int = 0
+    private(set) var defaultAllowlistRequestCount: Int = 0
     private(set) var createdInput: Domain.RepoEnvironment.Input?
     private(set) var updatedEnvironmentId: String?
     private(set) var updatedInput: Domain.RepoEnvironment.Input?

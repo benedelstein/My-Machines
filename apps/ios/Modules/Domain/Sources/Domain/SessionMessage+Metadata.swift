@@ -22,10 +22,10 @@ public struct SessionMessageMetadata: Sendable, Equatable {
         isAborted = metadata.boolValue(forKey: Self.abortedKey) == true
     }
 
-    public static let createdAtKey = "createdAt"
-    public static let startedAtKey = "startedAt"
-    public static let endedAtKey = "endedAt"
-    public static let abortedKey = "aborted"
+    public static let createdAtKey: String = "createdAt"
+    public static let startedAtKey: String = "startedAt"
+    public static let endedAtKey: String = "endedAt"
+    public static let abortedKey: String = "aborted"
 }
 
 public extension SessionMessage {
@@ -89,7 +89,7 @@ private extension JSONValue {
         standardISOFormatter.date(from: string) ?? fractionalISOFormatter.date(from: string)
     }
 
-    nonisolated(unsafe) private static let standardISOFormatter = ISO8601DateFormatter()
+    nonisolated(unsafe) private static let standardISOFormatter: ISO8601DateFormatter = ISO8601DateFormatter()
 
     nonisolated(unsafe) private static let fractionalISOFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()

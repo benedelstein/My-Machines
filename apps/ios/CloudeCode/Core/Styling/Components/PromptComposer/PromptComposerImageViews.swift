@@ -22,8 +22,8 @@ struct PromptComposerImageAttachmentPreview: Identifiable, Equatable {
 extension PromptComposerView {
     struct ImageSourceMenu: View {
         @Environment(\.composerStyle) var composerStyle: ComposerStyle
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         let isDisabled: Bool
         let onOpenCamera: () -> Void
@@ -53,8 +53,8 @@ extension PromptComposerView {
     }
 
     struct AttachmentPreviews: View {
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         let attachments: [PromptComposerImageAttachmentPreview]
         let onRemove: (UUID) -> Void
@@ -87,8 +87,8 @@ extension PromptComposerView {
 
 extension PromptComposerView {
     private struct AttachmentThumbnail: View {
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         let attachment: PromptComposerImageAttachmentPreview
         let onRemove: () -> Void

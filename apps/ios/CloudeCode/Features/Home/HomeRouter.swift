@@ -17,14 +17,14 @@ final class HomeRouter: NotificationHandlerDelegate {
 
     @ObservationIgnored private let notificationHandler: NotificationHandler
     @ObservationIgnored private let sessionSummaryStore: SessionSummaryStore
-    @ObservationIgnored private var navigationRequestID = 0
+    @ObservationIgnored private var navigationRequestID: Int = 0
     /// Maps a `.newSession` destination's local draft UUID to the server session id
     /// once that draft creates its session. `HomeDestination.newSession` is keyed by
     /// a client-side UUID so the pushed screen keeps its identity (no rebuild) when
     /// the session comes into existence; this table lets `activeSessionId` resolve
     /// those destinations to real session ids for notification suppression/routing.
     @ObservationIgnored private var createdSessionIDs: [UUID: String] = [:]
-    @ObservationIgnored private var cancellables = Set<AnyCancellable>()
+    @ObservationIgnored private var cancellables: Set<AnyCancellable> = Set<AnyCancellable>()
 
     var notificationTap: NotificationRoute? {
         notificationHandler.notificationTap

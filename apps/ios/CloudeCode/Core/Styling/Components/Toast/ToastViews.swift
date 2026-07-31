@@ -3,8 +3,8 @@ import SwiftUI
 import UIKit
 
 struct ToastContainerView<Content: View>: View {
-    @Environment(\.style) private var style
-    @Environment(\.theme) private var theme
+    @Environment(\.style) private var style: Style
+    @Environment(\.theme) private var theme: Theme
 
     let content: () -> Content
 
@@ -29,8 +29,8 @@ struct ToastContainerView<Content: View>: View {
 }
 
 struct ToastDefaultContentView: View {
-    @Environment(\.style) private var style
-    @Environment(\.theme) private var theme
+    @Environment(\.style) private var style: Style
+    @Environment(\.theme) private var theme: Theme
 
     let title: Text
     var subtitle: Text?
@@ -67,7 +67,7 @@ struct ToastSceneView: View {
 }
 
 final class ToastHudViewModel: ObservableObject {
-    @Published var showToast = false
+    @Published var showToast: Bool = false
     @Published var dragOffset: CGFloat = .zero
     var proposedHeight: CGFloat?
     var onDismiss: (() -> Void)?
@@ -76,7 +76,7 @@ final class ToastHudViewModel: ObservableObject {
 private struct ToastHudContainerView<Content: View>: View {
     @StateObject private var toastViewModel: ToastHudViewModel
     @State private var timer: Publishers.Autoconnect<Timer.TimerPublisher>
-    @GestureState private var isDragging = false
+    @GestureState private var isDragging: Bool = false
 
     let config: ToastConfig
     let content: () -> Content

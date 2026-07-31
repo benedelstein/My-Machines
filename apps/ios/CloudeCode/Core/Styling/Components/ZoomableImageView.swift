@@ -79,22 +79,22 @@ protocol ZoomingImageScrollViewDragHandling: AnyObject {
 }
 
 final class ZoomingImageScrollView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
-    private let scrollView = UIScrollView()
-    private let imageView = UIImageView()
+    private let scrollView: UIScrollView = UIScrollView()
+    private let imageView: UIImageView = UIImageView()
 
     private var currentImage: UIImage?
     private var lastBoundsSize: CGSize = .zero
-    private var isZoomedIn = false
-    private lazy var dismissalPanGestureRecognizer = UIPanGestureRecognizer(
+    private var isZoomedIn: Bool = false
+    private lazy var dismissalPanGestureRecognizer: UIPanGestureRecognizer = UIPanGestureRecognizer(
         target: self,
         action: #selector(handleDismissalPan(_:))
     )
-    private lazy var singleTapGestureRecognizer = UITapGestureRecognizer(
+    private lazy var singleTapGestureRecognizer: UITapGestureRecognizer = UITapGestureRecognizer(
         target: self,
         action: #selector(handleSingleTap)
     )
 
-    var isDragEnabled = false
+    var isDragEnabled: Bool = false
     weak var dragHandler: ZoomingImageScrollViewDragHandling?
     var onZoomedStateChanged: ((Bool) -> Void)?
     var onSingleTap: (() -> Void)?

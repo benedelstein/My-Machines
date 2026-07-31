@@ -30,5 +30,5 @@ enum ThemePreference: String, CaseIterable, Identifiable {
 
 /// Shared `@AppStorage` keys so writers (a future picker) and readers agree on the string.
 enum AppStorageKey {
-    static let themePreference = "themePreference"
+    static let themePreference: String = "themePreference"
 }

@@ -19,12 +19,12 @@ final class HomeViewModel {
     private let userSessionsSocket: UserSessionsSocket
     private let archiveSessionAction: ArchiveSessionAction
     private let deleteSessionAction: DeleteSessionAction
-    private var didStart = false
-    private var hasConnected = false
+    private var didStart: Bool = false
+    private var hasConnected: Bool = false
     private var socketTask: Task<Void, Never>?
 
-    private(set) var isLoading = false
-    private(set) var hasLoaded = false
+    private(set) var isLoading: Bool = false
+    private(set) var hasLoaded: Bool = false
     private(set) var errorMessage: String?
     private(set) var nextRepoCursor: String?
 

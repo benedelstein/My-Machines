@@ -20,7 +20,7 @@ enum Constants {
     }()
 
     /// OAuth callback handled by the app's registered custom URL scheme.
-    static let oauthRedirectURI = "\(deepLinkScheme)://auth/callback"
+    static let oauthRedirectURI: String = "\(deepLinkScheme)://auth/callback"
 
     /// Web app origin injected by the active build scheme through Info.plist.
     static let webBaseURL: String = {
@@ -34,9 +34,9 @@ enum Constants {
 
     /// Userdefaults keys
     enum UserDefaults {
-        static let lastSelectedNewSessionModel = "lastSelectedNewSessionModel"
-        static let recentNewSessionRepos = "recentNewSessionRepos"
+        static let lastSelectedNewSessionModel: String = "lastSelectedNewSessionModel"
+        static let recentNewSessionRepos: String = "recentNewSessionRepos"
         /// Per-repo key prefix; append the repo id. Mirrors web's `lastEnvironmentId:{repoId}`.
-        static let lastEnvironmentIdPrefix = "lastEnvironmentId:"
+        static let lastEnvironmentIdPrefix: String = "lastEnvironmentId:"
     }
 }

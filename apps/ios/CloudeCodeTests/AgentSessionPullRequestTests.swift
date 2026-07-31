@@ -252,8 +252,8 @@ private actor RecordingSessionsAPI: SessionsAPIProviding {
 
     private var createOutcomes: [CreateOutcome]
     private var pullRequestResponses: [PullRequestStatusResponse]
-    private(set) var createCallCount = 0
-    private(set) var pullRequestCallCount = 0
+    private(set) var createCallCount: Int = 0
+    private(set) var pullRequestCallCount: Int = 0
 
     init(
         createOutcomes: [CreateOutcome] = [],

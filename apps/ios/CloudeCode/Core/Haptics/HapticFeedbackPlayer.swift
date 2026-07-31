@@ -19,9 +19,9 @@ struct NoopHapticFeedbackPlayer: HapticFeedbackPlaying {
 
 @MainActor
 final class SystemHapticFeedbackPlayer: HapticFeedbackPlaying {
-    private let lightFeedback = UIImpactFeedbackGenerator(style: .light)
-    private let softFeedback = UIImpactFeedbackGenerator(style: .soft)
-    private let notificationFeedback = UINotificationFeedbackGenerator()
+    private let lightFeedback: UIImpactFeedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+    private let softFeedback: UIImpactFeedbackGenerator = UIImpactFeedbackGenerator(style: .soft)
+    private let notificationFeedback: UINotificationFeedbackGenerator = UINotificationFeedbackGenerator()
 
     func play(_ feedback: HapticFeedback) {
         switch feedback {

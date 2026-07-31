@@ -20,7 +20,7 @@ final class NewSessionPreferences {
         let defaultBranch: String
     }
 
-    private static let maxRecentRepos = 3
+    private static let maxRecentRepos: Int = 3
 
     private let userDefaults: UserDefaults
 

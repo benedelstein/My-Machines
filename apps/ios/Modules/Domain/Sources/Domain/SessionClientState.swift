@@ -1,5 +1,5 @@
 public struct SessionClientState: Sendable, Equatable, Codable {
-    public static let empty = SessionClientState(
+    public static let empty: SessionClientState = SessionClientState(
         repoFullName: nil,
         status: .preparing,
         sessionSetupRun: nil,

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Native sheet chrome shared by provider-specific connection screens.
 struct ProviderConnectionView<Content: View>: View {
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
 
     private let content: Content
 

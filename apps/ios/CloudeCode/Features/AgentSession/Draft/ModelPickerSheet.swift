@@ -2,9 +2,9 @@ import CoreAPI
 import SwiftUI
 
 struct ModelPickerSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.style) private var style
-    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss: DismissAction
+    @Environment(\.style) private var style: Style
+    @Environment(\.theme) private var theme: Theme
 
     let modelCatalog: ModelCatalogStore
     let selectedModel: ModelSelection?
@@ -12,8 +12,8 @@ struct ModelPickerSheet: View {
     let restrictsProvider: Bool
     let onSelectModel: (ProviderCatalogEntry, ProviderCatalogModel) -> Void
     let onConnectProvider: (ProviderCatalogEntry) -> Void
-    @State private var query = ""
-    @State private var collapsedProviderIDs = Set<String>()
+    @State private var query: String = ""
+    @State private var collapsedProviderIDs: Set<String> = Set<String>()
 
     var body: some View {
         NavigationStack {
@@ -210,7 +210,7 @@ struct ModelPickerSheet: View {
     }
 
     private struct ModelRow: View {
-        @Environment(\.theme) private var theme
+        @Environment(\.theme) private var theme: Theme
 
         let displayName: String
         let isSelected: Bool

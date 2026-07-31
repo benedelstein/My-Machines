@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct GlassButton: View {
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
 
     var systemImage: String
     var isDisabled: Bool = false
@@ -21,9 +21,9 @@ struct GlassButton: View {
 }
 
 struct CloseButton: View {
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
 
-    var isDisabled = false
+    var isDisabled: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -33,9 +33,9 @@ struct CloseButton: View {
 }
 
 struct BackButton: View {
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
 
-    var isDisabled = false
+    var isDisabled: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -45,10 +45,10 @@ struct BackButton: View {
 }
 
 struct ToolbarCloseButton: ToolbarContent {
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
 
     var placement: ToolbarItemPlacement = .topBarLeading
-    var isDisabled = false
+    var isDisabled: Bool = false
     let action: () -> Void
 
     var body: some ToolbarContent {
@@ -66,10 +66,10 @@ struct ToolbarCloseButton: ToolbarContent {
 }
 
 struct ToolbarBackButton: ToolbarContent {
-    @Environment(\.theme) private var theme
+    @Environment(\.theme) private var theme: Theme
 
     var placement: ToolbarItemPlacement = .topBarLeading
-    var isDisabled = false
+    var isDisabled: Bool = false
     let action: () -> Void
 
     var body: some ToolbarContent {

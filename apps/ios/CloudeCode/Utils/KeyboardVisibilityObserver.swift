@@ -5,7 +5,7 @@ import UIKit
 @Observable
 final class KeyboardVisibilityObserver {
     /// Whether the keyboard currently intersects the main screen.
-    private(set) var isVisible = false
+    private(set) var isVisible: Bool = false
     /// Height of the keyboard intersection with the main screen.
     private(set) var visibleHeight: CGFloat = 0
     /// Final keyboard frame reported by the most recent notification.
@@ -13,7 +13,7 @@ final class KeyboardVisibilityObserver {
     /// Animation metadata from the most recent keyboard transition.
     private(set) var transition: KeyboardTransition?
     /// Monotonic trigger value that changes for every keyboard transition notification.
-    private(set) var transitionID = 0
+    private(set) var transitionID: Int = 0
 
     private let notificationCenter: NotificationCenter
     private var observers: [NSObjectProtocol] = []

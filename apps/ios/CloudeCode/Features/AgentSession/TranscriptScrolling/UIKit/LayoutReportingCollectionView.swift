@@ -7,7 +7,8 @@ final class LayoutReportingCollectionView: UICollectionView, SessionTranscriptKe
     /// Most recent keyboard transition waiting to be consumed by the transcript coordinator.
     private(set) var pendingKeyboardTransition: KeyboardTransition?
     private let keyboardTransitionObserver: KeyboardTransitionObserving
-    private let obstructionInsetResolver = SessionTranscriptObstructionInsetResolver()
+    private let obstructionInsetResolver: SessionTranscriptObstructionInsetResolver =
+        SessionTranscriptObstructionInsetResolver()
 
     /// Creates a collection view that reports layout passes and keyboard transitions.
     init(

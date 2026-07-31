@@ -24,7 +24,7 @@ final class ClaudeProviderConnectionViewModel {
 
     private(set) var phase: Phase = .ready
     private(set) var externalAuthorizationURL: URL?
-    var code = ""
+    var code: String = ""
     var errorMessage: String?
 
     var isConnected: Bool {

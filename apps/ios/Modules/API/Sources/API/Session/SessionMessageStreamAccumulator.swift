@@ -46,7 +46,7 @@ public actor SessionMessageStreamAccumulator {
     private let onStatus: @Sendable (SessionMessageStreamStatus) -> Void
     private let onMessage: @Sendable (SessionMessage) -> Void
     private var readTask: Task<Void, Never>?
-    private var isFinished = false
+    private var isFinished: Bool = false
     private var emissionPhase: EmissionPhase
     private var chunksQueuedDuringPreparation: [SessionStreamChunk] = []
 

@@ -59,7 +59,7 @@ private final class TestTokenPersistence: SessionPersisting, @unchecked Sendable
 }
 
 private actor RotatingAuthAPI: SessionRefreshing, SessionRevoking {
-    private(set) var refreshCount = 0
+    private(set) var refreshCount: Int = 0
 
     func refresh(refreshToken: String) async throws -> Session {
         refreshCount += 1

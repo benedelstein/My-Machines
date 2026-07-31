@@ -3,14 +3,14 @@ import SwiftUI
 
 struct BranchPickerSheet: View {
     @Environment(\.style) var style: Style
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss: DismissAction
+    @Environment(\.theme) private var theme: Theme
 
     let draft: NewSessionDraft
     let selectedRepo: NewSessionDraft.SelectedRepo
-    @State private var query = ""
+    @State private var query: String = ""
     @State private var branches: [Branch] = []
-    @State private var isLoading = true
+    @State private var isLoading: Bool = true
     @State private var errorMessage: String?
 
     init(draft: NewSessionDraft, selectedRepo: NewSessionDraft.SelectedRepo) {
@@ -144,7 +144,7 @@ struct BranchPickerSheet: View {
     }
 
     private struct BranchRow: View {
-        @Environment(\.theme) private var theme
+        @Environment(\.theme) private var theme: Theme
 
         let name: String
         let isSelected: Bool

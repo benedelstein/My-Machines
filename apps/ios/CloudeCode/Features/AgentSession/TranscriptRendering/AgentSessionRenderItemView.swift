@@ -3,8 +3,8 @@ import MarkdownParsing
 import SwiftUI
 
 struct AgentSessionRenderItemView: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let item: AgentSessionRenderItem
     let isActive: Bool
@@ -67,7 +67,7 @@ struct MarkdownPartsView: View {
 
 extension MarkdownPartsView {
     struct PartView: View {
-        @Environment(\.style) private var style
+        @Environment(\.style) private var style: Style
 
         let part: MarkdownPart
         let isFirst: Bool
@@ -88,8 +88,8 @@ extension MarkdownPartsView {
     }
 
     struct BlockView: View {
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         let block: MarkdownBlock
         let partStability: MarkdownPart.Stability
@@ -148,8 +148,8 @@ extension MarkdownPartsView {
     }
 
     struct ProseView: View {
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         let paragraphs: [MarkdownParagraph]
 
@@ -235,8 +235,8 @@ extension MarkdownPartsView {
     }
 
     struct ListItemView: View {
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         let item: MarkdownListItem
         let marker: String
@@ -266,8 +266,8 @@ extension MarkdownPartsView {
     }
 
     struct BlockQuoteView: View {
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         let blocks: [MarkdownBlock]
         let partStability: MarkdownPart.Stability
@@ -290,7 +290,7 @@ extension MarkdownPartsView {
     }
 
     struct DividerView: View {
-        @Environment(\.theme) private var theme
+        @Environment(\.theme) private var theme: Theme
 
         var body: some View {
             Rectangle()
@@ -301,8 +301,8 @@ extension MarkdownPartsView {
     }
 
     struct CodeBlockView: View {
-        @Environment(\.theme) private var theme
-        @Environment(\.style) private var style
+        @Environment(\.theme) private var theme: Theme
+        @Environment(\.style) private var style: Style
 
         let codeBlock: MarkdownCodeBlock
         let isActive: Bool
@@ -338,8 +338,8 @@ extension MarkdownPartsView {
 }
 
 private struct ToolActionInlineRow: View {
-    @Environment(\.theme) private var theme
-    @Environment(\.style) private var style
+    @Environment(\.theme) private var theme: Theme
+    @Environment(\.style) private var style: Style
 
     let item: AgentSessionRenderItem.ActionItem
     let isActive: Bool
