@@ -82,7 +82,9 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
 }
 
 interface TestAgentAccess {
-  ensureReady(): Promise<{ ok: boolean }>;
+  ensureRuntimeReadyAndDispatchNextTurn(
+    prepared?: PreparedChatMessage,
+  ): Promise<{ ok: boolean }>;
   handleUserChatMessage(
     connection: Connection,
     payload: ChatMessageEvent,
@@ -265,7 +267,7 @@ describe("SessionAgentDO runtime boundary", () => {
       }
       if (provisionCalls === 2) {
         queueMicrotask(() => {
-          competingReadiness = agent.ensureReady();
+          competingReadiness = agent.ensureRuntimeReadyAndDispatchNextTurn();
         });
       }
     });
@@ -299,7 +301,7 @@ describe("SessionAgentDO runtime boundary", () => {
       guardSessionRepoAccess: vi.fn(async () => ({ ok: true as const })),
     };
 
-    const readiness = agent.ensureReady();
+    const readiness = agent.ensureRuntimeReadyAndDispatchNextTurn();
     await readinessEntered.promise;
     const chat = agent.handleUserChatMessage(
       connection("connection-1"),
@@ -355,7 +357,10 @@ describe("SessionAgentDO runtime boundary", () => {
       content: directPrepared.content,
       attachmentIds: [],
     }));
-    const claimPendingMessage = vi.fn((): ClaimedTurn => {
+    const claimPendingMessage = vi.fn((): ClaimedTurn | null => {
+      if (agent.serverState.activeUserMessageId || !agent.state.pendingUserMessage) {
+        return null;
+      }
       agent.serverState = {
         ...agent.serverState,
         activeUserMessageId: USER_MESSAGE_ID,
@@ -384,7 +389,7 @@ describe("SessionAgentDO runtime boundary", () => {
       send: vi.fn(),
     } as unknown as Connection;
 
-    const readiness = agent.ensureReady();
+    const readiness = agent.ensureRuntimeReadyAndDispatchNextTurn();
     await readinessEntered.promise;
     const chat = agent.handleUserChatMessage(
       directConnection,
@@ -397,7 +402,7 @@ describe("SessionAgentDO runtime boundary", () => {
     releaseReadiness.resolve();
     await Promise.all([readiness, chat]);
 
-    expect(claimPendingMessage).toHaveBeenCalledOnce();
+    expect(claimPendingMessage).toHaveBeenCalledTimes(2);
     expect(claimPreparedMessage).not.toHaveBeenCalled();
     expect(spawnClaimedTurn).toHaveBeenCalledOnce();
     expect(directConnection.send).toHaveBeenCalledWith(expect.stringContaining(
@@ -415,7 +420,7 @@ describe("SessionAgentDO runtime boundary", () => {
       }),
     });
 
-    const readiness = await agent.ensureReady();
+    const readiness = await agent.ensureRuntimeReadyAndDispatchNextTurn();
 
     expect(readiness.ok).toBe(true);
     expect(agent.serverState.activeUserMessageId).toBeNull();
@@ -442,7 +447,7 @@ describe("SessionAgentDO runtime boundary", () => {
       boundaryEntered.resolve();
       await releaseBoundary.promise;
     });
-    const readiness = agent.ensureReady();
+    const readiness = agent.ensureRuntimeReadyAndDispatchNextTurn();
     await boundaryEntered.promise;
 
     const handled = await agent.handleWebhookChunks(

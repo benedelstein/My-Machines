@@ -158,7 +158,8 @@ Phase 2 is independently valuable and must not depend on the runtime migration
 engine. It introduces:
 
 - `RuntimeBoundaryMutex` and `RuntimeBoundaryLease`;
-- public `ensureReady()` plus private `_ensureReady(lease)`;
+- one `ensureRuntimeReadyAndDispatchNextTurn()` orchestrator plus private readiness-only
+  `_ensureReady(lease)`;
 - final readiness, conflict check, and synchronous `beginTurn()` under one
   mutex ownership interval;
 - the split between synchronous pending-turn claim and asynchronous dispatch;
@@ -988,8 +989,8 @@ runtime boundary and extends ownership through `beginTurn()`.
 Sprite operations must not block all Durable Object events because inbound
 webhooks need to complete an existing turn.
 
-This is not the current webhook behavior being changed. Today regular
-`ensureReady()`/provisioning does not wrap webhook RPC handlers.
+This is not the current webhook behavior being changed. Regular
+`ensureRuntimeReadyAndDispatchNextTurn()` does not wrap webhook RPC handlers.
 `blockConcurrencyWhile` is currently used by `handleInit`, so only that durable
 initialization window globally gates other events. The proposed application
 mutex is selective: webhook handlers never acquire it.
@@ -1027,34 +1028,51 @@ class RuntimeBoundaryMutex {
 Production code should use a tested mutex implementation with rejection-safe
 tail handling, but retain this behavior.
 
-#### Plain readiness callers serialize and re-evaluate
+#### Admission callers serialize and re-evaluate readiness
 
-There is no separate `ensureReadyPromise`. Every public `ensureReady()` call
-enters the same Durable Object method, which owns the mutex and calls its private
-`_ensureReady(lease)` after the preceding owner releases it. The DO reads its
-current state after acquisition, so every caller re-evaluates rather than
-capturing earlier state. The second pass is intentionally cheap when the first
-pass already made every migration revision current.
+There is no separate `ensureReadyPromise`. Every
+`ensureRuntimeReadyAndDispatchNextTurn()` call enters
+the same admission method, which owns the mutex and calls private
+`_ensureReady(lease)` after the preceding owner releases it. `_ensureReady` only
+prepares the runtime; admission then claims at most one turn before releasing
+the boundary, and dispatch performs process I/O afterward. The DO reads current
+state after acquisition, so every caller re-evaluates rather than capturing
+earlier state.
 
 ```ts
-async ensureReady(): Promise<EnsureReadyResult> {
-  const result = await this.runtimeBoundaryMutex.runExclusive(async (lease) => {
+async admitNextTurn(preparedMessage?: PreparedChatMessage) {
+  return this.runtimeBoundaryMutex.runExclusive(async (lease) => {
+    this.chatDispatchService.recoverInterruptedClaim();
     const readiness = await this._ensureReady(lease);
     if (!readiness.ok || readiness.value.outcome !== "ready") {
-      return { readiness, pendingTurn: null };
+      return { readiness, admission: null };
     }
 
-    // This claim is synchronous and occurs before the boundary is released.
+    // Pending initial work always takes priority over a prepared direct message.
     const pendingTurn = this.chatDispatchService.claimPendingMessage();
-    return { readiness, pendingTurn };
+    if (pendingTurn) {
+      return { readiness, admission: { source: "pending", turn: pendingTurn } };
+    }
+    if (preparedMessage && !this.serverState.activeUserMessageId) {
+      const turn = this.chatDispatchService.claimPreparedMessage(preparedMessage);
+      return { readiness, admission: { source: "prepared", turn } };
+    }
+    return { readiness, admission: null };
   });
+}
 
-  // Process I/O happens after activeUserMessageId is durable and after the
-  // selective runtime boundary is released.
-  if (result.pendingTurn) {
-    await this.chatDispatchService.spawnClaimedTurn(result.pendingTurn);
-  }
-  return result.readiness;
+async ensureRuntimeReadyAndDispatchNextTurn(
+  preparedMessage?: PreparedChatMessage,
+) {
+  return this.keepAliveWhile(async () => {
+    const result = await this.admitNextTurn(preparedMessage);
+    // Process I/O happens after activeUserMessageId is durable and after the
+    // selective runtime boundary is released.
+    if (result.admission) {
+      await this.chatDispatchService.spawnClaimedTurn(result.admission.turn);
+    }
+    return mapDispatchResult(result, preparedMessage);
+  });
 }
 ```
 
@@ -1072,7 +1090,7 @@ profiling later shows the cheap serialized recheck is material, coalescing can
 be added as an optimization without changing mutex ownership or
 `RuntimeMigrationRepository` semantics.
 
-#### Direct chat claims the turn inside the same mutex
+#### Direct chat uses the same dispatch entry point
 
 Slow, non-mutating preparation may happen first. The final readiness pass,
 conflict check, state persistence, and `beginTurn()` happen under the runtime
@@ -1087,23 +1105,15 @@ async function handleUserChatMessage(
   // the message, mutate client/server state, or begin the turn.
   const preparedMessage = await chatDispatchService.prepareMessage(payload);
 
-  // Internally acquires the one mutex, calls private `_ensureReady(lease)`,
-  // checks for a conflict, and synchronously claims without another await.
-  const claim = await this.admitPreparedTurn(preparedMessage);
+  // The same orchestrator used by init/connect gives pending initial work
+  // priority, otherwise synchronously claims this prepared message.
+  const admission = await this.ensureRuntimeReadyAndDispatchNextTurn(
+    preparedMessage,
+  );
 
-  if (!claim.ok) {
-    sendChatFailure(connection, claim.error);
+  if (!admission.ok) {
+    sendChatFailure(connection, admission.error);
     return;
-  }
-
-  // The mutex may be released before spawn. activeUserMessageId is already
-  // durable, so later readiness calls defer process-affecting work.
-  const spawn = await chatDispatchService.spawnClaimedTurn(claim.value);
-  if (!spawn.ok) {
-    turnCoordinator.handleTurnSpawnFailed(
-      claim.value.userMessageId,
-      spawn.error.message,
-    );
   }
 }
 ```
@@ -1111,13 +1121,15 @@ async function handleUserChatMessage(
 If spawn fails, the existing turn-failure path clears active state. A later
 readiness event can retry pending migration work.
 
-Calling the public `ensureReady()` from inside `runExclusive` would try to
-acquire the same non-reentrant mutex and deadlock. Calling it only before
-`runExclusive` would still leave the post-resolution gap. Direct chat therefore
-enters the DO's private `admitPreparedTurn()`, which reuses its private
-`_ensureReady(lease)` body while it already owns the one runtime boundary. This
-is a second readiness comparison, not a second mutex; normally the migration
-record makes it a local no-op.
+Direct chat prepares its non-mutating input first, then passes it to the same
+`ensureRuntimeReadyAndDispatchNextTurn()` orchestrator used by init and
+connection events. Its
+admission stage owns the one mutex acquisition, calls readiness-only
+`_ensureReady(lease)`, gives a pending initial message priority, and otherwise
+claims the prepared direct message without another await. The dispatch stage
+then performs process I/O outside the boundary. This avoids both a second
+orchestration path and the post-readiness admission gap without making readiness
+itself responsible for accepting or spawning work.
 
 #### Why inbound webhooks stay outside
 
@@ -1135,12 +1147,14 @@ is unable to make the session idle.
 #### Mutex ownership is orchestration-level and non-reentrant
 
 The coordinator does not acquire `RuntimeBoundaryMutex` internally. The Durable
-Object owns the mutex, private `_ensureReady(lease)` implementation, and private
-`admitPreparedTurn()` orchestration. It delegates cohesive provisioning and turn
-operations to their existing services rather than introducing a second
-orchestration object. Public `ensureReady()` and direct-chat admission are the
-only normal paths that acquire the mutex. The mutex yields an opaque branded
-lease, and every internal method that assumes ownership requires that lease:
+Object owns the mutex and private `_ensureReady(lease)` implementation. It
+delegates cohesive provisioning and turn operations to their existing services
+rather than introducing a second orchestration object.
+`ensureRuntimeReadyAndDispatchNextTurn()`, with an optional prepared direct
+message, is the one normal orchestration entry;
+its `admitNextTurn()` stage acquires the mutex. The mutex yields an opaque
+branded lease, and every internal method that assumes ownership requires that
+lease:
 
 ```ts
 await this.runtimeBoundaryMutex.runExclusive(async (lease) => {
@@ -1158,8 +1172,7 @@ lease is module-private and is not exposed through a Durable Object/RPC entry
 point.
 
 The lease is a compile-time ownership guard, not a temporal type: TypeScript
-cannot prevent code from retaining a token after the callback returns or from
-calling public `ensureReady()` while already holding one. Keep focused runtime
+cannot prevent code from retaining a token after the callback returns. Keep focused runtime
 tests for FIFO release and non-reentrant call paths, but do not use tests as the
 sole enforcement of the ordinary ownership precondition.
 
@@ -1216,19 +1229,20 @@ private async _ensureReady(
 }
 ```
 
-`_ensureReady(lease)` is the private body of the existing public `ensureReady()`. It
-does not replace the public method and it never acquires the mutex itself. That
-lets both plain readiness and direct chat reuse the same work while already
-holding the boundary.
+`_ensureReady(lease)` is the readiness-only prerequisite used by
+`admitNextTurn()`. It never acquires the mutex, claims a message, or spawns a
+process. That lets background and direct admission reuse the same preparation
+while already holding the boundary.
 
 The full orchestration order is load-bearing:
 
 1. acquire the selective runtime boundary;
-2. `_ensureReady(lease)`: initialization, setup/provisioning, and awaited migrations;
-3. while still inside the boundary, synchronously claim either the pending
+2. recover any interrupted turn claim;
+3. `_ensureReady(lease)`: initialization, setup/provisioning, and awaited migrations;
+4. while still inside the boundary, synchronously claim either the pending
   initial message or a direct chat turn;
-4. release the boundary;
-5. perform process attach/spawn I/O for the already-claimed turn.
+5. release the boundary;
+6. perform process attach/spawn I/O for the already-claimed turn.
 
 The existing `maybeDispatchPendingMessage()` combines a synchronous state claim
 with asynchronous process I/O. The implementation should split it into
@@ -1244,14 +1258,14 @@ Later stages never run past a migration failure or active-turn deferral.
 Entry-point behavior:
 
 
-| Entry point             | Readiness behavior                                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `handleInit`            | await only `blockConcurrencyWhile(initialize)`; queue readiness through `keepAliveWhile`; preserve create latency        |
-| `onConnect`             | send current snapshot/history; queue readiness on the shared mutex                                                       |
-| direct chat             | prepare without mutation, enter the shared runtime mutex, run `_ensureReady(lease)`, synchronously claim, release, then spawn |
-| pending initial message | plain `ensureReady()` runs `_ensureReady(lease)`, synchronously claims pending inside the mutex, releases, then spawns        |
-| agent webhook           | never enter readiness mutex                                                                                              |
-| turn completion         | clear active state, then queue readiness for deferred work                                                               |
+| Entry point             | Readiness behavior                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `handleInit`            | await only `blockConcurrencyWhile(initialize)`; queue the shared orchestrator; preserve create latency                               |
+| `onConnect`             | send current snapshot/history; queue `ensureRuntimeReadyAndDispatchNextTurn()` on the shared mutex                                   |
+| direct chat             | prepare without mutation, call `ensureRuntimeReadyAndDispatchNextTurn(prepared)`, claim under the mutex, release, then spawn          |
+| pending initial message | the shared orchestrator runs readiness, synchronously claims pending inside the mutex, releases, then spawns                          |
+| agent webhook           | never enter readiness mutex                                                                                                          |
+| turn completion         | clear active state, then queue `ensureRuntimeReadyAndDispatchNextTurn()` for deferred work                                            |
 
 
 
@@ -1265,8 +1279,8 @@ new turn can be claimed until the range finishes. A concurrent terminal webhook
 can only move the state from active to idle, which does not make an in-progress
 migration unsafe. If a turn is active at the check, the range returns
 the range-level `deferred_active_turn` outcome without a migration ID. Turn
-completion queues `ensureReady()` again, and that later idle pass evaluates the
-full registry normally.
+completion queues `ensureRuntimeReadyAndDispatchNextTurn()` again, and that
+later idle pass evaluates the full registry normally.
 
 ```ts
 if (context.getServerState().activeUserMessageId !== null) {
@@ -1713,7 +1727,7 @@ sequenceDiagram
     participant C as RuntimeMigrationCoordinator
     participant R as RuntimeMigrationRepository
     participant X as Sprite or connector
-    participant R as Later ensureReady
+    participant Q as Later readiness
 
     S->>C: ensureMigration(id, context, lease)
     C->>R: compare desired revision
@@ -1724,10 +1738,10 @@ sequenceDiagram
     C->>R: record applied revision
     C-->>S: applied
     S->>S: mark setup task complete
-    R->>C: ensure registry
+    Q->>C: ensure registry
     C->>R: compare same revision
     R-->>C: already applied
-    C-->>R: no external call
+    C-->>Q: no external call
 ```
 
 

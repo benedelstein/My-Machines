@@ -278,21 +278,21 @@ synchronous transition from idle state to `beginTurn()`. The mutex SHALL yield
 an opaque branded lease required by private readiness and mutating coordinator
 methods that assume boundary ownership.
 
-#### Scenario: Plain readiness is called concurrently
-- **WHEN** multiple init or connection events call `ensureReady()` while one call is in flight
+#### Scenario: Background dispatch is called concurrently
+- **WHEN** multiple init or connection events call `ensureRuntimeReadyAndDispatchNextTurn()` while one call is in flight
 - **THEN** each call SHALL queue on the same runtime-boundary mutex and the later call SHALL re-evaluate current state after acquiring it
 
 #### Scenario: Earlier readiness made every migration current
-- **WHEN** a queued readiness call acquires the mutex after an earlier successful pass
+- **WHEN** a queued dispatch call acquires the mutex after an earlier successful readiness pass
 - **THEN** it SHALL rerun the pipeline and normally skip migration apply through local migration-record equality without external calls
 
 #### Scenario: Direct chat preparation yields
 - **WHEN** attachment or message preparation awaits before a direct chat starts
-- **THEN** preparation SHALL avoid state mutation, the handler SHALL enter the shared runtime-boundary mutex afterward, call private `_ensureReady(lease, preparedInputs)`, and synchronously claim the turn without another await between the ready decision and active-turn persistence
+- **THEN** preparation SHALL avoid state mutation, the admission orchestrator SHALL enter the shared runtime-boundary mutex afterward, recover an interrupted claim, call private `_ensureReady(lease, preparedInputs)`, and synchronously claim the turn without another await between the ready decision and active-turn persistence
 
 #### Scenario: Direct chat already owns the boundary
 - **WHEN** direct chat needs to run readiness while holding the non-reentrant runtime mutex
-- **THEN** it SHALL pass the current lease to private `_ensureReady(lease, ...)` and SHALL NOT call public `ensureReady()` or acquire a second mutex
+- **THEN** the admission orchestrator SHALL pass the current lease to private `_ensureReady(lease, ...)` and SHALL NOT acquire a second mutex
 
 #### Scenario: Chat arrives during a migration
 - **WHEN** readiness mutation already owns the runtime boundary
@@ -304,7 +304,7 @@ methods that assume boundary ownership.
 
 #### Scenario: Pending initial message is ready
 - **WHEN** `_ensureReady(lease)` reports current state and `pendingUserMessage` exists
-- **THEN** public `ensureReady()` SHALL synchronously claim that pending turn inside the runtime boundary, release the boundary, and then perform process attach/spawn I/O
+- **THEN** the admission orchestrator SHALL synchronously claim that pending turn inside the runtime boundary, release the boundary, and the dispatch orchestrator SHALL then perform process attach/spawn I/O
 
 #### Scenario: Initialization runs
 - **WHEN** `handleInit` mutates durable initialization state
@@ -316,7 +316,7 @@ methods that assume boundary ownership.
 
 #### Scenario: Coordinator mutation has no independent entry point
 - **WHEN** code outside readiness or its nested setup execution needs runtime migration work
-- **THEN** it SHALL queue public `ensureReady()` rather than invoking a mutating coordinator method directly
+- **THEN** it SHALL queue the shared dispatch orchestrator rather than invoking a mutating coordinator method directly
 
 #### Scenario: Ungated code calls an ownership-requiring method
 - **WHEN** code attempts to call `_ensureReady(lease, ...)`, `ensureMigrations(context, lease)`, or `ensureMigration(id, context, lease)` without the current runtime-boundary lease
@@ -324,16 +324,17 @@ methods that assume boundary ownership.
 
 #### Scenario: Runtime behavior still needs verification
 - **WHEN** code holds or receives a branded lease
-- **THEN** focused tests SHALL still verify FIFO release and that nested paths do not call public `ensureReady()` or otherwise reacquire the non-reentrant mutex
+- **THEN** focused tests SHALL still verify FIFO release and that nested paths do not reacquire the non-reentrant mutex
 
 #### Scenario: Agent webhook arrives during regular readiness
 - **WHEN** a chunk or event webhook arrives while the application runtime mutex is owned
 - **THEN** webhook handling SHALL not acquire that mutex and SHALL remain dispatchable; only the existing `handleInit` `blockConcurrencyWhile` initialization window may globally gate events
 
 ### Requirement: Readiness has explicit stage order and outcomes
-The system SHALL run initialization, setup/provisioning, awaited runtime
-migrations, and pending dispatch in that order and SHALL return a typed outcome
-without an ambiguous progress value.
+The system SHALL run initialization, setup/provisioning, and awaited runtime
+migrations in that order and SHALL return a typed outcome. Admission SHALL use
+that outcome as a prerequisite before claiming pending work, without an
+ambiguous progress value.
 
 #### Scenario: Setup remains incomplete
 - **WHEN** provisioning does not reach terminal setup success
@@ -349,11 +350,11 @@ without an ambiguous progress value.
 
 #### Scenario: Pending initial message exists
 - **WHEN** setup is complete and the migration range returns `current` or `applied`
-- **THEN** readiness SHALL claim the pending initial message within the runtime boundary and SHALL perform process attach/spawn after releasing that boundary
+- **THEN** the admission orchestrator SHALL claim the pending initial message within the runtime boundary and SHALL perform process attach/spawn after releasing that boundary
 
 #### Scenario: Init handler returns
 - **WHEN** durable session initialization succeeds
-- **THEN** `handleInit` SHALL queue readiness through the Durable Object lifetime mechanism without awaiting provisioning or migration completion
+- **THEN** `handleInit` SHALL queue the shared readiness/admission/dispatch orchestrator through the Durable Object lifetime mechanism without awaiting provisioning or migration completion
 
 ### Requirement: Active turns defer the complete migration range
 The system SHALL use persisted `activeUserMessageId` as the authoritative turn
