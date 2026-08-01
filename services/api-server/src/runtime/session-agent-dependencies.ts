@@ -80,7 +80,6 @@ export interface SessionAgentRepositories {
   environmentSnapshotRepository: SessionEnvironmentSnapshotRepository;
   pendingChunkRepository: PendingChunkRepository;
   setupOutputRepository: SetupOutputRepository;
-  serverState: ServerState;
 }
 
 export interface SessionAgentDependencies {
@@ -154,7 +153,6 @@ export function createSessionAgentRepositories(
     environmentSnapshotRepository,
     pendingChunkRepository,
     setupOutputRepository,
-    serverState: serverStateRepository.get(),
   };
 }
 
