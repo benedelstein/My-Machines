@@ -13,8 +13,13 @@ import {
 } from "@repo/shared";
 import type { Env } from "@/shared/types";
 import { Agent, type Connection } from "agents";
-import type { ServerState } from
+import type { SpriteLifecycleClient } from "@repo/sprites-client";
+import type { SecretRepository } from
+  "@/modules/session-agent/repositories/secret.repository";
+import type { ServerStateRepository, ServerState } from
   "@/modules/session-agent/repositories/server-state.repository";
+import type { SessionEnvironmentSnapshotRepository } from
+  "@/modules/session-agent/repositories/session-environment-snapshot.repository";
 import { createLogger, initializeLogger } from "@/shared/logging";
 import type { UIMessage, UIMessageChunk } from "ai";
 import type {
@@ -39,12 +44,34 @@ import type {
   LogLevel,
   ChatMessageEvent,
 } from "@repo/shared";
-import type { FinishedAssistantTurn } from
+import type {
+  AgentTurnCoordinator,
+  FinishedAssistantTurn,
+} from
   "@/modules/session-agent/services/agent-turn-coordinator.service";
+import type { SpriteAgentProcessManager } from
+  "@/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
 import type {
   ClaimedTurn,
   PreparedChatMessage,
+  SessionChatDispatchService,
 } from "@/modules/session-agent/services/session-chat-dispatch.service";
+import type { SessionConnectorService } from
+  "@/modules/session-agent/services/session-connector.service";
+import type { SessionGitProxyService } from
+  "@/modules/session-agent/services/session-git-proxy.service";
+import type { SessionProviderConnectionService } from
+  "@/modules/session-agent/services/session-provider-connection.service";
+import type { SessionProvisionService } from
+  "@/modules/session-agent/services/session-provision.service";
+import type { SessionQueryService } from
+  "@/modules/session-agent/services/session-query.service";
+import type { SessionSetupRunService } from
+  "@/modules/session-agent/services/session-setup-run.service";
+import type { SessionSummaryService } from
+  "@/modules/session-agent/services/session-summary.service";
+import type { SessionSyncService } from
+  "@/modules/session-agent/services/session-sync.service";
 import { normalizePullRequestState } from "@/modules/session-agent/utils/session-agent-pull-request-state.utils";
 import { synthesizeSessionStatus } from "@/modules/session-agent/utils/session-status.utils";
 import {
@@ -52,11 +79,18 @@ import {
   type RuntimeBoundaryLease,
 } from "./runtime-boundary-mutex";
 import { getInitialClientState } from "@/modules/session-agent/utils/initial-client-state.utils";
+import type { SessionAgentAttachmentProvider } from "./session-agent-attachment-provider";
+import type { SessionAutoPullRequestService } from
+  "./session-auto-pull-request.service";
+import type { SessionPullRequestLifecycleService } from
+  "./session-pull-request-lifecycle.service";
+import type { SessionRepoAccessLifecycleService } from
+  "./session-repo-access-lifecycle.service";
+import type { SessionTurnNotificationService } from
+  "./session-turn-notification.service";
 import {
   createSessionAgentDependencies,
   createSessionAgentRepositories,
-  type SessionAgentDependencies,
-  type SessionAgentRepositories,
 } from "./session-agent-dependencies";
 
 type EnsureReadyOutcome =
@@ -83,32 +117,28 @@ interface AgentStateInternalAccess {
 }
 export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAgentRpc {
   private readonly logger: Logger;
-  private readonly spriteLifecycleClient: SessionAgentDependencies["spriteLifecycleClient"];
-  private readonly secretRepository: SessionAgentRepositories["secretRepository"];
-  private readonly serverStateRepository: SessionAgentRepositories["serverStateRepository"];
-  private readonly environmentSnapshotRepository:
-    SessionAgentRepositories["environmentSnapshotRepository"];
-  private readonly attachmentService: SessionAgentDependencies["attachmentService"];
+  private readonly spriteLifecycleClient: SpriteLifecycleClient;
+  private readonly secretRepository: SecretRepository;
+  private readonly serverStateRepository: ServerStateRepository;
+  private readonly environmentSnapshotRepository: SessionEnvironmentSnapshotRepository;
+  private readonly attachmentService: SessionAgentAttachmentProvider;
   /** In-memory ServerState mirror — written through via updateServerState() */
   private serverState: ServerState;
-  private readonly turnCoordinator: SessionAgentDependencies["turnCoordinator"];
-  private readonly processManager: SessionAgentDependencies["processManager"];
-  private readonly provisionService: SessionAgentDependencies["provisionService"];
-  private readonly chatDispatchService: SessionAgentDependencies["chatDispatchService"];
-  private readonly setupRunService: SessionAgentDependencies["setupRunService"];
-  private readonly providerConnectionService:
-    SessionAgentDependencies["providerConnectionService"];
-  private readonly sessionConnectorService: SessionAgentDependencies["sessionConnectorService"];
-  private readonly gitProxyService: SessionAgentDependencies["gitProxyService"];
-  private readonly queryService: SessionAgentDependencies["queryService"];
-  private readonly sessionSummaryService: SessionAgentDependencies["sessionSummaryService"];
-  private readonly syncService: SessionAgentDependencies["syncService"];
-  private readonly pullRequestLifecycleService:
-    SessionAgentDependencies["pullRequestLifecycleService"];
-  private readonly repoAccessLifecycleService:
-    SessionAgentDependencies["repoAccessLifecycleService"];
-  private readonly autoPullRequestService: SessionAgentDependencies["autoPullRequestService"];
-  private readonly turnNotificationService: SessionAgentDependencies["turnNotificationService"];
+  private readonly turnCoordinator: AgentTurnCoordinator;
+  private readonly processManager: SpriteAgentProcessManager;
+  private readonly provisionService: SessionProvisionService;
+  private readonly chatDispatchService: SessionChatDispatchService;
+  private readonly setupRunService: SessionSetupRunService;
+  private readonly providerConnectionService: SessionProviderConnectionService;
+  private readonly sessionConnectorService: SessionConnectorService;
+  private readonly gitProxyService: SessionGitProxyService;
+  private readonly queryService: SessionQueryService;
+  private readonly sessionSummaryService: SessionSummaryService;
+  private readonly syncService: SessionSyncService;
+  private readonly pullRequestLifecycleService: SessionPullRequestLifecycleService;
+  private readonly repoAccessLifecycleService: SessionRepoAccessLifecycleService;
+  private readonly autoPullRequestService: SessionAutoPullRequestService;
+  private readonly turnNotificationService: SessionTurnNotificationService;
   private readonly runtimeBoundaryMutex = new RuntimeBoundaryMutex();
   private initializeSessionStatePromise: Promise<HandleInitResult> | null = null;
 
@@ -133,7 +163,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.secretRepository = repositories.secretRepository;
     this.serverStateRepository = repositories.serverStateRepository;
     this.environmentSnapshotRepository = repositories.environmentSnapshotRepository;
-    this.serverState = repositories.serverState;
+    this.serverState = this.serverStateRepository.get();
 
     const dependencies = createSessionAgentDependencies({
       env,
