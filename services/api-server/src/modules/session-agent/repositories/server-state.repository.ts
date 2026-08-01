@@ -15,6 +15,8 @@ import { StartupToolchainCheckpoint } from "@/shared/types/startup-toolchain";
 export const ServerStateSchema = z.object({
   /** True after handleInit has been called (sets sessionId, userId, etc.) */
   initialized: z.boolean(),
+  /** Durable guard preventing new runtime migration attempts once teardown begins. */
+  teardownStarted: z.boolean(),
   /** The DO's sessionId — null until handleInit is called (DO name bug workaround) */
   sessionId: z.string().nullable(),
   /** The user id who owns the session */
@@ -52,6 +54,7 @@ export type ServerState = z.infer<typeof ServerStateSchema>;
 function defaultServerState(): ServerState {
   return {
     initialized: false,
+    teardownStarted: false,
     sessionId: null,
     userId: null,
     spriteName: null,

@@ -63,6 +63,8 @@ import type { SessionGitProxyService } from
   "@/modules/session-agent/services/session-git-proxy.service";
 import type { SessionProviderConnectionService } from
   "@/modules/session-agent/services/session-provider-connection.service";
+import type { RuntimeMigrationCoordinator } from
+  "@/modules/session-agent/services/runtime-migration-coordinator.service";
 import type { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import type { SessionQueryService } from
@@ -96,13 +98,15 @@ import {
 
 type EnsureReadyOutcome =
   | { outcome: "ready" }
-  | { outcome: "setup_incomplete" };
+  | { outcome: "setup_incomplete" }
+  | { outcome: "deferred_active_turn" };
 
 type EnsureReadyError = {
   code:
     | "SESSION_NOT_INITIALIZED"
     | "INITIALIZATION_FAILED"
-    | "PROVISIONING_FAILED";
+    | "PROVISIONING_FAILED"
+    | "RUNTIME_MIGRATION_FAILED";
   message: string;
 };
 
@@ -134,6 +138,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private serverState: ServerState;
   private readonly turnCoordinator: AgentTurnCoordinator;
   private readonly processManager: SpriteAgentProcessManager;
+  private readonly runtimeMigrationCoordinator: RuntimeMigrationCoordinator;
   private readonly provisionService: SessionProvisionService;
   private readonly chatDispatchService: SessionChatDispatchService;
   private readonly setupRunService: SessionSetupRunService;
@@ -205,6 +210,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.attachmentService = dependencies.attachmentService;
     this.turnCoordinator = dependencies.turnCoordinator;
     this.processManager = dependencies.processManager;
+    this.runtimeMigrationCoordinator = dependencies.runtimeMigrationCoordinator;
     this.provisionService = dependencies.provisionService;
     this.chatDispatchService = dependencies.chatDispatchService;
     this.setupRunService = dependencies.setupRunService;
@@ -589,7 +595,9 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       if (boundary.readiness.value.outcome !== "ready") {
         return failure({
           code: "READINESS_FAILED",
-          message: "Session setup is not complete",
+          message: boundary.readiness.value.outcome === "deferred_active_turn"
+            ? "Agent is already handling a message"
+            : "Session setup is not complete",
         });
       }
       if (boundary.admission?.source !== "prepared") {
@@ -625,6 +633,13 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       }
     }
 
+    if (this.serverState.teardownStarted) {
+      return failure({
+        code: "RUNTIME_MIGRATION_FAILED",
+        message: "Runtime readiness cannot begin during session teardown",
+      });
+    }
+
     try {
       await this.provisionService.ensureProvisioned();
     } catch (error) {
@@ -634,11 +649,27 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       });
     }
 
-    return success({
-      outcome: this.state.sessionSetupRun?.status === "completed"
-        ? "ready"
-        : "setup_incomplete",
-    });
+    if (this.state.sessionSetupRun?.status !== "completed") {
+      return success({ outcome: "setup_incomplete" });
+    }
+
+    const migrations = await this.runtimeMigrationCoordinator.ensureMigrations(
+      {
+        getServerState: () => this.serverState,
+        isTeardownStarted: () => this.serverState.teardownStarted,
+      },
+      _lease,
+    );
+    if (!migrations.ok) {
+      return failure({
+        code: "RUNTIME_MIGRATION_FAILED",
+        message: migrations.error.message,
+      });
+    }
+    if (migrations.value.outcome === "deferred_active_turn") {
+      return success({ outcome: "deferred_active_turn" });
+    }
+    return success({ outcome: "ready" });
   }
 
   /**
@@ -784,6 +815,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   async handleDeleteSession(): Promise<HandleDeleteSessionResult> {
+    this.updateServerState({ teardownStarted: true });
     // Force-kill any running vm-agent process before we tear down the sprite.
     try {
       await this.processManager.kill();

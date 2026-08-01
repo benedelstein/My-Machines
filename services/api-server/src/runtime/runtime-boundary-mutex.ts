@@ -1,9 +1,8 @@
-declare const runtimeBoundaryLeaseBrand: unique symbol;
+import type { RuntimeBoundaryLease } from
+  "@/modules/session-agent/types/runtime-boundary.types";
 
-/** Compile-time proof that the caller owns the session runtime boundary. */
-export type RuntimeBoundaryLease = {
-  readonly [runtimeBoundaryLeaseBrand]: true;
-};
+export type { RuntimeBoundaryLease } from
+  "@/modules/session-agent/types/runtime-boundary.types";
 
 /**
  * Serializes application-level readiness mutations and turn admission.
