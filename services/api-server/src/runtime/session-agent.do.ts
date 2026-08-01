@@ -198,7 +198,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         persistPushedBranch: (branch) =>
           this.sessionSummaryService.persistPushedBranch(branch),
         onTurnFinished: (turn) => this.handleTurnFinished(turn),
-        onTurnSettled: () => this.queueEnsureRuntimeReadyAndDispatchNextTurn(),
+        onTurnSettled: () => this.startRuntimeReadinessAndDispatch(),
       },
     });
     this.spriteLifecycleClient = dependencies.spriteLifecycleClient;
@@ -430,7 +430,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     }
 
     // Always call ensureReady — idempotent, skips completed steps via serverState checkpoints
-    this.queueEnsureRuntimeReadyAndDispatchNextTurn();
+    this.startRuntimeReadinessAndDispatch();
     this.providerConnectionService.queueRefresh();
   }
 
@@ -641,7 +641,10 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     });
   }
 
-  private queueEnsureRuntimeReadyAndDispatchNextTurn(): void {
+  /**
+   * Starts the runtime readiness and dispatch process asynchronously
+   */
+  private startRuntimeReadinessAndDispatch(): void {
     void this.ensureRuntimeReadyAndDispatchNextTurn()
       .then((readiness) => {
         if (!readiness.ok) {
@@ -668,7 +671,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     try {
       const initResult = await initPromise;
       if (initResult.ok) {
-        this.queueEnsureRuntimeReadyAndDispatchNextTurn();
+        this.startRuntimeReadinessAndDispatch();
       }
       return initResult;
     } finally {
