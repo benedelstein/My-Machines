@@ -144,13 +144,13 @@ export class SessionProvisionService {
     if (this.ensureProvisionedPromise) {
       return this.ensureProvisionedPromise;
     }
-    this.ensureProvisionedPromise = this.provision().finally(() => {
+    this.ensureProvisionedPromise = this._provision().finally(() => {
       this.ensureProvisionedPromise = null;
     });
     return this.ensureProvisionedPromise;
   }
 
-  private async provision(): Promise<void> {
+  private async _provision(): Promise<void> {
     this.spriteName = this.getServerState().spriteName;
     const setupRun = this.getClientState().sessionSetupRun;
     if (!setupRun) { return; }
