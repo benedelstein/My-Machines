@@ -1,8 +1,8 @@
 # My Machines
 
-My Machines is a background agent service to manage agent-driven software development teams.  It was inspired by [Ramp's background-agent](https://builders.ramp.com/post/why-we-built-our-background-agent).
+**My Machines** gives agents their own computers. It was inspired by [Ramp's background-agent](https://builders.ramp.com/post/why-we-built-our-background-agent).
 
-It was designed with these ideas in mind:
+**My Machines** was designed with these ideas in mind:
 
 - **Bring your own harness** — connect your Claude Code or Codex subscription and use their native harness (more providers to come). No API keys and no custom harness.
 - **Complete agent environments** - each agent gets its own stateful computer to work within, just like a human developer would use.
@@ -10,11 +10,11 @@ It was designed with these ideas in mind:
 
 ## How to Use It
 
-Visit [https://www.mymachines.dev](https://www.mymachines.dev) to get started. Authenticate with your Github account and install the Github app to connect your repositories, connect your Claude Code or Codex subscription, and start creating tasks.
+Visit [https://www.mymachines.dev](https://www.mymachines.dev) to get started. Authenticate with your Github account and install the Github app to connect your repositories, connect your Claude Code or Codex subscription, and start working.
 
 ## Architecture
 
-The system is designed around Cloudflare Durable Objects for session coordination and persistence. Each session gets its own Durable Object, which provisions a VM and coordinates between the agent running on the VM and the client.
+The system is designed around Cloudflare Durable Objects for session coordination and persistence. Each session gets its own Durable Object, which provisions a VM (fly.io Sprites) and coordinates between the agent running on the VM and connected client(s).
 
 For a detailed architecture map, read [ARCHITECTURE.md](./ARCHITECTURE.md).
 
@@ -53,15 +53,16 @@ This is a typescript monorepo using pnpm and Turbo. The code is organized like s
 
 - **pnpm workspaces** with [Turbo](https://turbo.build/) for monorepo orchestration.
 - **Cloudflare Workers** for the API server.
-- **[Cloudflare Agents SDK](https://agents.cloudflare.com/)** for managing message state and streaming data between client and server with websockets.
+- **[Cloudflare Agents SDK](https://agents.cloudflare.com/)** for managing message state and streaming data between client and server with websockets (Agents SDK wraps Durable Objects)
 - **[Fly.io Sprites](https://sprites.dev/)** for stateful sandbox VMs.
 - **Next.js** for the web client.
+- **Swift/SwiftUI/UIKit** for iOS client
 - **[AI SDK](https://ai-sdk.dev/)** for abstracting over LLM data types and harnesses.
 - **[Zod](https://zod.dev/)** for runtime type validation.
 
 ### Authentication and Authorization
 
-Users authenticate with their Github account, and then install the Github app to authorize My Machines to access their repositories.
+Users authenticate with their Github account (more auth methods may be added later), and then install the Github app to authorize **My Machines** to access their repositories.
 Users authorize the Github app to access their personal organization, or an organization that they own.
 
 If you are a member of an organization and your admin has granted access, you will be able to create sessions on all repositories for which:
@@ -218,36 +219,22 @@ SESSION_COOKIE_SECRET=<base64-encoded-32-byte-key>
    database ID, R2 bucket, and Worker route.
 2. Set Worker secrets from `services/api-server`:
 
-```bash
-cd services/api-server
-pnpm wrangler secret put ANTHROPIC_API_KEY # used for ad-hoc generation of session titles, pr descriptions, etc.
-pnpm wrangler secret put OPENAI_API_KEY # used for voice transcription
-pnpm wrangler secret put SPRITES_API_KEY
-pnpm wrangler secret put GITHUB_APP_PRIVATE_KEY
-pnpm wrangler secret put GITHUB_WEBHOOK_SECRET
-pnpm wrangler secret put GITHUB_APP_CLIENT_SECRET
-pnpm wrangler secret put TOKEN_ENCRYPTION_KEY
-pnpm wrangler secret put NATIVE_ACCESS_TOKEN_SIGNING_KEY
-pnpm wrangler secret put WEBSOCKET_TOKEN_SIGNING_KEY
-pnpm wrangler secret put VOICE_TOKEN_SIGNING_KEY
-```
+  Note - `TOKEN_ENCRYPTION_KEY` must be a base64-encoded 32-byte key; the same format
+  is useful for `NATIVE_ACCESS_TOKEN_SIGNING_KEY` and the web app's
+  `SESSION_COOKIE_SECRET`.
 
-`TOKEN_ENCRYPTION_KEY` must be a base64-encoded 32-byte key; the same format
-is useful for `NATIVE_ACCESS_TOKEN_SIGNING_KEY` and the web app's
-`SESSION_COOKIE_SECRET`.
+  ```bash
+  openssl rand -base64 32 | pbcopy
+  ```
 
-```bash
-openssl rand -base64 32 | pbcopy
-```
+3. Apply remote D1 migrations and deploy the Worker:
 
-1. Apply remote D1 migrations and deploy the Worker:
+  ```bash
+  pnpm --filter @repo/api-server db:migrate:prod
+  pnpm --filter @repo/api-server deploy
+  ```
 
-```bash
-pnpm --filter @repo/api-server db:migrate:prod
-pnpm --filter @repo/api-server deploy
-```
-
-1. Deploy the web project and make sure the GitHub App callback, Worker
+4. Deploy the web project and make sure the GitHub App callback, Worker
   `WORKER_URL`, Worker `WEB_ORIGIN`, and web `NEXT_PUBLIC_API_URL` all point at
    the domains you deployed.
 
@@ -280,13 +267,3 @@ webhooks, package boundaries, or external API integrations, read [ARCHITECTURE.m
 
 Before making repo-wide code changes, read [docs/ENGINEERING.md](./docs/ENGINEERING.md). It covers
 validation, package boundaries, logging, error handling, TypeScript style, and design expectations.
-
-General expectations:
-
-- Keep cross-package protocol types in `packages/shared`.
-- Parse external inputs at the boundary before passing values into internal services.
-- Respect workspace import direction: packages do not import apps/services, apps do not import services,
-and services do not import apps.
-- Use structured logging through the shared logger, not production `console.*`.
-- Run the relevant package tests plus `pnpm build`, `pnpm lint`, `pnpm typecheck`, and `pnpm test`
-before opening a pull request.
