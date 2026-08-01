@@ -19,6 +19,8 @@ import { LatestPlanRepository } from
 import { MessageRepository } from "@/modules/session-agent/repositories/message.repository";
 import { PendingChunkRepository } from
   "@/modules/session-agent/repositories/pending-chunk.repository";
+import { RuntimeMigrationRepository } from
+  "@/modules/session-agent/repositories/runtime-migration.repository";
 import type { SqlFn } from "@/modules/session-agent/repositories/repository.types";
 import { migrateAll } from "@/modules/session-agent/repositories/schema-manager.repository";
 import { SecretRepository } from "@/modules/session-agent/repositories/secret.repository";
@@ -44,6 +46,10 @@ import { SessionGitProxyService } from
   "@/modules/session-agent/services/session-git-proxy.service";
 import { SessionProviderConnectionService } from
   "@/modules/session-agent/services/session-provider-connection.service";
+import { RuntimeMigrationCoordinator } from
+  "@/modules/session-agent/services/runtime-migration-coordinator.service";
+import { RUNTIME_MIGRATIONS } from
+  "@/modules/session-agent/services/runtime-migration-registry.service";
 import { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import { SessionQueryService } from "@/modules/session-agent/services/session-query.service";
@@ -79,6 +85,7 @@ export interface SessionAgentRepositories {
   serverStateRepository: ServerStateRepository;
   environmentSnapshotRepository: SessionEnvironmentSnapshotRepository;
   pendingChunkRepository: PendingChunkRepository;
+  runtimeMigrationRepository: RuntimeMigrationRepository;
   setupOutputRepository: SetupOutputRepository;
 }
 
@@ -87,6 +94,7 @@ export interface SessionAgentDependencies {
   attachmentService: SessionAgentAttachmentProvider;
   turnCoordinator: AgentTurnCoordinator;
   processManager: SpriteAgentProcessManager;
+  runtimeMigrationCoordinator: RuntimeMigrationCoordinator;
   provisionService: SessionProvisionService;
   chatDispatchService: SessionChatDispatchService;
   setupRunService: SessionSetupRunService;
@@ -131,6 +139,7 @@ export function createSessionAgentRepositories(
   const serverStateRepository = new ServerStateRepository(sql);
   const environmentSnapshotRepository = new SessionEnvironmentSnapshotRepository(sql);
   const pendingChunkRepository = new PendingChunkRepository(sql);
+  const runtimeMigrationRepository = new RuntimeMigrationRepository(sql);
   const setupOutputRepository = new SetupOutputRepository(sql);
 
   migrateAll(sql, storage, [
@@ -140,6 +149,7 @@ export function createSessionAgentRepositories(
     serverStateRepository,
     environmentSnapshotRepository,
     pendingChunkRepository,
+    runtimeMigrationRepository,
     setupOutputRepository,
     // Migration-only Agents SDK client-state adapter; normal reads/writes stay on the SDK.
     new AgentSdkStateRepository(),
@@ -152,6 +162,7 @@ export function createSessionAgentRepositories(
     serverStateRepository,
     environmentSnapshotRepository,
     pendingChunkRepository,
+    runtimeMigrationRepository,
     setupOutputRepository,
   };
 }
@@ -169,6 +180,7 @@ export function createSessionAgentDependencies(input: {
     latestPlanRepository,
     environmentSnapshotRepository,
     pendingChunkRepository,
+    runtimeMigrationRepository,
     setupOutputRepository,
   } = repositories;
 
@@ -176,6 +188,11 @@ export function createSessionAgentDependencies(input: {
     logger,
     repository: setupOutputRepository,
     broadcastMessage: host.broadcastMessage,
+  });
+  const runtimeMigrationCoordinator = new RuntimeMigrationCoordinator({
+    repository: runtimeMigrationRepository,
+    definitions: RUNTIME_MIGRATIONS,
+    logger: logger.scope("runtime-migration-coordinator"),
   });
   const spriteLifecycleClient = new SpriteLifecycleClient({
     apiKey: env.SPRITES_API_KEY,
@@ -362,6 +379,7 @@ export function createSessionAgentDependencies(input: {
     attachmentService,
     turnCoordinator,
     processManager,
+    runtimeMigrationCoordinator,
     provisionService,
     chatDispatchService,
     setupRunService,

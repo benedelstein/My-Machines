@@ -62,6 +62,7 @@ function createClientState(overrides: Partial<ClientState> = {}): ClientState {
 function createServerState(overrides: Partial<ServerState> = {}): ServerState {
   return {
     initialized: true,
+    teardownStarted: false,
     sessionId: "session-1",
     userId: "user-1",
     spriteName: "sprite-1",
@@ -102,6 +103,11 @@ interface TestAgentAccess {
   provisionService: {
     ensureProvisioned(): Promise<void>;
   };
+  runtimeMigrationCoordinator: {
+    ensureMigrations(...args: unknown[]): Promise<Result<{
+      outcome: "current" | "applied" | "deferred_active_turn";
+    }, object>>;
+  };
   repoAccessLifecycleService: {
     guardSessionRepoAccess(): Promise<{ ok: true }>;
   };
@@ -135,6 +141,7 @@ interface TestAgentAccess {
   providerConnectionService: {
     queueRefresh(): void;
   };
+  testDatabase: ReturnType<typeof createTestDatabase>;
   turnCoordinator: {
     logger: {
       error(...args: unknown[]): void;
@@ -155,6 +162,7 @@ function constructAgent(args: {
     createFakeEnv(),
   );
   const testAgent = agent as unknown as TestAgentAccess & FakeAgent<Env, ClientState>;
+  testAgent.testDatabase = database;
   testAgent.sessionSummaryService = {
     persistWorkingState: vi.fn(),
     persistAssistantTurnFinished: vi.fn(async () => {}),
@@ -194,6 +202,105 @@ function connection(id: string): Connection {
 }
 
 describe("SessionAgentDO runtime boundary", () => {
+  it("keeps the production Phase 3 engine inert with zero migration records", async () => {
+    const agent = constructAgent();
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {});
+
+    const result = await agent.ensureRuntimeReadyAndDispatchNextTurn();
+    const rows = agent.testDatabase.prepare(
+      "SELECT migration_id FROM session_runtime_migrations",
+    ).all();
+
+    expect(result).toEqual({ ok: true, value: { outcome: "ready" } });
+    expect(rows).toEqual([]);
+  });
+
+  it("preserves the teardown guard across Durable Object reconstruction", async () => {
+    const agent = constructAgent({
+      serverState: createServerState({ teardownStarted: true }),
+    });
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {});
+
+    const result = await agent.ensureRuntimeReadyAndDispatchNextTurn();
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "RUNTIME_MIGRATION_FAILED" },
+    });
+    expect(agent.provisionService.ensureProvisioned).not.toHaveBeenCalled();
+    expect(agent.testDatabase.prepare(
+      "SELECT migration_id FROM session_runtime_migrations",
+    ).all()).toEqual([]);
+  });
+
+  it("runs the empty migration engine after terminal setup and before admission", async () => {
+    const agent = constructAgent();
+    const events: string[] = [];
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {
+      events.push("provision");
+    });
+    agent.runtimeMigrationCoordinator.ensureMigrations = vi.fn(async () => {
+      events.push("migrations");
+      return success({ outcome: "current" as const });
+    });
+    agent.chatDispatchService.claimPendingMessage = vi.fn(() => {
+      events.push("claim");
+      return null;
+    });
+
+    await agent.ensureRuntimeReadyAndDispatchNextTurn();
+
+    expect(events).toEqual(["provision", "migrations", "claim"]);
+  });
+
+  it("does not admit work when the migration range defers for an active turn", async () => {
+    const agent = constructAgent();
+    agent.runtimeMigrationCoordinator.ensureMigrations = vi.fn(async () =>
+      success({ outcome: "deferred_active_turn" as const }));
+    const claimPendingMessage = vi.fn(() => null);
+    agent.chatDispatchService.claimPendingMessage = claimPendingMessage;
+
+    const result = await agent.ensureRuntimeReadyAndDispatchNextTurn();
+
+    expect(result).toEqual({ ok: true, value: { outcome: "deferred_active_turn" } });
+    expect(claimPendingMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries a deferred migration range after the terminal webhook clears the turn", async () => {
+    const agent = constructAgent({
+      serverState: createServerState({
+        activeUserMessageId: USER_MESSAGE_ID,
+        activeTurnDispatchStatus: "dispatched",
+        agentProcessId: 42,
+        agentProcessRunId: "run-1",
+      }),
+      clientState: createClientState({
+        activeTurn: { userMessageId: USER_MESSAGE_ID },
+      }),
+    });
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {});
+    agent.secretRepository.set("webhook_token", "webhook-token");
+    const ensureMigrations = vi.spyOn(
+      agent.runtimeMigrationCoordinator,
+      "ensureMigrations",
+    );
+
+    const deferred = await agent.ensureRuntimeReadyAndDispatchNextTurn();
+    expect(deferred).toEqual({ ok: true, value: { outcome: "deferred_active_turn" } });
+
+    await agent.handleWebhookChunks(
+      "webhook-token",
+      USER_MESSAGE_ID,
+      [
+        { sequence: 0, chunk: { type: "start", messageId: "assistant-1" } as UIMessageChunk },
+        { sequence: 1, chunk: { type: "finish", finishReason: "stop" } as UIMessageChunk },
+      ],
+    );
+
+    await vi.waitFor(() => expect(ensureMigrations).toHaveBeenCalledTimes(2));
+    expect(agent.serverState.activeUserMessageId).toBeNull();
+  });
+
   it("serializes two connection readiness passes and reevaluates after the first", async () => {
     const agent = constructAgent();
     const firstEntered = Promise.withResolvers<void>();
@@ -402,7 +509,9 @@ describe("SessionAgentDO runtime boundary", () => {
     releaseReadiness.resolve();
     await Promise.all([readiness, chat]);
 
-    expect(claimPendingMessage).toHaveBeenCalledTimes(2);
+    // The second readiness pass reaches the migration range with an active
+    // pending turn and defers before attempting another claim.
+    expect(claimPendingMessage).toHaveBeenCalledOnce();
     expect(claimPreparedMessage).not.toHaveBeenCalled();
     expect(spawnClaimedTurn).toHaveBeenCalledOnce();
     expect(directConnection.send).toHaveBeenCalledWith(expect.stringContaining(
