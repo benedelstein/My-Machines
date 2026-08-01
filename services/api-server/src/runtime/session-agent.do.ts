@@ -52,6 +52,7 @@ import type {
 import type { SpriteAgentProcessManager } from
   "@/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
 import type {
+  ChatDispatchError,
   ClaimedTurn,
   PreparedChatMessage,
   SessionChatDispatchService,
@@ -110,6 +111,13 @@ type EnsureReadyResult = Result<EnsureReadyOutcome, EnsureReadyError>;
 type ChatAdmissionError = {
   code: "READINESS_FAILED" | "TURN_CONFLICT";
   message: string;
+};
+
+type ChatAdmissionResult = Result<void, ChatAdmissionError | ChatDispatchError>;
+
+type ReadyTurnAdmission = {
+  source: "pending" | "prepared";
+  turn: ClaimedTurn;
 };
 
 interface AgentStateInternalAccess {
@@ -190,7 +198,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         persistPushedBranch: (branch) =>
           this.sessionSummaryService.persistPushedBranch(branch),
         onTurnFinished: (turn) => this.handleTurnFinished(turn),
-        onTurnSettled: () => this.queueEnsureReady(),
+        onTurnSettled: () => this.queueEnsureRuntimeReadyAndDispatchNextTurn(),
       },
     });
     this.spriteLifecycleClient = dependencies.spriteLifecycleClient;
@@ -422,7 +430,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     }
 
     // Always call ensureReady — idempotent, skips completed steps via serverState checkpoints
-    this.queueEnsureReady();
+    this.queueEnsureRuntimeReadyAndDispatchNextTurn();
     this.providerConnectionService.queueRefresh();
   }
 
@@ -514,28 +522,84 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   // Provisioning
-  /** Serializes readiness and claims a pending initial turn before release. */
-  private async ensureReady(): Promise<EnsureReadyResult> {
-    const admission = await this.runtimeBoundaryMutex.runExclusive(async (lease) => {
+  /** Runs readiness, then synchronously admits pending work before prepared work. */
+  private async admitNextTurn(
+    prepared?: PreparedChatMessage,
+  ): Promise<{
+    readiness: EnsureReadyResult;
+    admission: ReadyTurnAdmission | null;
+  }> {
+    return this.runtimeBoundaryMutex.runExclusive(async (lease) => {
+      this.chatDispatchService.recoverInterruptedClaim();
       const readiness = await this._ensureReady(lease);
-      const claimedTurn = readiness.ok && readiness.value.outcome === "ready"
-        ? this.chatDispatchService.claimPendingMessage()
-        : null;
-      return { readiness, claimedTurn };
+      let admission: ReadyTurnAdmission | null = null;
+      if (readiness.ok && readiness.value.outcome === "ready") {
+        const pendingTurn = this.chatDispatchService.claimPendingMessage();
+        if (pendingTurn) {
+          admission = { source: "pending", turn: pendingTurn };
+        } else if (
+          prepared &&
+          !this.serverState.activeUserMessageId &&
+          !this.state.pendingUserMessage
+        ) {
+          admission = {
+            source: "prepared",
+            turn: this.chatDispatchService.claimPreparedMessage(prepared),
+          };
+        }
+      }
+      return { readiness, admission };
     });
+  }
 
-    if (admission.claimedTurn) {
-      const dispatchResult = await this.chatDispatchService.spawnClaimedTurn(
-        admission.claimedTurn,
-      );
-      if (!dispatchResult.ok) {
-        this.logger.error("Failed to dispatch pending message", {
-          fields: { code: dispatchResult.error.code },
-          error: dispatchResult.error.message,
+  /** Keeps the complete readiness, admission, and post-boundary dispatch alive. */
+  private async ensureRuntimeReadyAndDispatchNextTurn(): Promise<
+    EnsureReadyResult
+  >;
+  private async ensureRuntimeReadyAndDispatchNextTurn(
+    prepared: PreparedChatMessage,
+  ): Promise<ChatAdmissionResult>;
+  private async ensureRuntimeReadyAndDispatchNextTurn(
+    prepared?: PreparedChatMessage,
+  ): Promise<EnsureReadyResult | ChatAdmissionResult> {
+    return this.keepAliveWhile(async () => {
+      const boundary = await this.admitNextTurn(prepared);
+      let dispatchResult: Result<void, ChatDispatchError> | null = null;
+      if (boundary.admission) {
+        dispatchResult = await this.chatDispatchService.spawnClaimedTurn(
+          boundary.admission.turn,
+        );
+        if (boundary.admission.source === "pending" && !dispatchResult.ok) {
+          this.logger.error("Failed to dispatch pending message", {
+            fields: { code: dispatchResult.error.code },
+            error: dispatchResult.error.message,
+          });
+        }
+      }
+
+      if (!prepared) {
+        return boundary.readiness;
+      }
+      if (!boundary.readiness.ok) {
+        return failure({
+          code: "READINESS_FAILED",
+          message: boundary.readiness.error.message,
         });
       }
-    }
-    return admission.readiness;
+      if (boundary.readiness.value.outcome !== "ready") {
+        return failure({
+          code: "READINESS_FAILED",
+          message: "Session setup is not complete",
+        });
+      }
+      if (boundary.admission?.source !== "prepared") {
+        return failure({
+          code: "TURN_CONFLICT",
+          message: "Agent is already handling a message",
+        });
+      }
+      return dispatchResult ?? success(undefined);
+    });
   }
 
   /** Runs readiness stages while the caller owns the runtime boundary.
@@ -561,7 +625,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       }
     }
 
-    this.chatDispatchService.recoverInterruptedClaim();
     try {
       await this.provisionService.ensureProvisioned();
     } catch (error) {
@@ -578,45 +641,20 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     });
   }
 
-  /** Runs final readiness and synchronously claims a prepared direct turn. */
-  private async admitPreparedTurn(
-    prepared: PreparedChatMessage,
-  ): Promise<Result<ClaimedTurn, ChatAdmissionError>> {
-    return this.runtimeBoundaryMutex.runExclusive(async (lease) => {
-      const readiness = await this._ensureReady(lease);
-      if (!readiness.ok) {
-        return failure({
-          code: "READINESS_FAILED",
-          message: readiness.error.message,
+  private queueEnsureRuntimeReadyAndDispatchNextTurn(): void {
+    void this.ensureRuntimeReadyAndDispatchNextTurn()
+      .then((readiness) => {
+        if (!readiness.ok) {
+          this.logger.warn("Runtime readiness and dispatch did not complete", {
+            fields: { code: readiness.error.code },
+          });
+        }
+      })
+      .catch((error) => {
+        this.logger.error("Runtime readiness and dispatch failed unexpectedly", {
+          error,
         });
-      }
-      if (readiness.value.outcome !== "ready") {
-        return failure({
-          code: "READINESS_FAILED",
-          message: "Session setup is not complete",
-        });
-      }
-      if (this.serverState.activeUserMessageId || this.state.pendingUserMessage) {
-        return failure({
-          code: "TURN_CONFLICT",
-          message: "Agent is already handling a message",
-        });
-      }
-      return success(this.chatDispatchService.claimPreparedMessage(prepared));
-    });
-  }
-
-  private queueEnsureReady(): void {
-    void this.keepAliveWhile(async () => {
-      const readiness = await this.ensureReady();
-      if (!readiness.ok) {
-        this.logger.warn("ensureReady did not complete", {
-          fields: { code: readiness.error.code },
-        });
-      }
-    }).catch((error) => {
-      this.logger.error("ensureReady failed unexpectedly", { error });
-    });
+      });
   }
 
   // Init handler
@@ -630,7 +668,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     try {
       const initResult = await initPromise;
       if (initResult.ok) {
-        this.queueEnsureReady();
+        this.queueEnsureRuntimeReadyAndDispatchNextTurn();
       }
       return initResult;
     } finally {
@@ -817,26 +855,13 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         return;
       }
 
-      await this.keepAliveWhile(async () => {
-        const admission = await this.admitPreparedTurn(
-          prepared.value,
-        );
-        if (!admission.ok) {
-          this.sendChatFailure(connection, admission.error.message);
-          return;
-        }
-
-        const result = await this.chatDispatchService.spawnClaimedTurn(
-          admission.value,
-        );
-        if (!result.ok) {
-          this.logger.warn("Workflow chat message dispatch failed", {
-            fields: { code: result.error.code },
-          });
-          this.sendChatFailure(connection, result.error.message);
-          return;
-        }
-      });
+      const admission = await this.ensureRuntimeReadyAndDispatchNextTurn(
+        prepared.value,
+      );
+      if (!admission.ok) {
+        this.sendChatFailure(connection, admission.error.message);
+        return;
+      }
     } catch (error) {
       this.logger.error("Failed to handle chat message", { error });
       this.sendMessage(
