@@ -4,6 +4,8 @@ import { AgentSdkStateRepository } from "../../src/modules/session-agent/reposit
 import { LatestPlanRepository } from "../../src/modules/session-agent/repositories/latest-plan.repository";
 import { MessageRepository } from "../../src/modules/session-agent/repositories/message.repository";
 import { PendingChunkRepository } from "../../src/modules/session-agent/repositories/pending-chunk.repository";
+import { RuntimeMigrationRepository } from
+  "../../src/modules/session-agent/repositories/runtime-migration.repository";
 import { SecretRepository } from "../../src/modules/session-agent/repositories/secret.repository";
 import { ServerStateRepository } from "../../src/modules/session-agent/repositories/server-state.repository";
 import { SessionEnvironmentSnapshotRepository } from "../../src/modules/session-agent/repositories/session-environment-snapshot.repository";
@@ -37,6 +39,7 @@ const REPOSITORIES: Repository[] = [
   new ServerStateRepository(noopSql),
   new SessionEnvironmentSnapshotRepository(noopSql),
   new PendingChunkRepository(noopSql),
+  new RuntimeMigrationRepository(noopSql),
   new SetupOutputRepository(noopSql),
   new AgentSdkStateRepository(),
 ];
@@ -49,6 +52,7 @@ const EXPECTED_MIGRATION_FINGERPRINTS: Record<string, string[]> = {
   messages: ["a56628f52e8be595"],
   pending_message_chunks: ["6249ba5ddde259ae", "318de310a498486b"],
   secrets: ["8a940642e3e822ef"],
+  session_runtime_migrations: ["19a5184ee1258acf"],
   server_state: ["851a227f32ff6fde"],
   session_environment_snapshot: ["9fdbf834b964c745"],
   setup_script_output_chunks: ["9c52bd639e49ccb8"],

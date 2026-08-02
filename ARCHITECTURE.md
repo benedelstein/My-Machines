@@ -21,12 +21,14 @@ The VM owns the execution runtime for its workflows, and the Durable Object disp
 ## Key Files
 
 - `services/api-server/src/runtime/session-agent.do.ts` - Core session management, VM lifecycle, WebSocket handling, and webhook RPC handlers.
+- `services/api-server/src/modules/session-agent/services/runtime-migration-coordinator.service.ts` - Serial per-session runtime reconciliation, backed by Durable Object-local attempt records and gated by the runtime boundary.
 - `packages/vm-agent/src/index-webhook.ts` - Current vm-agent webhook entrypoint.
 - `packages/api-contract/src/websocket-api.ts` - WebSocket message schemas.
 
 ## Architectural Invariants
 
 - The Durable Object is the session authority. It owns session lifecycle, message state, client WebSocket handling, and VM coordination.
+- Runtime migrations run only from mutex-held readiness, defer while a turn is active, and treat their applied revision as the sole reconciliation checkpoint.
 - The Sprite VM owns the execution runtime. It runs the agent process and submits output back to the Durable Object through authenticated webhooks.
 - Browser clients cannot mutate Durable Object server state directly. Client messages go through typed API or WebSocket messages and are validated before handling.
 - Cross-package contracts live in `packages/api-contract` (client-facing) and `packages/shared` (server/VM internal). Server, VM, and web packages should not duplicate shared DTOs or protocol types.
