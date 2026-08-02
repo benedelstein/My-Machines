@@ -228,7 +228,7 @@ describe("SessionSetupRunService", () => {
     expect(setupScriptTask?.status).toBe("failed");
   });
 
-  it("repairs older running setup runs by inserting the network policy task", () => {
+  it("preserves an older running setup run without a network policy task", () => {
     const { clientState, service } = createHarness({
       serverState: { finalNetworkPolicyApplied: false },
     });
@@ -245,10 +245,7 @@ describe("SessionSetupRunService", () => {
       "session_connector",
       "repository",
       "setup_script",
-      "network_policy",
     ]);
-    expect(requireSetupRun(clientState).tasks.find((task) => task.id === "network_policy")?.status)
-      .toBe("pending");
   });
 
   it("repairs older setup runs by backfilling retry metadata", () => {
@@ -273,7 +270,7 @@ describe("SessionSetupRunService", () => {
     ]);
   });
 
-  it("marks inserted network policy tasks complete when the checkpoint exists", () => {
+  it("does not insert a network policy task when its checkpoint exists", () => {
     const { clientState, service } = createHarness();
     const setupRun = requireSetupRun(clientState);
     clientState.sessionSetupRun = {
@@ -283,8 +280,8 @@ describe("SessionSetupRunService", () => {
 
     service.repairOnStart();
 
-    expect(requireSetupRun(clientState).tasks.find((task) => task.id === "network_policy")?.status)
-      .toBe("completed");
+    expect(requireSetupRun(clientState).tasks.some((task) => task.id === "network_policy"))
+      .toBe(false);
   });
 
   it("includes the session connector task after cloud container", () => {
@@ -301,7 +298,7 @@ describe("SessionSetupRunService", () => {
       .toMatchObject({ isBlocking: true, canRetry: true });
   });
 
-  it("backfills the session connector task into older running runs", () => {
+  it("preserves an older running setup run without a session connector task", () => {
     const { clientState, service } = createHarness({
       serverState: { finalNetworkPolicyApplied: false },
     });
@@ -315,17 +312,13 @@ describe("SessionSetupRunService", () => {
 
     expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual([
       "cloud_container",
-      "session_connector",
       "repository",
       "setup_script",
       "network_policy",
     ]);
-    expect(
-      requireSetupRun(clientState).tasks.find((task) => task.id === "session_connector")?.status,
-    ).toBe("pending");
   });
 
-  it("marks repaired session connector tasks complete when the checkpoint exists", () => {
+  it("does not insert a session connector task when its checkpoint exists", () => {
     const { clientState, service } = createHarness({
       serverState: { sessionConnectorId: "conn-1", finalNetworkPolicyApplied: false },
     });
@@ -337,9 +330,8 @@ describe("SessionSetupRunService", () => {
 
     service.repairOnStart();
 
-    expect(
-      requireSetupRun(clientState).tasks.find((task) => task.id === "session_connector")?.status,
-    ).toBe("completed");
+    expect(requireSetupRun(clientState).tasks.some((task) => task.id === "session_connector"))
+      .toBe(false);
   });
 
   it("does not backfill the connector task into an already completed run", () => {
@@ -361,6 +353,25 @@ describe("SessionSetupRunService", () => {
     const repairedRun = requireSetupRun(clientState);
     expect(repairedRun.status).toBe("completed");
     expect(repairedRun.tasks.some((task) => task.id === "session_connector")).toBe(false);
+  });
+
+  it("preserves membership and order for failed historical runs", () => {
+    const { clientState, service } = createHarness();
+    const setupRun = requireSetupRun(clientState);
+    clientState.sessionSetupRun = {
+      ...setupRun,
+      status: "failed",
+      completedAt: "2026-06-02T00:00:00.000Z",
+      tasks: setupRun.tasks
+        .filter((task) => task.id !== "session_connector" && task.id !== "network_policy")
+        .map((task) => task.id === "repository" ? failTask(task) : task),
+    };
+    const storedIds = requireSetupRun(clientState).tasks.map((task) => task.id);
+
+    service.repairOnStart();
+
+    expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual(storedIds);
+    expect(requireSetupRun(clientState).status).toBe("failed");
   });
 
 });

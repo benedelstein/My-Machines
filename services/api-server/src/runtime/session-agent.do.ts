@@ -94,6 +94,7 @@ import type { SessionTurnNotificationService } from
 import {
   createSessionAgentDependencies,
   createSessionAgentRepositories,
+  type SessionAgentDependencies,
 } from "./session-agent-dependencies";
 
 type EnsureReadyOutcome =
@@ -139,6 +140,8 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private readonly turnCoordinator: AgentTurnCoordinator;
   private readonly processManager: SpriteAgentProcessManager;
   private readonly runtimeMigrationCoordinator: RuntimeMigrationCoordinator;
+  private readonly buildRuntimeMigrationContext:
+    SessionAgentDependencies["buildRuntimeMigrationContext"];
   private readonly provisionService: SessionProvisionService;
   private readonly chatDispatchService: SessionChatDispatchService;
   private readonly setupRunService: SessionSetupRunService;
@@ -211,6 +214,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.turnCoordinator = dependencies.turnCoordinator;
     this.processManager = dependencies.processManager;
     this.runtimeMigrationCoordinator = dependencies.runtimeMigrationCoordinator;
+    this.buildRuntimeMigrationContext = dependencies.buildRuntimeMigrationContext;
     this.provisionService = dependencies.provisionService;
     this.chatDispatchService = dependencies.chatDispatchService;
     this.setupRunService = dependencies.setupRunService;
@@ -641,7 +645,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     }
 
     try {
-      await this.provisionService.ensureProvisioned();
+      await this.provisionService.ensureProvisioned(_lease);
     } catch (error) {
       return failure({
         code: "PROVISIONING_FAILED",
@@ -657,11 +661,14 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       return success({ outcome: "deferred_active_turn" });
     }
 
+    if (!this.serverState.spriteName) {
+      return failure({
+        code: "PROVISIONING_FAILED",
+        message: "Sprite name is missing after completed setup",
+      });
+    }
     const migrations = await this.runtimeMigrationCoordinator.ensureMigrations(
-      {
-        getServerState: () => this.serverState,
-        isTeardownStarted: () => this.serverState.teardownStarted,
-      },
+      this.buildRuntimeMigrationContext(this.serverState.spriteName),
       _lease,
     );
     if (!migrations.ok) {

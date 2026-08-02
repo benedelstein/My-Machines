@@ -1,4 +1,4 @@
-import { SpriteLifecycleClient } from "@repo/sprites-client";
+import { SpriteLifecycleClient, WorkersSpriteClient } from "@repo/sprites-client";
 import type {
   ClientState,
   Logger,
@@ -57,6 +57,8 @@ import { SessionSetupOutputService } from
   "@/modules/session-agent/services/session-setup-output.service";
 import { SessionSetupRunService } from
   "@/modules/session-agent/services/session-setup-run.service";
+import { createStartupToolchainRuntimeMigrationTarget } from
+  "@/modules/session-agent/services/startup-toolchain-runtime-migration.service";
 import { SessionSummaryService } from
   "@/modules/session-agent/services/session-summary.service";
 import { SessionSyncService } from "@/modules/session-agent/services/session-sync.service";
@@ -70,6 +72,8 @@ import { createUserSessionsPublisher } from
 import { createLogger } from "@/shared/logging";
 import type { Env } from "@/shared/types";
 import type { HandleCreatePullRequestResult } from "@/shared/types/session-agent";
+import type { RuntimeMigrationContext } from
+  "@/modules/session-agent/types/runtime-migration.types";
 import { SessionAgentAttachmentProvider } from "./session-agent-attachment-provider";
 import { SessionAutoPullRequestService } from "./session-auto-pull-request.service";
 import { SessionPullRequestLifecycleService } from
@@ -95,6 +99,7 @@ export interface SessionAgentDependencies {
   turnCoordinator: AgentTurnCoordinator;
   processManager: SpriteAgentProcessManager;
   runtimeMigrationCoordinator: RuntimeMigrationCoordinator;
+  buildRuntimeMigrationContext: (spriteName: string) => RuntimeMigrationContext;
   provisionService: SessionProvisionService;
   chatDispatchService: SessionChatDispatchService;
   setupRunService: SessionSetupRunService;
@@ -198,6 +203,26 @@ export function createSessionAgentDependencies(input: {
     apiKey: env.SPRITES_API_KEY,
     logger: createLogger("sprites.ts"),
   });
+  const buildRuntimeMigrationContext = (spriteName: string) => {
+    const toolchainLogger = logger.scope("startup-toolchain-runtime-migration");
+    return {
+      getServerState: host.getServerState,
+      isTeardownStarted: () => host.getServerState().teardownStarted,
+      startupToolchain: createStartupToolchainRuntimeMigrationTarget({
+        providerId: host.getClientState().agentSettings.provider,
+        codexMinVersion: env.CODEX_MIN_VERSION,
+        sprite: new WorkersSpriteClient(
+          spriteName,
+          env.SPRITES_API_KEY,
+          env.SPRITES_API_URL,
+          createLogger("sprite-websocket.session.ts"),
+        ),
+        checkpoint: host.getServerState().startupToolchain,
+        logger: toolchainLogger,
+        updateCheckpoint: (startupToolchain) => host.updateServerState({ startupToolchain }),
+      }),
+    };
+  };
   const attachmentService = new SessionAgentAttachmentProvider(env.DB);
   const githubAppService = new GitHubAppService(env, logger);
   const notificationPublisher = new NotificationPublisher(env);
@@ -326,6 +351,12 @@ export function createSessionAgentDependencies(input: {
     retireGitProxySecret: () => gitProxyService.retireGitProxySecret(),
     ensureSessionConnector: (spriteName) => sessionConnectorService.ensureMinted(spriteName),
     getSessionConnectorGatewayBase: () => sessionConnectorService.getGatewayBase(),
+    ensureRuntimeMigration: (migrationId, spriteName, lease) =>
+      runtimeMigrationCoordinator.ensureMigration(
+        migrationId,
+        buildRuntimeMigrationContext(spriteName),
+        lease,
+      ),
     githubTokenProvider: githubAppService,
     setupReporter: {
       startTask: (taskId) => setupRunService.startTask(taskId),
@@ -380,6 +411,7 @@ export function createSessionAgentDependencies(input: {
     turnCoordinator,
     processManager,
     runtimeMigrationCoordinator,
+    buildRuntimeMigrationContext,
     provisionService,
     chatDispatchService,
     setupRunService,

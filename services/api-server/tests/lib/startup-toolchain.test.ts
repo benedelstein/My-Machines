@@ -1,16 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { Logger } from "@repo/shared";
+import { success, type Logger } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
 import { DEFAULT_NETWORK_POLICY } from "@repo/sprites-client";
 import {
   CLAUDE_CODE_STARTUP_CHECK_ID,
   MIN_CLAUDE_CODE_CLI_VERSION,
   OPENAI_CODEX_INSTALL_SCRIPT_URL,
+  buildStartupToolchainContract,
   ensureSpriteStartupToolchain,
   getProviderStartupToolchainChecks,
+  prepareStartupToolchain,
+  type StartupToolchainCheck,
 } from "../../src/shared/integrations/sprite-startup-toolchain";
+import { hashRuntimeMigrationContract } from
+  "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
 import {
   getClaudeStartupToolchainChecks,
 } from "../../src/shared/integrations/sprite-startup-toolchain/providers/claude";
@@ -120,6 +125,69 @@ describe("startup toolchain dispatch", () => {
         "utf8",
       );
       expect(source).not.toMatch(/openai-codex|claude-code|codex --version|install\.sh/);
+    }
+  });
+
+  it.each(["openai-codex", "claude-code"] as const)(
+    "changes %s desired hash for every shared check input",
+    async (providerId) => {
+      const commonContract = {
+        id: "common.runtime",
+        binary: "bun",
+        minimumVersion: "1.0.0",
+        scriptVersion: "1",
+        script: "ensure bun 1.0.0",
+      };
+      const commonCheck: StartupToolchainCheck = {
+        id: "common.runtime",
+        contract: commonContract,
+        ensureReady: async () => success({ id: "common.runtime", status: "ready" }),
+      };
+      const providerChecks = getProviderStartupToolchainChecks(providerId, {
+        logger: createLogger(),
+      });
+      const base = buildStartupToolchainContract(providerId, [commonCheck, ...providerChecks]);
+      const baseHash = await hashRuntimeMigrationContract("sprite.startup-toolchain", base);
+
+      for (const change of [
+        { ...commonContract, binary: "node" },
+        { ...commonContract, minimumVersion: "2.0.0" },
+        { ...commonContract, scriptVersion: "2" },
+        { ...commonContract, script: "ensure bun 2.0.0" },
+      ]) {
+        const changed = { ...base, checks: [change, ...base.checks.slice(1)] };
+        await expect(hashRuntimeMigrationContract("sprite.startup-toolchain", changed))
+          .resolves.not.toBe(baseHash);
+      }
+    },
+  );
+
+  it("hashes every Codex provider install and repair input", async () => {
+    const prepared = prepareStartupToolchain({
+      providerId: "openai-codex",
+      logger: createLogger(),
+    });
+    const [providerContract] = prepared.contract.checks;
+    if (!providerContract || typeof providerContract !== "object" || Array.isArray(providerContract)) {
+      throw new Error("Expected Codex provider contract");
+    }
+    const baseHash = await hashRuntimeMigrationContract(
+      "sprite.startup-toolchain",
+      prepared.contract,
+    );
+
+    for (const [key, value] of [
+      ["minimumVersion", "999.0.0"],
+      ["installScriptUrl", "https://example.test/install.sh"],
+      ["scriptVersion", "next"],
+      ["script", "updated repair script"],
+    ] as const) {
+      const changed = {
+        ...prepared.contract,
+        checks: [{ ...providerContract, [key]: value }],
+      };
+      await expect(hashRuntimeMigrationContract("sprite.startup-toolchain", changed))
+        .resolves.not.toBe(baseHash);
     }
   });
 });
