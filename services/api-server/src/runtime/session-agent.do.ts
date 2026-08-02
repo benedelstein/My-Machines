@@ -25,6 +25,7 @@ import { SessionEnvironmentSnapshotRepository } from "@/modules/session-agent/re
 import { SessionConnectorsRepository } from "@/modules/session-agent/repositories/session-connectors.repository";
 import { SetupOutputRepository } from "@/modules/session-agent/repositories/setup-output.repository";
 import { migrateAll } from "@/modules/session-agent/repositories/schema-manager.repository";
+import { AgentSdkStateRepository } from "@/modules/session-agent/repositories/agent-sdk-state.repository";
 import { createLogger, initializeLogger } from "@/shared/logging";
 import type { UIMessage, UIMessageChunk } from "ai";
 import type {
@@ -144,6 +145,8 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
 
     this.disableClientStateUpdates();
 
+    // Local migrations must run before ServerState loads, services construct,
+    // or SDK state hydrates.
     const sql = this.sql.bind(this);
     this.messageRepository = new MessageRepository(sql);
     this.secretRepository = new SecretRepository(sql);
@@ -152,6 +155,17 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.environmentSnapshotRepository = new SessionEnvironmentSnapshotRepository(sql);
     this.pendingChunkRepository = new PendingChunkRepository(sql);
     this.setupOutputRepository = new SetupOutputRepository(sql);
+
+    migrateAll(sql, ctx.storage, [
+      this.messageRepository, this.secretRepository, this.latestPlanRepository,
+      this.serverStateRepository, this.environmentSnapshotRepository,
+      this.pendingChunkRepository, this.setupOutputRepository,
+      // Migration-only Agents SDK client-state adapter; normal reads/writes stay on the SDK.
+      new AgentSdkStateRepository(),
+    ]);
+
+    this.serverState = this.serverStateRepository.get();
+
     this.setupOutputService = new SessionSetupOutputService({
       logger: this.logger,
       repository: this.setupOutputRepository,
@@ -223,19 +237,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         this.repoAccessLifecycleService.assertSessionRepoAccess(),
       enforceSessionAccessBlocked: () => this.enforceSessionAccessBlocked(false),
     });
-
-    migrateAll(sql, ctx.storage, [
-      this.messageRepository,
-      this.secretRepository,
-      this.latestPlanRepository,
-      this.serverStateRepository,
-      this.environmentSnapshotRepository,
-      this.pendingChunkRepository,
-      this.setupOutputRepository,
-    ]);
-
-    // Load server state from SQLite
-    this.serverState = this.serverStateRepository.get();
 
     this.setupRunService = new SessionSetupRunService({
       getServerState: () => this.serverState,
