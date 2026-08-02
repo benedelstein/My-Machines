@@ -170,6 +170,26 @@ export function createService(
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
   });
+  const ensureRuntimeMigration = vi.fn(async (
+    migrationId: string,
+    _spriteName: string,
+  ) => {
+    const result = await mockState.ensureSpriteStartupToolchain({
+      codexMinVersion: envOverrides.CODEX_MIN_VERSION,
+    });
+    if (!result.ok) {
+      return {
+        ok: false as const,
+        error: {
+          code: "APPLY_FAILED" as const,
+          message: result.error.message,
+          migrationId,
+        },
+      };
+    }
+    updateServerState({ startupToolchain: result.value });
+    return { ok: true as const, value: { outcome: "applied" as const } };
+  });
   const service = new SessionProvisionService({
     logger: createTestLogger(),
     env: {
@@ -189,6 +209,7 @@ export function createService(
     ensureSessionConnector,
     getSessionConnectorGatewayBase: () =>
       serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
+    ensureRuntimeMigration,
     githubTokenProvider: {
       getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
     },
@@ -202,6 +223,7 @@ export function createService(
     spriteLifecycleClient,
     retireGitProxySecret,
     ensureSessionConnector,
+    ensureRuntimeMigration,
   };
 }
 

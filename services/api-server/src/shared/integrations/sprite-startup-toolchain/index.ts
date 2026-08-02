@@ -9,6 +9,8 @@ import { getCommonStartupToolchainChecks } from "./checks/common";
 import { getClaudeStartupToolchainChecks } from "./providers/claude";
 import { getOpenAICodexStartupToolchainChecks } from "./providers/openai-codex";
 import type {
+  PreparedStartupToolchain,
+  StartupToolchainContract,
   StartupToolchainCheck,
   StartupToolchainDeps,
   StartupToolchainError,
@@ -43,23 +45,12 @@ export function getProviderStartupToolchainChecks(
   }
 }
 
-async function buildStartupToolchainContractHash(
-  providerId: ProviderId,
-  checks: StartupToolchainCheck[],
-): Promise<string> {
-  return sha256(JSON.stringify({
-    providerId,
-    checks: checks.map((check) => check.contract),
-  }));
-}
-
-export async function ensureSpriteStartupToolchain(args: {
+/** Builds one immutable check set used for both contract hashing and apply. */
+export function prepareStartupToolchain(args: {
   providerId: ProviderId;
-  sprite: WorkersSpriteClient;
-  checkpoint: StartupToolchainCheckpoint | null;
   logger: Logger;
   codexMinVersion?: string;
-}): Promise<Result<StartupToolchainCheckpoint, StartupToolchainError>> {
+}): PreparedStartupToolchain {
   const checks = [
     ...getCommonStartupToolchainChecks(),
     ...getProviderStartupToolchainChecks(args.providerId, {
@@ -67,14 +58,46 @@ export async function ensureSpriteStartupToolchain(args: {
       codexMinVersion: args.codexMinVersion,
     }),
   ];
-  const contractHash = await buildStartupToolchainContractHash(
-    args.providerId,
+  return {
+    contract: buildStartupToolchainContract(args.providerId, checks),
     checks,
-  );
+  };
+}
+
+/** Projects executable checks into their deterministic desired contract. */
+export function buildStartupToolchainContract(
+  providerId: ProviderId,
+  checks: readonly StartupToolchainCheck[],
+): StartupToolchainContract {
+  return {
+    contractSchema: 1,
+    providerId,
+    checks: checks.map((check) => check.contract),
+  };
+}
+
+/** Computes the pre-runtime-migration checkpoint hash for rollout adoption. */
+export async function buildLegacyStartupToolchainContractHash(
+  contract: StartupToolchainContract,
+): Promise<string> {
+  return sha256(JSON.stringify({
+    providerId: contract.providerId,
+    checks: contract.checks,
+  }));
+}
+
+export async function ensurePreparedSpriteStartupToolchain(args: {
+  prepared: PreparedStartupToolchain;
+  sprite: WorkersSpriteClient;
+  checkpoint: StartupToolchainCheckpoint | null;
+  logger: Logger;
+}): Promise<Result<StartupToolchainCheckpoint, StartupToolchainError>> {
+  const { checks, contract } = args.prepared;
+  const contractHash = await buildLegacyStartupToolchainContractHash(contract);
   if (args.checkpoint?.contractHash === contractHash) {
     args.logger.info("Startup toolchain checkpoint is current", {
       fields: {
-        provider: args.providerId,
+        provider: contract.providerId,
         contractHash,
         checkCount: checks.length,
       },
@@ -86,7 +109,7 @@ export async function ensureSpriteStartupToolchain(args: {
   for (const check of checks) {
     args.logger.info("Running startup toolchain check", {
       fields: {
-        provider: args.providerId,
+        provider: contract.providerId,
         contractHash,
         checkId: check.id,
       },
@@ -95,7 +118,7 @@ export async function ensureSpriteStartupToolchain(args: {
     if (!result.ok) {
       args.logger.warn("Startup toolchain check returned failure", {
         fields: {
-          provider: args.providerId,
+          provider: contract.providerId,
           contractHash,
           checkId: check.id,
           code: result.error.code,
@@ -108,7 +131,7 @@ export async function ensureSpriteStartupToolchain(args: {
 
   args.logger.info("Startup toolchain checks completed", {
     fields: {
-      provider: args.providerId,
+      provider: contract.providerId,
       contractHash,
       checkCount: checks.length,
     },
@@ -118,5 +141,21 @@ export async function ensureSpriteStartupToolchain(args: {
     contractHash,
     checkedAt: Date.now(),
     results,
+  });
+}
+
+/** Compatibility wrapper retained while ServerState owns the legacy checkpoint. */
+export async function ensureSpriteStartupToolchain(args: {
+  providerId: ProviderId;
+  sprite: WorkersSpriteClient;
+  checkpoint: StartupToolchainCheckpoint | null;
+  logger: Logger;
+  codexMinVersion?: string;
+}): Promise<Result<StartupToolchainCheckpoint, StartupToolchainError>> {
+  return ensurePreparedSpriteStartupToolchain({
+    prepared: prepareStartupToolchain(args),
+    sprite: args.sprite,
+    checkpoint: args.checkpoint,
+    logger: args.logger,
   });
 }

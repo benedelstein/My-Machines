@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionSetupTask } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
+import type { RuntimeBoundaryLease } from
+  "../../src/modules/session-agent/types/runtime-boundary.types";
 import { SessionProvisionService } from "../../src/modules/session-agent/services/session-provision.service";
 import { createTestLogger } from "./test-logger";
 import {
@@ -61,6 +63,55 @@ describe("SessionProvisionService startup toolchain", () => {
         codexMinVersion: undefined,
       }),
     );
+  });
+
+  it("passes the existing runtime-boundary lease to targeted ensure", async () => {
+    const lease = {} as RuntimeBoundaryLease;
+    const { service, ensureRuntimeMigration } = createService(
+      createServerState(),
+      createClientState(),
+    );
+
+    await service.ensureProvisioned(lease);
+
+    expect(ensureRuntimeMigration).toHaveBeenCalledWith(
+      "sprite.startup-toolchain",
+      "sprite-1",
+      lease,
+    );
+  });
+
+  it("rechecks targeted ensure after migration success precedes task completion", async () => {
+    const effect = vi.fn();
+    const setupReporter = createSetupReporter();
+    vi.mocked(setupReporter.completeTask)
+      .mockImplementationOnce(() => {
+        throw new Error("simulated Worker stop before task completion");
+      });
+    const { service, ensureRuntimeMigration } = createService(
+      createServerState(),
+      createClientState(),
+      {},
+      createEnvironmentSnapshot(),
+      setupReporter,
+    );
+    let migrationCurrent = false;
+    ensureRuntimeMigration.mockImplementation(async () => {
+      if (!migrationCurrent) {
+        migrationCurrent = true;
+        effect();
+        return { ok: true, value: { outcome: "applied" } } as const;
+      }
+      return { ok: true, value: { outcome: "current" } } as const;
+    });
+
+    await expect(service.ensureProvisioned()).rejects.toThrow(
+      "simulated Worker stop before task completion",
+    );
+    await service.ensureProvisioned();
+
+    expect(ensureRuntimeMigration).toHaveBeenCalledTimes(2);
+    expect(effect).toHaveBeenCalledOnce();
   });
 
   it("passes CODEX_MIN_VERSION to startup toolchain checks", async () => {
@@ -339,6 +390,17 @@ describe("SessionProvisionService startup toolchain", () => {
       retireGitProxySecret: vi.fn(),
       ensureSessionConnector: vi.fn(async () => {}),
       getSessionConnectorGatewayBase: () => "https://gateway.test/conn-1",
+      ensureRuntimeMigration: async () => {
+        const result = await mockState.ensureSpriteStartupToolchain({});
+        if (!result.ok) {
+          return {
+            ok: false,
+            error: { code: "APPLY_FAILED", message: result.error.message },
+          } as const;
+        }
+        Object.assign(serverState, { startupToolchain: result.value });
+        return { ok: true, value: { outcome: "applied" } } as const;
+      },
       githubTokenProvider: {
         getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },
@@ -639,6 +701,17 @@ describe("SessionProvisionService startup toolchain", () => {
       retireGitProxySecret: vi.fn(),
       ensureSessionConnector: vi.fn(async () => {}),
       getSessionConnectorGatewayBase: () => "https://gateway.test/conn-1",
+      ensureRuntimeMigration: async () => {
+        const result = await mockState.ensureSpriteStartupToolchain({});
+        if (!result.ok) {
+          return {
+            ok: false,
+            error: { code: "APPLY_FAILED", message: result.error.message },
+          } as const;
+        }
+        Object.assign(serverState, { startupToolchain: result.value });
+        return { ok: true, value: { outcome: "applied" } } as const;
+      },
       githubTokenProvider: {
         getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },

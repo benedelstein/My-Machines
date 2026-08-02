@@ -27,10 +27,25 @@ export interface StartupToolchainCheckInput {
   sprite: WorkersSpriteClient;
 }
 
+export type StartupToolchainContractValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { readonly [key: string]: StartupToolchainContractValue }
+  | readonly StartupToolchainContractValue[];
+
+export interface StartupToolchainContract {
+  readonly [key: string]: StartupToolchainContractValue;
+  readonly contractSchema: 1;
+  readonly providerId: ProviderId;
+  readonly checks: readonly StartupToolchainContractValue[];
+}
+
 export interface StartupToolchainCheck {
   id: string;
-  // TODO: ADD DOCUMENTATION ON THIS FIELD AND OTHERS. I DON'T KNOW WHAT THEY ARE.
-  contract: Record<string, unknown>;
+  /** Stable desired inputs whose changes require this check to run again. */
+  contract: { readonly [key: string]: StartupToolchainContractValue };
   ensureReady(
     _input: StartupToolchainCheckInput,
   ): Promise<Result<StartupToolchainCheckResult, StartupToolchainError>>;
@@ -39,4 +54,9 @@ export interface StartupToolchainCheck {
 export interface StartupToolchainDeps {
   logger: Logger;
   codexMinVersion?: string;
+}
+
+export interface PreparedStartupToolchain {
+  readonly contract: StartupToolchainContract;
+  readonly checks: readonly StartupToolchainCheck[];
 }
