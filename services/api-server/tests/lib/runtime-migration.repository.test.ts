@@ -110,7 +110,7 @@ describe("RuntimeMigrationRepository", () => {
     });
   });
 
-  it("bounds persisted failure data and computes capped retry eligibility", () => {
+  it("bounds persisted failure data", () => {
     const { repository } = createRepository();
     const revision = { kind: "version", version: 1 } as const;
     repository.beginAttempt("fixture.failed", revision, "2026-08-01T00:00:00.000Z");
@@ -123,17 +123,5 @@ describe("RuntimeMigrationRepository", () => {
 
     const recordResult = repository.get("fixture.failed", "version");
     expect(recordResult.ok && recordResult.value?.lastErrorMessage).toHaveLength(512);
-    if (!recordResult.ok || !recordResult.value) {
-      return;
-    }
-    expect(repository.getRetryEligibility(
-      recordResult.value,
-      new Date("2026-08-01T00:00:00.500Z"),
-      { baseDelayMs: 1_000, maxDelayMs: 5_000, operatorThreshold: 1 },
-    )).toEqual({
-      eligible: false,
-      retryAt: "2026-08-01T00:00:01.000Z",
-      operatorAttentionRequired: true,
-    });
   });
 });

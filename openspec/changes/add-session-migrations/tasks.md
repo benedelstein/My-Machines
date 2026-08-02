@@ -124,7 +124,7 @@ marked against that decision.
 - [x] 4.1 Add the Durable Object-local `session_runtime_migrations` schema migration.
 - [x] 4.2 Persist migration ID, serialized attempted revision, nullable serialized applied revision, status (`running`, `failed`, or `applied`), attempt count, timestamps, and sanitized error code/message.
 - [x] 4.3 Add one stable serializer and untrusted-row parser for the `RuntimeMigrationRevision` discriminated union; reject malformed JSON, invalid members, mismatched applied/attempted kinds, and registry-kind conflicts.
-- [x] 4.4 Implement `get`, `list`, `beginAttempt`, `markApplied`, `markFailed`, and retry/backoff query operations.
+- [x] 4.4 Keep `RuntimeMigrationRepository` CRUD-only with `get`, `beginAttempt`, `markApplied`, and `markFailed`; keep status-aware retry/backoff policy in the coordinator service.
 - [x] 4.5 Make `beginAttempt` retain the prior applied revision while replacing the attempted revision and incrementing attempts.
 - [x] 4.6 Make `markApplied` conditional on the matching attempted revision so a stale completion cannot overwrite a newer attempt.
 - [x] 4.7 Treat `running` as retry evidence rather than a durable lock.
@@ -133,7 +133,7 @@ marked against that decision.
 
 ## 5. Awaited Runtime Migration Coordinator — Phase 3
 
-- [x] 5.1 Implement version comparison: missing/lower applies, equal skips, and higher stored version skips after rollback.
+- [x] 5.1 Implement version comparison: missing/lower applies, equal skips, and higher stored version skips after rollback while emitting a distinct lifecycle event.
 - [x] 5.2 Implement contract comparison: missing or unequal applies and equal skips.
 - [x] 5.3 Prepare and compare revisions before any Sprite/connector request.
 - [x] 5.4 Check `activeUserMessageId` once at the start of the shared range executor; return range-level `deferred_active_turn` without a migration ID and before contract preparation, migration-record reads, attempt writes, or external calls.
@@ -275,11 +275,11 @@ marked against that decision.
 
 ## 12. Observability, Rollout, and Operations — Added Incrementally Per Phase
 
-- [x] 12.1 Add structured secret-safe logs/metrics for prepared, current, running, applied, failed, deferred, and stale-retried outcomes.
+- [x] 12.1 Add structured secret-safe lifecycle events for prepared, pending, current, running, applied, failed, deferred, interrupted retry, and newer-version skip states; keep them distinct from coordinator outcomes.
 - [x] 12.2 Include migration ID, revision kind, hash/version, attempt, duration, and sanitized error code without contract preimages.
 - [x] 12.3 Define bounded exponential retry/backoff, cap, and repeated-failure operator threshold.
 - [x] 12.4 Prevent new migration claims after session teardown begins.
-- [x] 12.5 Add operator queries or diagnostics for pending/failed runtime migration records without exposing secret inputs.
+- [ ] 12.5 Add an operator-visible query surface for pending/failed runtime migration records without exposing secret inputs; do not keep an unused repository-wide list API as a placeholder.
 - [x] 12.6 Document forward-only local/version rules, contract rollback semantics, compensating migrations, contract retirement, and preparation/cutover/cleanup windows.
 - [ ] 12.7 Run separate canary cohorts: Phase 3 empty registry; Phase 4 new/completed/incomplete setup and toolchain adoption; Phase 5 stale rows, active turns, and connector disagreement; Phase 6 idle persistent processes.
 - [ ] 12.8 Measure each adopter backlog separately: toolchain checks in Phase 4, connector/Git/network changes in Phase 5, and idle process terminations in Phase 6.

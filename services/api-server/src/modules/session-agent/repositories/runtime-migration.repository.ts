@@ -4,8 +4,6 @@ import type { Migration, Repository, SqlFn } from "./repository.types";
 import type {
   RuntimeMigrationError,
   RuntimeMigrationRecord,
-  RuntimeMigrationRetryEligibility,
-  RuntimeMigrationRetryPolicy,
   RuntimeMigrationRevision,
   RuntimeMigrationRevisionKind,
 } from "@/modules/session-agent/types/runtime-migration.types";
@@ -175,29 +173,6 @@ export class RuntimeMigrationRepository implements Repository {
     }
   }
 
-  list(): RepositoryResult<RuntimeMigrationRecord[]> {
-    try {
-      const rows = this.sql<RuntimeMigrationRow>`
-        SELECT migration_id, applied_revision, attempted_revision, status,
-          attempt_count, started_at, last_attempt_at, applied_at,
-          last_error_code, last_error_message
-        FROM session_runtime_migrations
-        ORDER BY migration_id
-      `;
-      const records: RuntimeMigrationRecord[] = [];
-      for (const row of rows) {
-        const parsed = parseRecord(row);
-        if (!parsed.ok) {
-          return parsed;
-        }
-        records.push(parsed.value);
-      }
-      return success(records);
-    } catch {
-      return failure(repositoryError("MIGRATION_REPOSITORY_READ_FAILED"));
-    }
-  }
-
   beginAttempt(
     migrationId: string,
     revision: RuntimeMigrationRevision,
@@ -291,19 +266,4 @@ export class RuntimeMigrationRepository implements Repository {
     }
   }
 
-  getRetryEligibility(
-    record: RuntimeMigrationRecord,
-    now: Date,
-    policy: RuntimeMigrationRetryPolicy,
-  ): RuntimeMigrationRetryEligibility {
-    const exponent = Math.max(0, record.attemptCount - 1);
-    const delayMs = Math.min(policy.maxDelayMs, policy.baseDelayMs * (2 ** exponent));
-    const lastAttemptMs = Date.parse(record.lastAttemptAt);
-    const retryAtMs = lastAttemptMs + delayMs;
-    return {
-      eligible: !Number.isFinite(retryAtMs) || now.getTime() >= retryAtMs,
-      retryAt: Number.isFinite(retryAtMs) ? new Date(retryAtMs).toISOString() : null,
-      operatorAttentionRequired: record.attemptCount >= policy.operatorThreshold,
-    };
-  }
 }
