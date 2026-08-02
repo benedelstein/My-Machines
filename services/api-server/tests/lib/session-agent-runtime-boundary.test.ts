@@ -266,7 +266,7 @@ describe("SessionAgentDO runtime boundary", () => {
     expect(claimPendingMessage).not.toHaveBeenCalled();
   });
 
-  it("retries a deferred migration range after the terminal webhook clears the turn", async () => {
+  it("retries readiness after the terminal webhook clears the active turn", async () => {
     const agent = constructAgent({
       serverState: createServerState({
         activeUserMessageId: USER_MESSAGE_ID,
@@ -278,7 +278,8 @@ describe("SessionAgentDO runtime boundary", () => {
         activeTurn: { userMessageId: USER_MESSAGE_ID },
       }),
     });
-    agent.provisionService.ensureProvisioned = vi.fn(async () => {});
+    const ensureProvisioned = vi.fn(async () => {});
+    agent.provisionService.ensureProvisioned = ensureProvisioned;
     agent.secretRepository.set("webhook_token", "webhook-token");
     const ensureMigrations = vi.spyOn(
       agent.runtimeMigrationCoordinator,
@@ -287,6 +288,8 @@ describe("SessionAgentDO runtime boundary", () => {
 
     const deferred = await agent.ensureRuntimeReadyAndDispatchNextTurn();
     expect(deferred).toEqual({ ok: true, value: { outcome: "deferred_active_turn" } });
+    expect(ensureProvisioned).toHaveBeenCalledOnce();
+    expect(ensureMigrations).not.toHaveBeenCalled();
 
     await agent.handleWebhookChunks(
       "webhook-token",
@@ -297,7 +300,8 @@ describe("SessionAgentDO runtime boundary", () => {
       ],
     );
 
-    await vi.waitFor(() => expect(ensureMigrations).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(ensureMigrations).toHaveBeenCalledOnce());
+    expect(ensureProvisioned).toHaveBeenCalledTimes(2);
     expect(agent.serverState.activeUserMessageId).toBeNull();
   });
 
