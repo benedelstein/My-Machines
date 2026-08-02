@@ -653,6 +653,10 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       return success({ outcome: "setup_incomplete" });
     }
 
+    if (this.serverState.activeUserMessageId !== null) {
+      return success({ outcome: "deferred_active_turn" });
+    }
+
     const migrations = await this.runtimeMigrationCoordinator.ensureMigrations(
       {
         getServerState: () => this.serverState,
@@ -666,10 +670,18 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         message: migrations.error.message,
       });
     }
-    if (migrations.value.outcome === "deferred_active_turn") {
-      return success({ outcome: "deferred_active_turn" });
+    const outcome = migrations.value.outcome;
+    switch (outcome) {
+      case "current":
+      case "applied":
+        return success({ outcome: "ready" });
+      case "deferred_active_turn":
+        return success({ outcome: "deferred_active_turn" });
+      default: {
+        const exhaustiveCheck: never = outcome;
+        throw new Error(`Unhandled runtime migration outcome: ${exhaustiveCheck}`);
+      }
     }
-    return success({ outcome: "ready" });
   }
 
   /**
