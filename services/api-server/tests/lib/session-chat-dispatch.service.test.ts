@@ -54,10 +54,15 @@ function makeServerState(): ServerState {
     repoCloned: true,
     agentSessionId: null,
     agentProcessId: null,
+    agentProcessRunId: null,
     activeUserMessageId: null,
+    activeTurnDispatchStatus: null,
     startupToolchain: null,
     startupScriptCompleted: true,
     finalNetworkPolicyApplied: true,
+    sessionConnectorId: null,
+    spriteLabelsApplied: true,
+    gitAuthMode: "ephemeral_token",
   };
 }
 
@@ -97,10 +102,14 @@ function makeMessageRepository(): MessageRepository {
 
 function makeChatDispatchHarness(params: {
   publishSessionSummaryInvalidated: (userId: string, sessionId: string) => Promise<void>;
+  serverState?: ServerState;
+  clientState?: ClientState;
 }) {
+  const serverState = params.serverState ?? makeServerState();
+  const clientState = params.clientState ?? makeClientState();
   const turnCoordinator = {
     beginTurn: vi.fn(),
-    attachProcessId: vi.fn(),
+    markTurnDispatched: vi.fn(),
     handleTurnSpawnFailed: vi.fn(),
   } as unknown as AgentTurnCoordinator;
   const processManager = {
@@ -112,6 +121,9 @@ function makeChatDispatchHarness(params: {
   const messageRepository = makeMessageRepository();
   const broadcastMessage = vi.fn((_message: ServerMessage, _without?: string[]) => {});
   const sendMessageToConnection = vi.fn((_message: ServerMessage, _connectionId: string) => {});
+  const updatePartialState = vi.fn((partial: Partial<ClientState>) => {
+    Object.assign(clientState, partial);
+  });
 
   const service = new SessionChatDispatchService({
     logger: noopLogger,
@@ -123,9 +135,9 @@ function makeChatDispatchHarness(params: {
     attachmentService,
     turnCoordinator,
     processManager,
-    getServerState: makeServerState,
-    getClientState: makeClientState,
-    updatePartialState: vi.fn(),
+    getServerState: () => serverState,
+    getClientState: () => clientState,
+    updatePartialState,
     broadcastMessage,
     sendMessageToConnection,
     synthesizeStatus: vi.fn((): SessionStatus => "ready"),
@@ -139,6 +151,9 @@ function makeChatDispatchHarness(params: {
     sendMessageToConnection,
     turnCoordinator,
     processManager,
+    updatePartialState,
+    serverState,
+    clientState,
   };
 }
 
@@ -168,7 +183,18 @@ describe("SessionChatDispatchService", () => {
       publishSessionSummaryInvalidated: vi.fn(async () => {}),
     });
 
-    const result = await harness.service.dispatchChatMessage(makeChatMessage(), "connection-1");
+    const prepared = await harness.service.prepareChatMessage(makeChatMessage(), "connection-1");
+
+    expect(prepared.ok).toBe(true);
+    expect(harness.messageRepository.create).not.toHaveBeenCalled();
+    expect(harness.turnCoordinator.beginTurn).not.toHaveBeenCalled();
+    if (!prepared.ok) { return; }
+    const claimedTurn = harness.service.claimPreparedMessage(prepared.value);
+
+    expect(harness.turnCoordinator.beginTurn).toHaveBeenCalledWith(SERVER_MESSAGE_ID);
+    expect(harness.processManager.dispatchMessage).not.toHaveBeenCalled();
+
+    const result = await harness.service.spawnClaimedTurn(claimedTurn);
 
     expect(result).toEqual(success(undefined));
     expect(harness.messageRepository.create).toHaveBeenCalledWith(
@@ -194,7 +220,10 @@ describe("SessionChatDispatchService", () => {
       },
       ["connection-1"],
     );
-    expect(harness.turnCoordinator.beginTurn).toHaveBeenCalledWith(SERVER_MESSAGE_ID);
+    expect(harness.turnCoordinator.markTurnDispatched).toHaveBeenCalledWith(
+      SERVER_MESSAGE_ID,
+      42,
+    );
     expect(harness.processManager.dispatchMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         userMessage: expect.objectContaining({ id: SERVER_MESSAGE_ID }),
@@ -209,6 +238,85 @@ describe("SessionChatDispatchService", () => {
     expect(harness.broadcastMessage.mock.invocationCallOrder[0]).toBeLessThan(
       harness.turnCoordinator.beginTurn.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("keeps preparation mutation-free and applies overrides only while claiming", async () => {
+    const harness = makeChatDispatchHarness({
+      publishSessionSummaryInvalidated: vi.fn(async () => {}),
+    });
+
+    const prepared = await harness.service.prepareChatMessage(
+      { ...makeChatMessage(), agentMode: "plan" },
+      "connection-1",
+    );
+
+    expect(prepared.ok).toBe(true);
+    expect(harness.updatePartialState).not.toHaveBeenCalled();
+    expect(harness.messageRepository.create).not.toHaveBeenCalled();
+    expect(harness.broadcastMessage).not.toHaveBeenCalled();
+    expect(harness.turnCoordinator.beginTurn).not.toHaveBeenCalled();
+    if (!prepared.ok) { return; }
+
+    harness.service.claimPreparedMessage(prepared.value);
+
+    expect(harness.updatePartialState).toHaveBeenCalledWith({ agentMode: "plan" });
+    expect(harness.messageRepository.create).toHaveBeenCalledOnce();
+    expect(harness.turnCoordinator.beginTurn).toHaveBeenCalledOnce();
+  });
+
+  it("claims a pending initial message before starting process I/O", () => {
+    const pendingMessage = {
+      message: {
+        id: SERVER_MESSAGE_ID,
+        role: "user" as const,
+        parts: [{ type: "text" as const, text: "Initial request" }],
+      },
+      attachmentIds: [],
+    };
+    const harness = makeChatDispatchHarness({
+      publishSessionSummaryInvalidated: vi.fn(async () => {}),
+      clientState: { ...makeClientState(), pendingUserMessage: pendingMessage },
+    });
+
+    const claimedTurn = harness.service.claimPendingMessage();
+
+    expect(claimedTurn).toEqual(expect.objectContaining({
+      userMessageId: SERVER_MESSAGE_ID,
+      content: "Initial request",
+    }));
+    expect(harness.updatePartialState).toHaveBeenCalledWith({ pendingUserMessage: null });
+    expect(harness.turnCoordinator.beginTurn).toHaveBeenCalledWith(SERVER_MESSAGE_ID);
+    expect(harness.processManager.dispatchMessage).not.toHaveBeenCalled();
+  });
+
+  it("recovers a durable claim only when this instance is not dispatching it", async () => {
+    const interruptedHarness = makeChatDispatchHarness({
+      publishSessionSummaryInvalidated: vi.fn(async () => {}),
+      serverState: {
+        ...makeServerState(),
+        activeUserMessageId: SERVER_MESSAGE_ID,
+        activeTurnDispatchStatus: "claimed",
+      },
+    });
+
+    expect(interruptedHarness.service.recoverInterruptedClaim()).toBe(SERVER_MESSAGE_ID);
+    expect(interruptedHarness.turnCoordinator.handleTurnSpawnFailed).toHaveBeenCalledWith(
+      SERVER_MESSAGE_ID,
+      "Previous agent turn did not start",
+    );
+
+    const liveHarness = makeChatDispatchHarness({
+      publishSessionSummaryInvalidated: vi.fn(async () => {}),
+    });
+    const prepared = await liveHarness.service.prepareChatMessage(
+      makeChatMessage(),
+      "connection-1",
+    );
+    if (!prepared.ok) { throw new Error(prepared.error.message); }
+    liveHarness.service.claimPreparedMessage(prepared.value);
+
+    expect(liveHarness.service.recoverInterruptedClaim()).toBeNull();
+    expect(liveHarness.turnCoordinator.handleTurnSpawnFailed).not.toHaveBeenCalled();
   });
 
   it("publishes a summary invalidation only after history persistence resolves", async () => {
@@ -227,7 +335,10 @@ describe("SessionChatDispatchService", () => {
     });
     const service = makeChatDispatchService({ publishSessionSummaryInvalidated });
 
-    await service.dispatchChatMessage(makeChatMessage(), "connection-1");
+    const prepared = await service.prepareChatMessage(makeChatMessage(), "connection-1");
+    if (!prepared.ok) { throw new Error(prepared.error.message); }
+    const claimedTurn = service.claimPreparedMessage(prepared.value);
+    await service.spawnClaimedTurn(claimedTurn);
     await Promise.resolve();
 
     expect(operations).toEqual(["history:start"]);
@@ -252,7 +363,10 @@ describe("SessionChatDispatchService", () => {
     const publishSessionSummaryInvalidated = vi.fn(async () => {});
     const service = makeChatDispatchService({ publishSessionSummaryInvalidated });
 
-    await service.dispatchChatMessage(makeChatMessage(), "connection-1");
+    const prepared = await service.prepareChatMessage(makeChatMessage(), "connection-1");
+    if (!prepared.ok) { throw new Error(prepared.error.message); }
+    const claimedTurn = service.claimPreparedMessage(prepared.value);
+    await service.spawnClaimedTurn(claimedTurn);
     await historyDone.promise;
     await Promise.resolve();
 

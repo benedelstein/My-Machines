@@ -84,6 +84,26 @@ export interface SessionChatAttachmentProvider {
   ): Promise<AttachmentRecord[]>;
 }
 
+export interface PreparedChatMessage {
+  userMessage: UIMessage;
+  content: string | undefined;
+  attachmentIds: string[];
+  connectionId: string;
+  clientMessageId: string | undefined;
+  model: string | undefined;
+  effort: string | undefined;
+  agentMode: AgentMode | undefined;
+}
+
+export interface ClaimedTurn {
+  userMessageId: string;
+  content: string | undefined;
+  attachmentIds: string[];
+  model?: string;
+  effort?: string;
+  agentMode?: AgentMode;
+}
+
 /**
  * Owns dispatching user chat turns into the vm-agent process.
  * Validates the payload, persists the user message, delegates to
@@ -105,6 +125,7 @@ export class SessionChatDispatchService {
   private readonly synthesizeStatus: () => SessionStatus;
   private readonly publishSessionSummaryInvalidated:
     SessionChatDispatchServiceDeps["publishSessionSummaryInvalidated"];
+  private readonly dispatchingTurnIds = new Set<string>();
 
   constructor(deps: SessionChatDispatchServiceDeps) {
     this.logger = deps.logger.scope("session-chat-dispatch");
@@ -122,15 +143,11 @@ export class SessionChatDispatchService {
     this.publishSessionSummaryInvalidated = deps.publishSessionSummaryInvalidated;
   }
 
-  /**
-   * Dispatches a chat message from a client into a new vm-agent turn.
-   * Resolves bound attachments, applies any model/agent-mode overrides,
-   * persists the user messages, and sends the message to the vm-agent.
-   */
-  async dispatchChatMessage(
+  /** Resolves and validates a chat message without mutating session state. */
+  async prepareChatMessage(
     payload: ChatMessageEvent,
     connectionId: string,
-  ): Promise<Result<void, ChatDispatchError>> {
+  ): Promise<Result<PreparedChatMessage, ChatDispatchError>> {
     const serverState = this.getServerState();
     const sessionId = serverState.sessionId;
     if (!sessionId) {
@@ -151,23 +168,21 @@ export class SessionChatDispatchService {
     const clientState = this.getClientState();
     let modelOverride: string | undefined;
     if (payload.model && payload.model !== clientState.agentSettings.model) {
-      const modelResult = this.validateAndApplyModelSwitch(payload.model);
+      const modelResult = this.validateModelSwitch(payload.model);
       if (!modelResult.ok) { return failure(modelResult.error); }
       modelOverride = modelResult.value;
     }
 
     let effortOverride: string | undefined;
     if (payload.effort && payload.effort !== clientState.agentSettings.effort) {
-      const effortResult = this.validateAndApplyEffortSwitch(payload.effort);
+      const effortResult = this.validateEffortSwitch(payload.effort);
       if (!effortResult.ok) { return failure(effortResult.error); }
       effortOverride = effortResult.value;
     }
 
-    let agentModeOverride: AgentMode | undefined;
-    if (payload.agentMode && payload.agentMode !== clientState.agentMode) {
-      this.updatePartialState({ agentMode: payload.agentMode });
-      agentModeOverride = payload.agentMode;
-    }
+    const agentModeOverride = payload.agentMode !== clientState.agentMode
+      ? payload.agentMode
+      : undefined;
 
     const userUiMessage = createUserUiMessage(
       content,
@@ -182,45 +197,60 @@ export class SessionChatDispatchService {
       );
     }
 
-    this.onUserMessageSent(
-      userUiMessage,
-      attachmentIds,
-      connectionId,
-      payload.clientMessageId,
-    );
-
-    const dispatchResult = await this.spawnTurn({
-      userMessageId: userUiMessage.id,
+    return success({
+      userMessage: userUiMessage,
       content,
       attachmentIds,
+      connectionId,
+      clientMessageId: payload.clientMessageId,
       model: modelOverride,
       effort: effortOverride,
       agentMode: agentModeOverride,
     });
-    if (!dispatchResult.ok) {
-      this.turnCoordinator.handleTurnSpawnFailed(
-        userUiMessage.id,
-        dispatchResult.error.message,
-      );
-      return failure(dispatchResult.error);
-    }
-
-    return success(undefined);
   }
 
-  /**
-   * Dispatches the pending initial message once provisioning completes.
-   * No-op if there is no pending message or a turn is already in flight.
-   */
-  async maybeDispatchPendingMessage(): Promise<void> {
+  /** Persists a prepared message and synchronously marks its turn claimed. */
+  claimPreparedMessage(prepared: PreparedChatMessage): ClaimedTurn {
+    const clientState = this.getClientState();
+    if (prepared.model || prepared.effort) {
+      this.updatePartialState({
+        agentSettings: {
+          ...clientState.agentSettings,
+          model: prepared.model ?? clientState.agentSettings.model,
+          effort: prepared.effort ?? clientState.agentSettings.effort,
+        } as AgentSettings,
+      });
+    }
+    if (prepared.agentMode) {
+      this.updatePartialState({ agentMode: prepared.agentMode });
+    }
+
+    this.onUserMessageSent(
+      prepared.userMessage,
+      prepared.attachmentIds,
+      prepared.connectionId,
+      prepared.clientMessageId,
+    );
+    return this.claimTurn({
+      userMessageId: prepared.userMessage.id,
+      content: prepared.content,
+      attachmentIds: prepared.attachmentIds,
+      model: prepared.model,
+      effort: prepared.effort,
+      agentMode: prepared.agentMode,
+    });
+  }
+
+  /** Claims the pending initial message without starting process I/O. */
+  claimPendingMessage(): ClaimedTurn | null {
     const clientState = this.getClientState();
     const serverState = this.getServerState();
     const pendingMessage = clientState.pendingUserMessage;
-    if (!pendingMessage || serverState.activeUserMessageId) { return; }
-    const sessionId = serverState.sessionId;
-    if (!sessionId) { return; }
+    if (!pendingMessage || serverState.activeUserMessageId || !serverState.sessionId) {
+      return null;
+    }
 
-    this.logger.debug("Dispatching pending message", {
+    this.logger.debug("Claiming pending message", {
       fields: { messageId: pendingMessage.message.id },
     });
     const { attachmentIds } = pendingMessage;
@@ -229,37 +259,60 @@ export class SessionChatDispatchService {
 
     this.updatePartialState({ pendingUserMessage: null });
     this.onUserMessageSent(userMessage, attachmentIds);
-
-    const dispatchResult = await this.spawnTurn({
+    return this.claimTurn({
       userMessageId: userMessage.id,
       content,
       attachmentIds,
     });
-    if (!dispatchResult.ok) {
-      this.logger.error("Failed to dispatch pending message", {
-        fields: { code: dispatchResult.error.code },
-        error: dispatchResult.error.message,
-      });
-      this.turnCoordinator.handleTurnSpawnFailed(
-        userMessage.id,
-        dispatchResult.error.message,
-      );
+  }
+
+  /** Dispatches an already-claimed turn and clears it through the failure path. */
+  async spawnClaimedTurn(
+    claimedTurn: ClaimedTurn,
+  ): Promise<Result<void, ChatDispatchError>> {
+    try {
+      const dispatchResult = await this.spawnTurn(claimedTurn);
+      if (!dispatchResult.ok) {
+        this.turnCoordinator.handleTurnSpawnFailed(
+          claimedTurn.userMessageId,
+          dispatchResult.error.message,
+        );
+      }
+      return dispatchResult;
+    } finally {
+      this.dispatchingTurnIds.delete(claimedTurn.userMessageId);
     }
   }
 
-  private async spawnTurn(args: {
-    userMessageId: string;
-    content: string | undefined;
-    attachmentIds: string[];
-    model?: string;
-    effort?: string;
-    agentMode?: AgentMode;
-  }): Promise<Result<void, ChatDispatchError>> {
-    // Register the turn before spawning so any webhook that races in with
-    // chunks is not rejected as stale. The processId is filled in below once
-    // the spawn returns.
-    this.turnCoordinator.beginTurn(args.userMessageId);
+  /** Clears a durable claim left behind before dispatch was confirmed. */
+  recoverInterruptedClaim(): string | null {
+    const serverState = this.getServerState();
+    const userMessageId = serverState.activeUserMessageId;
+    if (
+      !userMessageId ||
+      serverState.activeTurnDispatchStatus !== "claimed" ||
+      this.dispatchingTurnIds.has(userMessageId)
+    ) {
+      return null;
+    }
 
+    this.logger.warn("Recovering interrupted claimed turn", {
+      fields: { userMessageId },
+    });
+    this.turnCoordinator.handleTurnSpawnFailed(
+      userMessageId,
+      "Previous agent turn did not start",
+    );
+    return userMessageId;
+  }
+
+  private claimTurn(claimedTurn: ClaimedTurn): ClaimedTurn {
+    this.dispatchingTurnIds.add(claimedTurn.userMessageId);
+    this.turnCoordinator.beginTurn(claimedTurn.userMessageId);
+    return claimedTurn;
+  }
+
+  private async spawnTurn(args: ClaimedTurn): Promise<Result<void, ChatDispatchError>> {
     let spawnResult;
     try {
       spawnResult = await this.processManager.dispatchMessage({
@@ -282,11 +335,14 @@ export class SessionChatDispatchService {
       return failure(spawnResult.error);
     }
 
-    this.turnCoordinator.attachProcessId(spawnResult.value.agentProcessId);
+    this.turnCoordinator.markTurnDispatched(
+      args.userMessageId,
+      spawnResult.value.agentProcessId,
+    );
     return success(undefined);
   }
 
-  private validateAndApplyModelSwitch(
+  private validateModelSwitch(
     model: string,
   ): Result<string, ChatDispatchError> {
     const clientState = this.getClientState();
@@ -306,16 +362,10 @@ export class SessionChatDispatchService {
       );
     }
 
-    this.updatePartialState({
-      agentSettings: {
-        ...clientState.agentSettings,
-        model: validatedModel.id,
-      } as AgentSettings,
-    });
     return success(validatedModel.id);
   }
 
-  private validateAndApplyEffortSwitch(
+  private validateEffortSwitch(
     effort: string,
   ): Result<string, ChatDispatchError> {
     const clientState = this.getClientState();
@@ -335,12 +385,6 @@ export class SessionChatDispatchService {
       );
     }
 
-    this.updatePartialState({
-      agentSettings: {
-        ...clientState.agentSettings,
-        effort: validatedEffort.id,
-      } as AgentSettings,
-    });
     return success(validatedEffort.id);
   }
 
