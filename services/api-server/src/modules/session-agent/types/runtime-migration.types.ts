@@ -97,9 +97,3 @@ export interface RuntimeMigrationRetryPolicy {
   readonly maxDelayMs: number;
   readonly operatorThreshold: number;
 }
-
-export interface RuntimeMigrationRetryEligibility {
-  readonly eligible: boolean;
-  readonly retryAt: string | null;
-  readonly operatorAttentionRequired: boolean;
-}

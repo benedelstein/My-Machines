@@ -77,8 +77,9 @@ defineContractRuntimeMigration({
 ```
 
 The registry is a static serial list. A targeted setup ensure executes the
-registry prefix through its target; it never bypasses an earlier definition or
-reacquires the runtime-boundary mutex.
+registry prefix through its target; it never bypasses an earlier definition.
+The caller passes a compile-time-only lease proving that it already owns the
+runtime-boundary mutex, and the coordinator never acquires that mutex itself.
 
 ## Persistence and retry
 
@@ -88,9 +89,16 @@ not a lock. Apply functions must be idempotent and return success only after
 verifying their postcondition.
 
 Retries use bounded exponential backoff: one second initially, capped at five
-minutes. Five attempts makes the structured lifecycle event operator-visible.
-Operator diagnostics expose only IDs, revisions, attempt counts, timestamps,
-status, and sanitized failures.
+minutes. Five attempts marks the structured lifecycle event for operator
+attention. The repository remains CRUD-only; a future operator-visible query
+surface will expose pending and failed records without leaking contract inputs.
+
+Structured telemetry uses lifecycle `event` values rather than calling every
+state an outcome. An interrupted `running` record emits `interrupted_retry` when
+retried. A higher stored version emits `newer_version_skipped`: it is safely
+skipped during rolling deployment or rollback, but remains visible because old
+code is running against state previously touched by newer code. The event
+includes both the desired and higher applied versions.
 
 ## Security
 

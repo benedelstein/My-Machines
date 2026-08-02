@@ -6,7 +6,10 @@ import {
 } from "@repo/shared";
 import { RuntimeMigrationRepository } from
   "../../src/modules/session-agent/repositories/runtime-migration.repository";
-import { RuntimeMigrationCoordinator } from
+import {
+  RuntimeMigrationCoordinator,
+  type RuntimeMigrationLifecycleEvent,
+} from
   "../../src/modules/session-agent/services/runtime-migration-coordinator.service";
 import {
   defineContractRuntimeMigration,
@@ -59,6 +62,7 @@ function createFixture(
   options: {
     now?: () => Date;
     retryDelayMs?: number;
+    observe?: (event: RuntimeMigrationLifecycleEvent) => void;
   } = {},
 ): {
   coordinator: RuntimeMigrationCoordinator;
@@ -83,6 +87,7 @@ function createFixture(
       maxDelayMs: options.retryDelayMs ?? 0,
       operatorThreshold: 3,
     },
+    ...(options.observe ? { observe: options.observe } : {}),
   });
   return { coordinator, repository, logger };
 }
@@ -108,6 +113,7 @@ describe("RuntimeMigrationCoordinator", () => {
     });
 
     const applyVersionOne = vi.fn(async () => success(undefined));
+    const rollbackEvents: RuntimeMigrationLifecycleEvent[] = [];
     const rolledBack = new RuntimeMigrationCoordinator({
       repository: fixture.repository,
       definitions: [defineVersionedRuntimeMigration({
@@ -117,6 +123,7 @@ describe("RuntimeMigrationCoordinator", () => {
         apply: applyVersionOne,
       })],
       logger: createLogger(),
+      observe: (event) => rollbackEvents.push(event),
     });
     expect(await rolledBack.ensureMigrations(createContext(), lease)).toEqual({
       ok: true,
@@ -124,6 +131,12 @@ describe("RuntimeMigrationCoordinator", () => {
     });
     expect(applyVersionTwo).toHaveBeenCalledOnce();
     expect(applyVersionOne).not.toHaveBeenCalled();
+    expect(rollbackEvents).toContainEqual(expect.objectContaining({
+      event: "newer_version_skipped",
+      migrationId: "fixture.version",
+      revision: 1,
+      appliedRevision: 2,
+    }));
   });
 
   it("reapplies a contract when its desired value changes", async () => {
@@ -158,8 +171,10 @@ describe("RuntimeMigrationCoordinator", () => {
       buildContract: () => desired,
       apply,
     });
+    const events: RuntimeMigrationLifecycleEvent[] = [];
     const fixture = createFixture([definition], {
       now: () => new Date("2026-08-01T00:01:00.000Z"),
+      observe: (event) => events.push(event),
     });
     fixture.repository.beginAttempt(
       "fixture.changed-attempt",
@@ -176,6 +191,11 @@ describe("RuntimeMigrationCoordinator", () => {
       kind: "contract",
       hash: "a".repeat(64),
     });
+    expect(events).toContainEqual(expect.objectContaining({
+      event: "interrupted_retry",
+      migrationId: "fixture.changed-attempt",
+      attempt: 2,
+    }));
   });
 
   it("runs targeted prefixes serially and propagates aggregate applied", async () => {
@@ -383,7 +403,9 @@ describe("RuntimeMigrationCoordinator", () => {
     await fixture.coordinator.ensureMigrations(createContext(), lease);
 
     const serializedLogs = JSON.stringify(fixture.logger.calls);
-    const serializedRecords = JSON.stringify(fixture.repository.list());
+    const serializedRecords = JSON.stringify(
+      fixture.repository.get("fixture.secret-safe", "contract"),
+    );
     expect(serializedLogs).not.toContain(secret);
     expect(serializedLogs).not.toContain("private-contract-preimage");
     expect(serializedRecords).not.toContain(secret);
@@ -523,10 +545,11 @@ describe("RuntimeMigrationCoordinator", () => {
 
   it("ships an empty registry as a local no-op with no records", async () => {
     const fixture = createFixture([]);
+    const beginAttempt = vi.spyOn(fixture.repository, "beginAttempt");
     expect(await fixture.coordinator.ensureMigrations(createContext(), lease)).toEqual({
       ok: true,
       value: { outcome: "current" },
     });
-    expect(fixture.repository.list()).toEqual({ ok: true, value: [] });
+    expect(beginAttempt).not.toHaveBeenCalled();
   });
 });

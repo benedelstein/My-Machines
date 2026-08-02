@@ -2,6 +2,7 @@ import {
   failure,
   success,
   type Logger,
+  type Result,
 } from "@repo/shared";
 import type { RuntimeMigrationRepository } from
   "@/modules/session-agent/repositories/runtime-migration.repository";
@@ -25,8 +26,8 @@ const DEFAULT_RETRY_POLICY: RuntimeMigrationRetryPolicy = {
   operatorThreshold: 5,
 };
 
-export interface RuntimeMigrationObservation {
-  readonly outcome:
+export interface RuntimeMigrationLifecycleEvent {
+  readonly event:
     | "prepared"
     | "pending"
     | "current"
@@ -34,10 +35,12 @@ export interface RuntimeMigrationObservation {
     | "applied"
     | "failed"
     | "deferred"
-    | "stale_retried";
+    | "interrupted_retry"
+    | "newer_version_skipped";
   readonly migrationId?: string;
   readonly revisionKind?: RuntimeMigrationRevision["kind"];
   readonly revision?: string | number;
+  readonly appliedRevision?: string | number;
   readonly attempt?: number;
   readonly durationMs?: number;
   readonly errorCode?: string;
@@ -50,36 +53,87 @@ interface RuntimeMigrationCoordinatorDependencies {
   readonly logger: Logger;
   readonly now?: () => Date;
   readonly retryPolicy?: RuntimeMigrationRetryPolicy;
-  readonly observe?: (observation: RuntimeMigrationObservation) => void;
+  readonly observe?: (event: RuntimeMigrationLifecycleEvent) => void;
 }
 
-function needsApply(
+type RevisionDisposition =
+  | { readonly kind: "apply" }
+  | { readonly kind: "current" }
+  | { readonly kind: "newer_version"; readonly appliedVersion: number };
+
+interface RetryEligibility {
+  readonly status: "running" | "failed";
+  readonly nextAttempt: number;
+  readonly eligible: boolean;
+  readonly retryAt: string | null;
+  readonly operatorAttentionRequired: boolean;
+}
+
+function compareRevision(
   record: RuntimeMigrationRecord | null,
   desired: RuntimeMigrationRevision,
-): boolean {
+): Result<RevisionDisposition, RuntimeMigrationError> {
   if (!record?.appliedRevision) {
-    return true;
+    return success({ kind: "apply" });
   }
 
   const applied = record.appliedRevision;
-  if (applied.kind !== desired.kind) {
-    return true;
-  }
-  switch (desired.kind) {
+  switch (applied.kind) {
     case "version": {
-      if (applied.kind !== "version") {
-        return true;
+      if (desired.kind !== "version") {
+        return failure({
+          code: "MIGRATION_REVISION_KIND_CHANGED",
+          message: "A runtime migration changed revision strategy",
+          migrationId: record.migrationId,
+        });
       }
       if (applied.version > desired.version) {
-        return false;
+        return success({ kind: "newer_version", appliedVersion: applied.version });
       }
-      return applied.version < desired.version || record.status !== "applied";
+      return success(
+        applied.version < desired.version || record.status !== "applied"
+          ? { kind: "apply" }
+          : { kind: "current" },
+      );
     }
     case "contract": {
-      if (applied.kind !== "contract") {
-        return true;
+      if (desired.kind !== "contract") {
+        return failure({
+          code: "MIGRATION_REVISION_KIND_CHANGED",
+          message: "A runtime migration changed revision strategy",
+          migrationId: record.migrationId,
+        });
       }
-      return applied.hash !== desired.hash || record.status !== "applied";
+      return success(
+        applied.hash !== desired.hash || record.status !== "applied"
+          ? { kind: "apply" }
+          : { kind: "current" },
+      );
+    }
+  }
+}
+
+function getRetryEligibility(
+  record: RuntimeMigrationRecord,
+  now: Date,
+  policy: RuntimeMigrationRetryPolicy,
+): RetryEligibility | null {
+  switch (record.status) {
+    case "applied":
+      return null;
+    case "running":
+    case "failed": {
+      const exponent = Math.max(0, record.attemptCount - 1);
+      const delayMs = Math.min(policy.maxDelayMs, policy.baseDelayMs * (2 ** exponent));
+      const lastAttemptMs = Date.parse(record.lastAttemptAt);
+      const retryAtMs = lastAttemptMs + delayMs;
+      return {
+        status: record.status,
+        nextAttempt: record.attemptCount + 1,
+        eligible: !Number.isFinite(retryAtMs) || now.getTime() >= retryAtMs,
+        retryAt: Number.isFinite(retryAtMs) ? new Date(retryAtMs).toISOString() : null,
+        operatorAttentionRequired: record.attemptCount >= policy.operatorThreshold,
+      };
     }
   }
 }
@@ -110,7 +164,7 @@ export class RuntimeMigrationCoordinator {
   private readonly logger: Logger;
   private readonly now: () => Date;
   private readonly retryPolicy: RuntimeMigrationRetryPolicy;
-  private readonly observe: (observation: RuntimeMigrationObservation) => void;
+  private readonly observe: (event: RuntimeMigrationLifecycleEvent) => void;
 
   constructor(dependencies: RuntimeMigrationCoordinatorDependencies) {
     assertRuntimeMigrationRegistry(dependencies.definitions);
@@ -130,7 +184,7 @@ export class RuntimeMigrationCoordinator {
     return this.ensureDefinitions(this.definitions, context);
   }
 
-  /** Ensures the registry prefix through `migrationId` without reacquiring the boundary. */
+  /** Ensures the registry prefix while the caller's lease proves mutex ownership. */
   async ensureMigration(
     migrationId: string,
     context: RuntimeMigrationContext,
@@ -147,15 +201,6 @@ export class RuntimeMigrationCoordinator {
     return this.ensureDefinitions(this.definitions.slice(0, targetIndex + 1), context);
   }
 
-  /** Returns failed/running records for operator diagnostics without exposing contracts. */
-  listDiagnostics(): ReturnType<RuntimeMigrationRepository["list"]> {
-    const records = this.repository.list();
-    if (!records.ok) {
-      return records;
-    }
-    return success(records.value.filter((record) => record.status !== "applied"));
-  }
-
   private async ensureDefinitions(
     definitions: readonly RuntimeMigrationDefinition[],
     context: RuntimeMigrationContext,
@@ -168,9 +213,9 @@ export class RuntimeMigrationCoordinator {
     }
     if (context.getServerState().activeUserMessageId !== null) {
       this.logger.debug("Runtime migrations deferred for active turn", {
-        fields: { outcome: "deferred" },
+        fields: { event: "deferred" },
       });
-      this.observe({ outcome: "deferred" });
+      this.observe({ event: "deferred" });
       return success({ outcome: "deferred_active_turn" });
     }
 
@@ -207,8 +252,8 @@ export class RuntimeMigrationCoordinator {
     }
 
     const prepared = preparedResult.value;
-    this.logObservation({
-      outcome: "prepared",
+    this.logEvent({
+      event: "prepared",
       migrationId: definition.id,
       revisionKind: prepared.revision.kind,
       revision: revisionValue(prepared.revision),
@@ -220,24 +265,36 @@ export class RuntimeMigrationCoordinator {
       return recordResult;
     }
     const record = recordResult.value;
-    if (!needsApply(record, prepared.revision)) {
-      this.logObservation({
-        outcome: "current",
+    const comparison = compareRevision(record, prepared.revision);
+    if (!comparison.ok) {
+      this.logFailure(definition.id, comparison.error);
+      return comparison;
+    }
+    if (comparison.value.kind !== "apply") {
+      this.logEvent({
+        event: comparison.value.kind === "newer_version"
+          ? "newer_version_skipped"
+          : "current",
         migrationId: definition.id,
         revisionKind: prepared.revision.kind,
         revision: revisionValue(prepared.revision),
+        ...(comparison.value.kind === "newer_version"
+          ? { appliedRevision: comparison.value.appliedVersion }
+          : {}),
       });
       return success({ outcome: "current" });
     }
 
-    this.logObservation({
-      outcome: "pending",
+    this.logEvent({
+      event: "pending",
       migrationId: definition.id,
       revisionKind: prepared.revision.kind,
       revision: revisionValue(prepared.revision),
     });
-    if (record && (record.status === "running" || record.status === "failed")) {
-      const retry = this.repository.getRetryEligibility(record, this.now(), this.retryPolicy);
+    const retry = record
+      ? getRetryEligibility(record, this.now(), this.retryPolicy)
+      : null;
+    if (retry) {
       if (!retry.eligible) {
         const error: RuntimeMigrationError = {
           code: "MIGRATION_RETRY_BACKOFF",
@@ -248,13 +305,13 @@ export class RuntimeMigrationCoordinator {
         this.logFailure(definition.id, error, retry.operatorAttentionRequired);
         return failure(error);
       }
-      if (record.status === "running") {
-        this.logObservation({
-          outcome: "stale_retried",
+      if (retry.status === "running") {
+        this.logEvent({
+          event: "interrupted_retry",
           migrationId: definition.id,
           revisionKind: prepared.revision.kind,
           revision: revisionValue(prepared.revision),
-          attempt: record.attemptCount + 1,
+          attempt: retry.nextAttempt,
           operatorAttentionRequired: retry.operatorAttentionRequired,
         });
       }
@@ -271,8 +328,8 @@ export class RuntimeMigrationCoordinator {
       return attemptResult;
     }
     const attempt = attemptResult.value.attemptCount;
-    this.logObservation({
-      outcome: "running",
+    this.logEvent({
+      event: "running",
       migrationId: definition.id,
       revisionKind: prepared.revision.kind,
       revision: revisionValue(prepared.revision),
@@ -314,8 +371,8 @@ export class RuntimeMigrationCoordinator {
       this.logFailure(definition.id, appliedResult.error);
       return appliedResult;
     }
-    this.logObservation({
-      outcome: "applied",
+    this.logEvent({
+      event: "applied",
       migrationId: definition.id,
       revisionKind: prepared.revision.kind,
       revision: revisionValue(prepared.revision),
@@ -330,30 +387,31 @@ export class RuntimeMigrationCoordinator {
     error: RuntimeMigrationError,
     operatorAttentionRequired = false,
   ): void {
-    this.logObservation({
-      outcome: "failed",
+    this.logEvent({
+      event: "failed",
       migrationId,
       errorCode: error.code,
       operatorAttentionRequired,
     });
   }
 
-  private logObservation(observation: RuntimeMigrationObservation): void {
+  private logEvent(event: RuntimeMigrationLifecycleEvent): void {
     const fields = {
-      outcome: observation.outcome,
-      migrationId: observation.migrationId ?? null,
-      revisionKind: observation.revisionKind ?? null,
-      revision: observation.revision ?? null,
-      attempt: observation.attempt ?? null,
-      durationMs: observation.durationMs ?? null,
-      errorCode: observation.errorCode ?? null,
-      operatorAttentionRequired: observation.operatorAttentionRequired ?? false,
+      event: event.event,
+      migrationId: event.migrationId ?? null,
+      revisionKind: event.revisionKind ?? null,
+      revision: event.revision ?? null,
+      appliedRevision: event.appliedRevision ?? null,
+      attempt: event.attempt ?? null,
+      durationMs: event.durationMs ?? null,
+      errorCode: event.errorCode ?? null,
+      operatorAttentionRequired: event.operatorAttentionRequired ?? false,
     };
-    if (observation.outcome === "failed") {
+    if (event.event === "failed" || event.event === "newer_version_skipped") {
       this.logger.warn("Runtime migration lifecycle event", { fields });
     } else {
       this.logger.info("Runtime migration lifecycle event", { fields });
     }
-    this.observe(observation);
+    this.observe(event);
   }
 }

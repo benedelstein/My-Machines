@@ -148,7 +148,7 @@ and non-null `attemptedRevision` domain values.
 
 #### Scenario: Code rollback sees a higher stored version
 - **WHEN** a versioned migration's stored version is greater than the version desired by rolled-back code
-- **THEN** the coordinator SHALL treat the migration as already applied and SHALL NOT run the older imperative transition
+- **THEN** the coordinator SHALL treat the migration as already applied, SHALL NOT run the older imperative transition, and SHALL emit a distinct lifecycle event so the mixed-version or rollback state is visible
 
 #### Scenario: Worker stops after an external effect
 - **WHEN** a migration record remains running because execution stopped before success was recorded
@@ -639,8 +639,9 @@ state.
 - **THEN** rollout SHALL retire/tombstone or safely supersede the old definition so late-waking sessions do not reapply conflicting state
 
 ### Requirement: Runtime migration failures are observable and secret-safe
-The system SHALL emit structured lifecycle events for pending, current, running,
-applied, failed, and deferred migrations without exposing secret material.
+The system SHALL emit structured lifecycle events for prepared, pending,
+current, running, applied, failed, deferred, interrupted-retry, and
+newer-version-skip states without exposing secret material.
 `pending` and `running` are observability/migration-record vocabulary, not additional
 coordinator return outcomes.
 
