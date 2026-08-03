@@ -221,8 +221,16 @@ Set these via `wrangler secret put`:
 
 1. Create a GitHub App at https://github.com/settings/apps/new
 2. Set webhook URL to `https://<api-domain>/webhooks/github`
-3. Grant permissions: `Contents: Read & write`, `Metadata: Read-only`
-4. Subscribe to events: `Installation`, `Repository`
+3. Grant permissions: `Contents: Read & write`, `Metadata: Read-only`,
+   `Pull requests: Read & write`
+   - Contents is used for clone, fetch, push, and compare through
+     `GitHubAppService`.
+   - Pull requests is required because `GitHubAppService.createPullRequest(...)`
+     calls GitHub's pull-request create endpoint for manual and automatic PRs.
+4. Subscribe to events: `Installation`, `Repository`, `Pull request`
+   - `GitHubWebhookService.registerWebhookHandlers()` consumes
+     `pull_request` events to update stored session PR state when a PR is
+     opened, closed, reopened, or merged outside the app.
 5. Generate a private key and download it
 6. Ensure `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_SLUG` are configured in `wrangler.jsonc`, then set secrets:
    ```bash
