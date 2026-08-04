@@ -291,6 +291,7 @@ export class SessionProvisionService {
       throw new Error(migration.error.message);
     }
     if (migration.value.outcome === "deferred_active_turn") {
+      // this should never happen during setup.
       throw new Error("Startup toolchain migration deferred during setup");
     }
   }
