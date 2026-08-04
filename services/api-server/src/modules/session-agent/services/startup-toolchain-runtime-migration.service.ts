@@ -65,7 +65,6 @@ export function createStartupToolchainRuntimeMigrationTarget(args: {
   };
 }
 
-/** Phase 4's sole production runtime migration definition. */
 export const startupToolchainRuntimeMigration = defineContractRuntimeMigration({
   id: STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
   description: "Keep the provider runtime toolchain current",
