@@ -18,7 +18,8 @@ import type { InitSessionAgentRequest } from "../../src/shared/types/session-age
 import {
   buildLegacyStartupToolchainContractHash,
   prepareStartupToolchain,
-} from "../../src/shared/integrations/sprite-startup-toolchain";
+} from
+  "../../src/modules/session-agent/services/startup-toolchain/startup-toolchain.service";
 import type { FakeAgent } from "./session-agent-do-harness";
 import {
   createFakeDurableObjectState,

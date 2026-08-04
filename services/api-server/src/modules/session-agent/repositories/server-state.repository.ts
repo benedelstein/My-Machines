@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Migration, SqlFn, Repository } from "./repository.types";
-import { StartupToolchainCheckpoint } from "@/shared/types/startup-toolchain";
+import { StartupToolchainCheckpoint } from
+  "@/modules/session-agent/types/startup-toolchain.types";
 
 /**
  * Durable server-only session state — never synced to clients.

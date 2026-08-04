@@ -16,9 +16,10 @@ import {
   buildLegacyStartupToolchainContractHash,
   buildStartupToolchainContract,
   type StartupToolchainCheck,
-} from "../../src/shared/integrations/sprite-startup-toolchain";
+} from
+  "../../src/modules/session-agent/services/startup-toolchain/startup-toolchain.service";
 import type { StartupToolchainCheckpoint } from
-  "../../src/shared/types/startup-toolchain";
+  "../../src/modules/session-agent/types/startup-toolchain.types";
 import {
   createFakeDurableObjectState,
   createSqlFn,
