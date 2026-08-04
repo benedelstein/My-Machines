@@ -101,7 +101,6 @@ type EnsureReadyOutcome =
   | { outcome: "ready" }
   | { outcome: "setup_incomplete" }
   | { outcome: "deferred_active_turn" };
-
 type EnsureReadyError = {
   code:
     | "SESSION_NOT_INITIALIZED"
@@ -110,7 +109,6 @@ type EnsureReadyError = {
     | "RUNTIME_MIGRATION_FAILED";
   message: string;
 };
-
 type EnsureReadyResult = Result<EnsureReadyOutcome, EnsureReadyError>;
 
 type ChatAdmissionError = {
@@ -228,7 +226,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.repoAccessLifecycleService = dependencies.repoAccessLifecycleService;
     this.autoPullRequestService = dependencies.autoPullRequestService;
     this.turnNotificationService = dependencies.turnNotificationService;
-
     this.logger.info("Constructed agent DO", {
       fields: { sessionId: this.serverState.sessionId },
     });
@@ -247,7 +244,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         ? { userMessageId: this.serverState.activeUserMessageId }
         : null,
     });
-    this.logger.debug("onStart");
   }
 
   private disableClientStateUpdates(): void {
@@ -334,7 +330,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       });
       return;
     }
-
     await this.turnNotificationService.publishTurnFinished({
       toUserId: userId,
       sessionId,
@@ -949,7 +944,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       this.sendMessage(accessGuard.message, connection);
       return;
     }
-
     this.sendMessage(this.syncService.buildSyncResponse(), connection);
   }
 
