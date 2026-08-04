@@ -7,6 +7,8 @@ import type {
 import type { WorkersSpriteClient } from "@repo/sprites-client";
 import type { StartupToolchainCheckResult } from
   "@/modules/session-agent/types/startup-toolchain.types";
+import type { JsonValue } from
+  "@/modules/session-agent/types/runtime-migration.types";
 
 export const STARTUP_TOOLCHAIN_DOMAIN = "startup_toolchain";
 
@@ -28,25 +30,17 @@ export interface StartupToolchainCheckInput {
   sprite: WorkersSpriteClient;
 }
 
-export type StartupToolchainContractValue =
-  | string
-  | number
-  | boolean
-  | null
-  | { readonly [key: string]: StartupToolchainContractValue }
-  | readonly StartupToolchainContractValue[];
-
 export interface StartupToolchainContract {
-  readonly [key: string]: StartupToolchainContractValue;
+  readonly [key: string]: JsonValue;
   readonly contractSchema: 1;
   readonly providerId: ProviderId;
-  readonly checks: readonly StartupToolchainContractValue[];
+  readonly checks: readonly JsonValue[];
 }
 
 export interface StartupToolchainCheck {
   id: string;
   /** Stable desired inputs whose changes require this check to run again. */
-  contract: { readonly [key: string]: StartupToolchainContractValue };
+  contract: { readonly [key: string]: JsonValue };
   ensureReady(
     _input: StartupToolchainCheckInput,
   ): Promise<Result<StartupToolchainCheckResult, StartupToolchainError>>;

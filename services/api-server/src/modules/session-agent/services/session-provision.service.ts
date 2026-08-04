@@ -80,7 +80,7 @@ export interface SessionProvisionServiceDeps {
   ensureSessionConnector: (spriteName: string) => Promise<void>;
   getSessionConnectorGatewayBase: () => string | null;
   ensureRuntimeMigration: (
-    migrationId: string,
+    migrationId: typeof STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
     spriteName: string,
     lease: RuntimeBoundaryLease,
   ) => Promise<RuntimeMigrationCoordinatorResult>;
@@ -190,6 +190,8 @@ export class SessionProvisionService {
             await this.ensureSessionConnectorTask(this.requireSpriteName());
             break;
           case "repository":
+            // Historical persisted runs do not gain setup tasks added later.
+            // Reconcile the connector here when this run predates that task.
             if (!setupRun.tasks.some((candidate) => candidate.id === "session_connector")) {
               await this.ensureSessionConnectorTask(this.requireSpriteName());
             }
