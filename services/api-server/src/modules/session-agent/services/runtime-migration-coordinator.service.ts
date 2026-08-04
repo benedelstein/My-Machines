@@ -220,6 +220,7 @@ export class RuntimeMigrationCoordinator {
     }
 
     let appliedAny = false;
+    this.logger.debug("Ensuring runtime migrations");
     for (const definition of definitions) {
       const result = await this.ensureDefinition(definition, context);
       if (!result.ok) {

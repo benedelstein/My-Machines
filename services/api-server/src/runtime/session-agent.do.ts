@@ -778,6 +778,9 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         attachmentService: this.attachmentService,
       },
     );
+    // the setup run tasks are frozen at init time.
+    // later changes to the run do not affect the frozen task list,
+    // and older sessions should use migrations to ensure they are up to date.
     const sessionSetupRun = this.setupRunService.buildRun();
 
     // Mark initialized in ServerState

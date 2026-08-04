@@ -93,6 +93,8 @@ export async function ensurePreparedSpriteStartupToolchain(args: {
   logger: Logger;
 }): Promise<Result<StartupToolchainCheckpoint, StartupToolchainError>> {
   const { checks, contract } = args.prepared;
+  // Existing sessions may have this legacy ServerState checkpoint but no SQLite migration row yet.
+  // A matching hash lets the runtime migration adopt that state without rerunning the Sprite checks.
   const contractHash = await buildLegacyStartupToolchainContractHash(contract);
   if (args.checkpoint?.contractHash === contractHash) {
     args.logger.info("Startup toolchain checkpoint is current", {
