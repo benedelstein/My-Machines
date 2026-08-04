@@ -65,7 +65,7 @@ import type { SessionGitProxyService } from
 import type { SessionProviderConnectionService } from
   "@/modules/session-agent/services/session-provider-connection.service";
 import type { RuntimeMigrationCoordinator } from
-  "@/modules/session-agent/services/runtime-migration-coordinator.service";
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
 import type { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import type { SessionQueryService } from

@@ -10,11 +10,11 @@ import {
   RuntimeMigrationCoordinator,
   type RuntimeMigrationLifecycleEvent,
 } from
-  "../../src/modules/session-agent/services/runtime-migration-coordinator.service";
+  "../../src/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
 import {
   defineContractRuntimeMigration,
   defineVersionedRuntimeMigration,
-} from "../../src/modules/session-agent/services/runtime-migration-definition.service";
+} from "../../src/modules/session-agent/services/runtime-migration/runtime-migration-definition.service";
 import type { RuntimeBoundaryLease } from
   "../../src/modules/session-agent/types/runtime-boundary.types";
 import type {

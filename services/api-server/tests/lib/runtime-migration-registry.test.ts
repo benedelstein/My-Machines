@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RUNTIME_MIGRATIONS } from
-  "../../src/modules/session-agent/services/runtime-migration-registry.service";
+  "../../src/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
 
 describe("Phase 4 runtime migration registry", () => {
   it("contains only the startup toolchain adopter", () => {

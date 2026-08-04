@@ -23,7 +23,7 @@ vi.mock("@repo/sprites-client", async (importOriginal) => {
   return mocks.mockSpriteClientModule(actual);
 });
 
-vi.mock("@/modules/session-agent/services/startup-toolchain/startup-toolchain.service", async () => {
+vi.mock("@/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service", async () => {
   const mocks = await import("./session-provision-mocks");
   return { ensureSpriteStartupToolchain: mocks.mockState.ensureSpriteStartupToolchain };
 });

@@ -1,7 +1,7 @@
 import type { RuntimeBoundaryLease } from
   "@/modules/session-agent/types/runtime-boundary.types";
 import type { RuntimeMigrationCoordinator } from "./runtime-migration-coordinator.service";
-import type { SessionProvisionService } from "./session-provision.service";
+import type { SessionProvisionService } from "../session-provision.service";
 
 type Assert<Condition extends true> = Condition;
 type Equal<Left, Right> =

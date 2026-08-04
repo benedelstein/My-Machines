@@ -47,9 +47,9 @@ import { SessionGitProxyService } from
 import { SessionProviderConnectionService } from
   "@/modules/session-agent/services/session-provider-connection.service";
 import { RuntimeMigrationCoordinator } from
-  "@/modules/session-agent/services/runtime-migration-coordinator.service";
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
 import { RUNTIME_MIGRATIONS } from
-  "@/modules/session-agent/services/runtime-migration-registry.service";
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
 import { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import { SessionQueryService } from "@/modules/session-agent/services/session-query.service";
@@ -58,7 +58,7 @@ import { SessionSetupOutputService } from
 import { SessionSetupRunService } from
   "@/modules/session-agent/services/session-setup-run.service";
 import { createStartupToolchainRuntimeMigrationTarget } from
-  "@/modules/session-agent/services/startup-toolchain-runtime-migration.service";
+  "@/modules/session-agent/services/runtime-migration/startup-toolchain-runtime-migration.service";
 import { SessionSummaryService } from
   "@/modules/session-agent/services/session-summary.service";
 import { SessionSyncService } from "@/modules/session-agent/services/session-sync.service";

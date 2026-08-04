@@ -4,12 +4,12 @@ import type { WorkersSpriteClient } from "@repo/sprites-client";
 import { RuntimeMigrationRepository } from
   "../../src/modules/session-agent/repositories/runtime-migration.repository";
 import { RuntimeMigrationCoordinator } from
-  "../../src/modules/session-agent/services/runtime-migration-coordinator.service";
+  "../../src/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
 import {
   startupToolchainRuntimeMigration,
   type StartupToolchainRuntimeMigrationContext,
 } from
-  "../../src/modules/session-agent/services/startup-toolchain-runtime-migration.service";
+  "../../src/modules/session-agent/services/runtime-migration/startup-toolchain-runtime-migration.service";
 import type { RuntimeBoundaryLease } from
   "../../src/modules/session-agent/types/runtime-boundary.types";
 import {
@@ -17,7 +17,7 @@ import {
   buildStartupToolchainContract,
   type StartupToolchainCheck,
 } from
-  "../../src/modules/session-agent/services/startup-toolchain/startup-toolchain.service";
+  "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service";
 import type { StartupToolchainCheckpoint } from
   "../../src/modules/session-agent/types/startup-toolchain.types";
 import {
