@@ -5,7 +5,8 @@ import type {
   Result,
 } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
-import type { StartupToolchainCheckResult } from "@/shared/types/startup-toolchain";
+import type { StartupToolchainCheckResult } from
+  "@/modules/session-agent/types/startup-toolchain.types";
 
 export const STARTUP_TOOLCHAIN_DOMAIN = "startup_toolchain";
 

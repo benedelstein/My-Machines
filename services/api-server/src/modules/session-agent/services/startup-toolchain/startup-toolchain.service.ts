@@ -4,7 +4,7 @@ import type { WorkersSpriteClient } from "@repo/sprites-client";
 import { sha256 } from "@/shared/utils/crypto";
 import type {
   StartupToolchainCheckpoint,
-} from "@/shared/types/startup-toolchain";
+} from "@/modules/session-agent/types/startup-toolchain.types";
 import { getCommonStartupToolchainChecks } from "./checks/common";
 import { getClaudeStartupToolchainChecks } from "./providers/claude";
 import { getOpenAICodexStartupToolchainChecks } from "./providers/openai-codex";

@@ -5,12 +5,13 @@ import {
   type ProviderId,
 } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
-import type { StartupToolchainCheckpoint } from "@/shared/types/startup-toolchain";
+import type { StartupToolchainCheckpoint } from
+  "@/modules/session-agent/types/startup-toolchain.types";
 import {
   ensurePreparedSpriteStartupToolchain,
   prepareStartupToolchain,
   type PreparedStartupToolchain,
-} from "@/shared/integrations/sprite-startup-toolchain";
+} from "./startup-toolchain/startup-toolchain.service";
 import type { RuntimeMigrationContext } from
   "@/modules/session-agent/types/runtime-migration.types";
 import { defineContractRuntimeMigration } from "./runtime-migration-definition.service";
