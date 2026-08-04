@@ -4,7 +4,7 @@ import {
   assertRuntimeMigrationRegistry,
   defineContractRuntimeMigration,
   defineVersionedRuntimeMigration,
-} from "../../src/modules/session-agent/services/runtime-migration-definition.service";
+} from "../../src/modules/session-agent/services/runtime-migration/runtime-migration-definition.service";
 import type { RuntimeMigrationContext } from
   "../../src/modules/session-agent/types/runtime-migration.types";
 import {

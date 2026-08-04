@@ -19,7 +19,7 @@ import {
   buildLegacyStartupToolchainContractHash,
   prepareStartupToolchain,
 } from
-  "../../src/modules/session-agent/services/startup-toolchain/startup-toolchain.service";
+  "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service";
 import type { FakeAgent } from "./session-agent-do-harness";
 import {
   createFakeDurableObjectState,

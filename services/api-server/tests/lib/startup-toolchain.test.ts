@@ -14,15 +14,15 @@ import {
   prepareStartupToolchain,
   type StartupToolchainCheck,
 } from
-  "../../src/modules/session-agent/services/startup-toolchain/startup-toolchain.service";
+  "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service";
 import { hashRuntimeMigrationContract } from
   "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
 import {
   getClaudeStartupToolchainChecks,
-} from "../../src/modules/session-agent/services/startup-toolchain/providers/claude";
+} from "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/providers/claude";
 import {
   getOpenAICodexStartupToolchainChecks,
-} from "../../src/modules/session-agent/services/startup-toolchain/providers/openai-codex";
+} from "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/providers/openai-codex";
 
 const MIN_CODEX_CLI_VERSION = "0.144.0";
 

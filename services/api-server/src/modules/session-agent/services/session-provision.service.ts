@@ -28,7 +28,7 @@ import type { RuntimeMigrationCoordinatorResult } from "../types/runtime-migrati
 import { buildSessionSpriteLabels } from "./session-connector.service";
 import { isTerminalSetupTask } from "./session-setup-run.service";
 import { STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID } from
-  "./startup-toolchain-runtime-migration.service";
+  "./runtime-migration/startup-toolchain-runtime-migration.service";
 import {
   SessionStartupScriptService,
   type SessionStartupScriptRunResult,
