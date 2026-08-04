@@ -83,8 +83,8 @@ export interface PreparedRuntimeMigration {
   readonly apply: (attempt: number) => Promise<Result<void, RuntimeMigrationError>>;
 }
 
-export interface RuntimeMigrationDefinition {
-  readonly id: string;
+export interface RuntimeMigrationDefinition<Id extends string = string> {
+  readonly id: Id;
   readonly description: string;
   readonly revisionKind: RuntimeMigrationRevisionKind;
   readonly prepare: (

@@ -25,6 +25,8 @@ import EPHEMERAL_GIT_CREDENTIAL_HELPER from "@repo/vm-agent/dist/git-credential-
 import type { ServerState } from "../repositories/server-state.repository";
 import type { RuntimeBoundaryLease } from "../types/runtime-boundary.types";
 import type { RuntimeMigrationCoordinatorResult } from "../types/runtime-migration.types";
+import type { RuntimeMigrationId } from
+  "./runtime-migration/runtime-migration-registry.service";
 import { buildSessionSpriteLabels } from "./session-connector.service";
 import { isTerminalSetupTask } from "./session-setup-run.service";
 import { STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID } from
@@ -80,7 +82,7 @@ export interface SessionProvisionServiceDeps {
   ensureSessionConnector: (spriteName: string) => Promise<void>;
   getSessionConnectorGatewayBase: () => string | null;
   ensureRuntimeMigration: (
-    migrationId: typeof STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
+    migrationId: RuntimeMigrationId,
     spriteName: string,
     lease: RuntimeBoundaryLease,
   ) => Promise<RuntimeMigrationCoordinatorResult>;

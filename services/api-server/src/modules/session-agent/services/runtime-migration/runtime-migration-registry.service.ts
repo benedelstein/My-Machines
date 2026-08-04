@@ -9,4 +9,6 @@ export const RUNTIME_MIGRATIONS = [
   startupToolchainRuntimeMigration,
 ] as const satisfies readonly RuntimeMigrationDefinition[];
 
+export type RuntimeMigrationId = (typeof RUNTIME_MIGRATIONS)[number]["id"];
+
 assertRuntimeMigrationRegistry(RUNTIME_MIGRATIONS);
