@@ -8,6 +8,9 @@ import {
   CLAUDE_CODE_STARTUP_CHECK_ID,
   MIN_CLAUDE_CODE_CLI_VERSION,
   OPENAI_CODEX_INSTALL_SCRIPT_URL,
+  OPENAI_CODEX_STARTUP_CHECK_ID,
+  PRETTIER_STARTUP_CHECK_ID,
+  PRETTIER_STARTUP_PACKAGE_VERSION,
   buildStartupToolchainContract,
   ensureSpriteStartupToolchain,
   getProviderStartupToolchainChecks,
@@ -15,6 +18,9 @@ import {
   type StartupToolchainCheck,
 } from
   "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service";
+import {
+  getCommonStartupToolchainChecks,
+} from "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/checks/common";
 import { hashRuntimeMigrationContract } from
   "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
 import {
@@ -63,7 +69,10 @@ describe("startup toolchain dispatch", () => {
 
   it("skips execution when the startup checkpoint contract is current", async () => {
     const logger = createLogger();
-    const firstSprite = createSprite([{ stdout: "codex is ready: 0.144.0\n", exitCode: 0 }]);
+    const firstSprite = createSprite([
+      { stdout: "prettier is ready: 3.8.1\n", exitCode: 0 },
+      { stdout: "codex is ready: 0.144.0\n", exitCode: 0 },
+    ]);
     const firstResult = await ensureSpriteStartupToolchain({
       providerId: "openai-codex",
       sprite: firstSprite,
@@ -89,7 +98,10 @@ describe("startup toolchain dispatch", () => {
 
   it("reruns checks when the Codex minimum version override changes", async () => {
     const logger = createLogger();
-    const firstSprite = createSprite([{ stdout: "codex is ready: 0.144.0\n", exitCode: 0 }]);
+    const firstSprite = createSprite([
+      { stdout: "prettier is ready: 3.8.1\n", exitCode: 0 },
+      { stdout: "codex is ready: 0.144.0\n", exitCode: 0 },
+    ]);
     const firstResult = await ensureSpriteStartupToolchain({
       providerId: "openai-codex",
       sprite: firstSprite,
@@ -101,7 +113,10 @@ describe("startup toolchain dispatch", () => {
       return;
     }
 
-    const secondSprite = createSprite([{ stdout: "codex is ready: 0.140.0\n", exitCode: 0 }]);
+    const secondSprite = createSprite([
+      { stdout: "prettier is current: 3.8.1\n", exitCode: 0 },
+      { stdout: "codex is ready: 0.140.0\n", exitCode: 0 },
+    ]);
     const secondResult = await ensureSpriteStartupToolchain({
       providerId: "openai-codex",
       sprite: secondSprite,
@@ -111,7 +126,7 @@ describe("startup toolchain dispatch", () => {
     });
 
     expect(secondResult.ok).toBe(true);
-    expect(secondSprite.execWs).toHaveBeenCalledOnce();
+    expect(secondSprite.execWs).toHaveBeenCalledTimes(2);
   });
 
   it("keeps provisioning and spawn call sites provider-agnostic", () => {
@@ -168,7 +183,12 @@ describe("startup toolchain dispatch", () => {
       providerId: "openai-codex",
       logger: createLogger(),
     });
-    const [providerContract] = prepared.contract.checks;
+    const providerContractIndex = prepared.contract.checks.findIndex((contract) =>
+      typeof contract === "object"
+      && contract !== null
+      && !Array.isArray(contract)
+      && contract.id === OPENAI_CODEX_STARTUP_CHECK_ID);
+    const providerContract = prepared.contract.checks[providerContractIndex];
     if (!providerContract || typeof providerContract !== "object" || Array.isArray(providerContract)) {
       throw new Error("Expected Codex provider contract");
     }
@@ -185,11 +205,59 @@ describe("startup toolchain dispatch", () => {
     ] as const) {
       const changed = {
         ...prepared.contract,
-        checks: [{ ...providerContract, [key]: value }],
+        checks: prepared.contract.checks.map((contract, index) =>
+          index === providerContractIndex
+            ? { ...providerContract, [key]: value }
+            : contract),
       };
       await expect(hashRuntimeMigrationContract("sprite.startup-toolchain", changed))
         .resolves.not.toBe(baseHash);
     }
+  });
+});
+
+describe("common Prettier startup check", () => {
+  it("installs and verifies the pinned package in the user toolchain", async () => {
+    const sprite = createSprite([{
+      stdout: `prettier is ready: ${PRETTIER_STARTUP_PACKAGE_VERSION}\n`,
+      exitCode: 0,
+    }]);
+    const [check] = getCommonStartupToolchainChecks();
+
+    const result = await check!.ensureReady({ sprite });
+
+    expect(result).toEqual(success({
+      id: PRETTIER_STARTUP_CHECK_ID,
+      status: "ready",
+      requiredVersion: PRETTIER_STARTUP_PACKAGE_VERSION,
+    }));
+    const command = vi.mocked(sprite.execWs).mock.calls[0]?.[0] as string;
+    expect(command).toContain(`required_version="${PRETTIER_STARTUP_PACKAGE_VERSION}"`);
+    expect(command).toContain('npm install --global --prefix "$HOME/.local"');
+    expect(command).toContain('"prettier@$required_version"');
+    expect(command).toContain("prettier is ready");
+  });
+
+  it("fails when the package cannot be installed or verified", async () => {
+    const sprite = createSprite([{
+      stdout: "",
+      stderr: "npm install failed\n",
+      exitCode: 1,
+    }]);
+    const [check] = getCommonStartupToolchainChecks();
+
+    const result = await check!.ensureReady({ sprite });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error).toMatchObject({
+      code: "CHECK_FAILED",
+      checkId: PRETTIER_STARTUP_CHECK_ID,
+      requiredVersion: PRETTIER_STARTUP_PACKAGE_VERSION,
+      exitCode: 1,
+    });
   });
 });
 

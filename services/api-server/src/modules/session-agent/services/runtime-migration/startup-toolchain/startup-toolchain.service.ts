@@ -18,6 +18,10 @@ import type {
 
 export * from "./types";
 export {
+  PRETTIER_STARTUP_CHECK_ID,
+  PRETTIER_STARTUP_PACKAGE_VERSION,
+} from "./checks/common";
+export {
   CLAUDE_CODE_STARTUP_CHECK_ID,
   MIN_CLAUDE_CODE_CLI_VERSION,
 } from "./providers/claude";
