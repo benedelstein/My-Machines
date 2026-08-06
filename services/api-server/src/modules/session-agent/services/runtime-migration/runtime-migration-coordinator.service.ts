@@ -377,6 +377,7 @@ export class RuntimeMigrationCoordinator {
       migrationId: definition.id,
       revisionKind: prepared.revision.kind,
       revision: revisionValue(prepared.revision),
+      appliedRevision: revisionValue(prepared.revision),
       attempt,
       durationMs: Math.max(0, appliedAt.getTime() - startedAt.getTime()),
     });
