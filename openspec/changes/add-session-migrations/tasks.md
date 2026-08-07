@@ -207,7 +207,6 @@ marked against that decision.
 - [x] 8.9 Preserve first-run ordering before repository clone and environment startup script.
 - [x] 8.10 Add tests for completed legacy setup, incomplete historical setup, current hash skip, changed hash repair, failed check, retry, and setup checklist failure reporting.
 - [ ] 8.11 After the compatibility window, add a local ServerState migration to remove the legacy checkpoint and delete compatibility reads/writes.
-- [x] 8.12 Assert the Phase 4 production registry is exactly `[sprite.startup-toolchain]` and that no other runtime migration ID can produce a migration record.
 
 ## 9. Reusable Agent Process Contract — Phase 6
 

@@ -76,7 +76,6 @@ describe("SessionProvisionService startup toolchain", () => {
 
     expect(ensureRuntimeMigration).toHaveBeenCalledWith(
       "sprite.startup-toolchain",
-      "sprite-1",
       lease,
     );
   });

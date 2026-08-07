@@ -1,9 +1,4 @@
-import {
-  failure,
-  success,
-  type Logger,
-  type ProviderId,
-} from "@repo/shared";
+import { failure, success, type Logger } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
 import type { StartupToolchainCheckpoint } from
   "@/modules/session-agent/types/startup-toolchain.types";
@@ -12,13 +7,13 @@ import {
   prepareStartupToolchain,
   type PreparedStartupToolchain,
 } from "./startup-toolchain/startup-toolchain.service";
-import type { RuntimeMigrationContext } from
-  "@/modules/session-agent/types/runtime-migration.types";
 import { defineContractRuntimeMigration } from "./runtime-migration-definition.service";
 
 export const STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID = "sprite.startup-toolchain";
 
-export interface StartupToolchainRuntimeMigrationTarget {
+/** Everything the startup-toolchain migration needs from the live session. */
+export interface StartupToolchainMigrationContext {
+  /** Memoized so the hashed contract and the executed checks are one set. */
   readonly getPrepared: () => PreparedStartupToolchain;
   readonly sprite: WorkersSpriteClient;
   readonly checkpoint: StartupToolchainCheckpoint | null;
@@ -26,58 +21,45 @@ export interface StartupToolchainRuntimeMigrationTarget {
   readonly updateCheckpoint: (checkpoint: StartupToolchainCheckpoint) => void;
 }
 
-export type StartupToolchainRuntimeMigrationContext = RuntimeMigrationContext & {
-  readonly startupToolchain: StartupToolchainRuntimeMigrationTarget;
-};
-
-function requireTarget(
-  context: RuntimeMigrationContext,
-): StartupToolchainRuntimeMigrationTarget {
-  const startupContext = context as Partial<StartupToolchainRuntimeMigrationContext>;
-  if (!startupContext.startupToolchain) {
-    throw new Error("Startup toolchain migration context is missing");
-  }
-  return startupContext.startupToolchain;
-}
-
-/** Builds the per-readiness toolchain target with one shared check set. */
-export function createStartupToolchainRuntimeMigrationTarget(args: {
-  providerId: ProviderId;
-  codexMinVersion?: string;
-  sprite: WorkersSpriteClient;
-  checkpoint: StartupToolchainCheckpoint | null;
-  logger: Logger;
-  updateCheckpoint: (checkpoint: StartupToolchainCheckpoint) => void;
-}): StartupToolchainRuntimeMigrationTarget {
-  let prepared: PreparedStartupToolchain | null = null;
-  return {
-    getPrepared: () => {
-      prepared ??= prepareStartupToolchain({
-        providerId: args.providerId,
-        logger: args.logger,
-        codexMinVersion: args.codexMinVersion,
-      });
-      return prepared;
-    },
-    sprite: args.sprite,
-    checkpoint: args.checkpoint,
-    logger: args.logger,
-    updateCheckpoint: args.updateCheckpoint,
+function once<T>(build: () => T): () => T {
+  let value: T;
+  let built = false;
+  return () => {
+    if (!built) {
+      value = build();
+      built = true;
+    }
+    return value;
   };
 }
 
 export const startupToolchainRuntimeMigration = defineContractRuntimeMigration({
   id: STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
   description: "Keep the provider runtime toolchain current",
-  buildContract: (context) => requireTarget(context).getPrepared().contract,
+
+  buildContext: (host): StartupToolchainMigrationContext => {
+    const logger = host.logger.scope("startup-toolchain-runtime-migration");
+    return {
+      getPrepared: once(() => prepareStartupToolchain({
+        providerId: host.getClientState().agentSettings.provider,
+        codexMinVersion: host.env.CODEX_MIN_VERSION,
+        logger,
+      })),
+      sprite: host.createSpriteClient(),
+      checkpoint: host.getServerState().startupToolchain,
+      logger,
+      updateCheckpoint: (startupToolchain) => host.updateServerState({ startupToolchain }),
+    };
+  },
+
+  buildContract: (context) => context.getPrepared().contract,
+
   apply: async ({ context, desired }) => {
-    const target = requireTarget(context);
-    const prepared = target.getPrepared();
     const result = await ensurePreparedSpriteStartupToolchain({
-      prepared: { ...prepared, contract: desired },
-      sprite: target.sprite,
-      checkpoint: target.checkpoint,
-      logger: target.logger,
+      prepared: { ...context.getPrepared(), contract: desired },
+      sprite: context.sprite,
+      checkpoint: context.checkpoint,
+      logger: context.logger,
     });
     if (!result.ok) {
       return failure({
@@ -86,8 +68,8 @@ export const startupToolchainRuntimeMigration = defineContractRuntimeMigration({
         migrationId: STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
       });
     }
-    if (result.value !== target.checkpoint) {
-      target.updateCheckpoint(result.value);
+    if (result.value !== context.checkpoint) {
+      context.updateCheckpoint(result.value);
     }
     return success(undefined);
   },

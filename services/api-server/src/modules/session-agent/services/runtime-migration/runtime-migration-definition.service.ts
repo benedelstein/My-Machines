@@ -2,34 +2,43 @@ import { failure, success, type Result } from "@repo/shared";
 import type {
   JsonValue,
   RuntimeMigrationApplyInput,
-  RuntimeMigrationContext,
   RuntimeMigrationDefinition,
   RuntimeMigrationError,
+  RuntimeMigrationHost,
   RuntimeMigrationRevisionKind,
 } from "@/modules/session-agent/types/runtime-migration.types";
 import { hashRuntimeMigrationContract } from
   "@/modules/session-agent/utils/runtime-migration-contract.utils";
 
-interface RuntimeMigrationDefinitionBase<Id extends string, Desired extends JsonValue> {
+interface RuntimeMigrationDefinitionBase<
+  Id extends string,
+  Context,
+  Desired extends JsonValue,
+> {
   readonly id: Id;
   readonly description: string;
+  /**
+   * Builds everything this migration needs from the session. Called once per
+   * `prepare`, after the coordinator's teardown and active-turn gates, so
+   * dependencies are never constructed for a migration that does not run.
+   */
+  readonly buildContext: (host: RuntimeMigrationHost) => Context;
   readonly apply: (
-    input: RuntimeMigrationApplyInput<Desired>,
+    input: RuntimeMigrationApplyInput<Context, Desired>,
   ) => Promise<Result<void, RuntimeMigrationError>>;
 }
 
-interface VersionedRuntimeMigrationDefinitionArgs<Id extends string> extends
-  RuntimeMigrationDefinitionBase<Id, { readonly version: number }> {
+interface VersionedRuntimeMigrationDefinitionArgs<Id extends string, Context> extends
+  RuntimeMigrationDefinitionBase<Id, Context, { readonly version: number }> {
   readonly version: number;
 }
 
 interface ContractRuntimeMigrationDefinitionArgs<
   Id extends string,
+  Context,
   Contract extends JsonValue,
-> extends RuntimeMigrationDefinitionBase<Id, Contract> {
-  readonly buildContract: (
-    context: RuntimeMigrationContext,
-  ) => Contract | Promise<Contract>;
+> extends RuntimeMigrationDefinitionBase<Id, Context, Contract> {
+  readonly buildContract: (context: Context) => Contract | Promise<Contract>;
 }
 
 function validateDefinitionIdentity(id: string, description: string): void {
@@ -42,8 +51,8 @@ function validateDefinitionIdentity(id: string, description: string): void {
 }
 
 /** Declares a forward-only revision scoped to one stable migration ID. */
-export function defineVersionedRuntimeMigration<const Id extends string>(
-  args: VersionedRuntimeMigrationDefinitionArgs<Id>,
+export function defineVersionedRuntimeMigration<const Id extends string, Context>(
+  args: VersionedRuntimeMigrationDefinitionArgs<Id, Context>,
 ): RuntimeMigrationDefinition<Id> {
   validateDefinitionIdentity(args.id, args.description);
   if (!Number.isSafeInteger(args.version) || args.version <= 0) {
@@ -54,7 +63,8 @@ export function defineVersionedRuntimeMigration<const Id extends string>(
     id: args.id,
     description: args.description,
     revisionKind: "version",
-    prepare: async (context) => {
+    prepare: async (host) => {
+      const context = args.buildContext(host);
       const desired = { version: args.version } as const;
       const revision = { kind: "version", version: args.version } as const;
       return success({
@@ -68,9 +78,10 @@ export function defineVersionedRuntimeMigration<const Id extends string>(
 /** Declares desired state whose revision is built and hashed at readiness time. */
 export function defineContractRuntimeMigration<
   const Id extends string,
+  Context,
   Contract extends JsonValue,
 >(
-  args: ContractRuntimeMigrationDefinitionArgs<Id, Contract>,
+  args: ContractRuntimeMigrationDefinitionArgs<Id, Context, Contract>,
 ): RuntimeMigrationDefinition<Id> {
   validateDefinitionIdentity(args.id, args.description);
 
@@ -78,8 +89,9 @@ export function defineContractRuntimeMigration<
     id: args.id,
     description: args.description,
     revisionKind: "contract",
-    prepare: async (context) => {
+    prepare: async (host) => {
       try {
+        const context = args.buildContext(host);
         const desired = await args.buildContract(context);
         const revision = {
           kind: "contract",

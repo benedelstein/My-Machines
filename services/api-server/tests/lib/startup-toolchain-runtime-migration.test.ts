@@ -1,35 +1,60 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { failure, success } from "@repo/shared";
-import type { WorkersSpriteClient } from "@repo/sprites-client";
 import { RuntimeMigrationRepository } from
   "../../src/modules/session-agent/repositories/runtime-migration.repository";
 import { RuntimeMigrationCoordinator } from
   "../../src/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
-import {
-  startupToolchainRuntimeMigration,
-  type StartupToolchainRuntimeMigrationContext,
-} from
+import { startupToolchainRuntimeMigration } from
   "../../src/modules/session-agent/services/runtime-migration/startup-toolchain-runtime-migration.service";
 import type { RuntimeBoundaryLease } from
   "../../src/modules/session-agent/types/runtime-boundary.types";
 import {
   buildLegacyStartupToolchainContractHash,
   buildStartupToolchainContract,
+  prepareStartupToolchain,
   type StartupToolchainCheck,
 } from
   "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service";
 import type { StartupToolchainCheckpoint } from
   "../../src/modules/session-agent/types/startup-toolchain.types";
+import type * as StartupToolchainService from
+  "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service";
 import {
   createFakeDurableObjectState,
   createSqlFn,
   createTestDatabase,
 } from "./session-agent-do-harness";
+import { createMigrationHost } from "./runtime-migration-test-support";
 import { createTestLogger } from "./test-logger";
 
 const lease = {} as RuntimeBoundaryLease;
 
-function createFixture() {
+/**
+ * The definition builds its own check set from the host, so the fixture check
+ * is injected by stubbing the one factory it calls. Hashing and the apply path
+ * stay real.
+ */
+const fixture = vi.hoisted(() => ({
+  prepared: null as { contract: unknown; checks: unknown[] } | null,
+}));
+
+vi.mock(
+  "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof StartupToolchainService>();
+    return {
+      ...actual,
+      prepareStartupToolchain: vi.fn(() => {
+        if (!fixture.prepared) {
+          throw new Error("Test did not install a prepared startup toolchain");
+        }
+        return fixture.prepared;
+      }),
+    };
+  },
+);
+
+function createCoordinator() {
   const database = createTestDatabase();
   const sql = createSqlFn(database);
   const repository = new RuntimeMigrationRepository(sql);
@@ -63,49 +88,43 @@ function createCheck(revision: string): StartupToolchainCheck {
   };
 }
 
-function createContext(args: {
-  check: StartupToolchainCheck;
-  checkpoint?: StartupToolchainCheckpoint | null;
-  activeUserMessageId?: string | null;
-  updateCheckpoint?: (checkpoint: StartupToolchainCheckpoint) => void;
-}): StartupToolchainRuntimeMigrationContext {
-  const contract = buildStartupToolchainContract("openai-codex", [args.check]);
-  const getPrepared = vi.fn(() => ({ contract, checks: [args.check] }));
+/** Installs the check set the definition will see on its next prepare. */
+function installCheck(check: StartupToolchainCheck): void {
+  fixture.prepared = {
+    contract: buildStartupToolchainContract("openai-codex", [check]),
+    checks: [check],
+  };
+}
+
+async function legacyCheckpointFor(
+  check: StartupToolchainCheck,
+): Promise<StartupToolchainCheckpoint> {
+  const contract = buildStartupToolchainContract("openai-codex", [check]);
   return {
-    getServerState: () => ({
-      activeUserMessageId: args.activeUserMessageId ?? null,
-    }),
-    isTeardownStarted: () => false,
-    startupToolchain: {
-      getPrepared,
-      sprite: {} as WorkersSpriteClient,
-      checkpoint: args.checkpoint ?? null,
-      logger: createTestLogger(),
-      updateCheckpoint: args.updateCheckpoint ?? (() => {}),
-    },
+    contractHash: await buildLegacyStartupToolchainContractHash(contract),
+    checkedAt: 1,
+    results: [],
   };
 }
 
 describe("startup toolchain runtime migration", () => {
+  beforeEach(() => {
+    vi.mocked(prepareStartupToolchain).mockClear();
+  });
+
   it("adopts a matching legacy checkpoint with zero Sprite checks", async () => {
     const check = createCheck("1");
-    const contract = buildStartupToolchainContract("openai-codex", [check]);
-    const checkpoint = {
-      contractHash: await buildLegacyStartupToolchainContractHash(contract),
-      checkedAt: 1,
-      results: [],
-    };
-    const updateCheckpoint = vi.fn();
-    const { coordinator, repository } = createFixture();
+    installCheck(check);
+    const host = createMigrationHost({
+      serverState: { startupToolchain: await legacyCheckpointFor(check) },
+    });
+    const { coordinator, repository } = createCoordinator();
 
-    expect(await coordinator.ensureMigrations(createContext({
-      check,
-      checkpoint,
-      updateCheckpoint,
-    }), lease)).toEqual({ ok: true, value: { outcome: "applied" } });
+    expect(await coordinator.ensureMigrations(host, lease))
+      .toEqual({ ok: true, value: { outcome: "applied" } });
 
     expect(check.ensureReady).not.toHaveBeenCalled();
-    expect(updateCheckpoint).not.toHaveBeenCalled();
+    expect(host.updateServerState).not.toHaveBeenCalled();
     expect(repository.get("sprite.startup-toolchain", "contract")).toMatchObject({
       ok: true,
       value: { status: "applied", attemptCount: 1 },
@@ -115,25 +134,18 @@ describe("startup toolchain runtime migration", () => {
   it("repairs changed desired inputs, checkpoints them, then skips locally", async () => {
     const firstCheck = createCheck("1");
     const secondCheck = createCheck("2");
-    const updateCheckpoint = vi.fn();
-    const { coordinator } = createFixture();
+    const host = createMigrationHost();
+    const { coordinator } = createCoordinator();
 
-    await coordinator.ensureMigrations(createContext({
-      check: firstCheck,
-      updateCheckpoint,
-    }), lease);
-    await coordinator.ensureMigrations(createContext({
-      check: secondCheck,
-      updateCheckpoint,
-    }), lease);
-    await coordinator.ensureMigrations(createContext({
-      check: secondCheck,
-      updateCheckpoint,
-    }), lease);
+    installCheck(firstCheck);
+    await coordinator.ensureMigrations(host, lease);
+    installCheck(secondCheck);
+    await coordinator.ensureMigrations(host, lease);
+    await coordinator.ensureMigrations(host, lease);
 
     expect(firstCheck.ensureReady).toHaveBeenCalledOnce();
     expect(secondCheck.ensureReady).toHaveBeenCalledOnce();
-    expect(updateCheckpoint).toHaveBeenCalledTimes(2);
+    expect(host.updateServerState).toHaveBeenCalledTimes(2);
   });
 
   it("records a failed check and retries the idempotent check", async () => {
@@ -150,10 +162,11 @@ describe("startup toolchain runtime migration", () => {
         status: "ready",
         requiredVersion: "1",
       }));
-    const { coordinator, repository } = createFixture();
-    const context = createContext({ check });
+    installCheck(check);
+    const host = createMigrationHost();
+    const { coordinator, repository } = createCoordinator();
 
-    expect(await coordinator.ensureMigrations(context, lease)).toMatchObject({
+    expect(await coordinator.ensureMigrations(host, lease)).toMatchObject({
       ok: false,
       error: { code: "APPLY_FAILED" },
     });
@@ -161,7 +174,7 @@ describe("startup toolchain runtime migration", () => {
       ok: true,
       value: { status: "failed", attemptCount: 1 },
     });
-    expect(await coordinator.ensureMigrations(context, lease)).toEqual({
+    expect(await coordinator.ensureMigrations(host, lease)).toEqual({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -170,8 +183,9 @@ describe("startup toolchain runtime migration", () => {
 
   it("adopts the verified checkpoint when recording applied state is interrupted", async () => {
     const check = createCheck("1");
-    const { coordinator, repository } = createFixture();
-    let checkpoint: StartupToolchainCheckpoint | null = null;
+    installCheck(check);
+    const host = createMigrationHost();
+    const { coordinator, repository } = createCoordinator();
     const originalMarkApplied = repository.markApplied.bind(repository);
     vi.spyOn(repository, "markApplied")
       .mockReturnValueOnce(failure({
@@ -180,42 +194,30 @@ describe("startup toolchain runtime migration", () => {
         migrationId: "sprite.startup-toolchain",
       }))
       .mockImplementation(originalMarkApplied);
-    const updateCheckpoint = (nextCheckpoint: StartupToolchainCheckpoint) => {
-      checkpoint = nextCheckpoint;
-    };
 
-    expect(await coordinator.ensureMigrations(createContext({
-      check,
-      checkpoint,
-      updateCheckpoint,
-    }), lease)).toMatchObject({
+    expect(await coordinator.ensureMigrations(host, lease)).toMatchObject({
       ok: false,
       error: { code: "MIGRATION_REPOSITORY_WRITE_FAILED" },
     });
-    expect(await coordinator.ensureMigrations(createContext({
-      check,
-      checkpoint,
-      updateCheckpoint,
-    }), lease)).toEqual({
+    expect(await coordinator.ensureMigrations(host, lease)).toEqual({
       ok: true,
       value: { outcome: "applied" },
     });
     expect(check.ensureReady).toHaveBeenCalledOnce();
   });
 
-  it("defers the entire adopter before a Sprite check while a turn is active", async () => {
+  it("defers the entire adopter before building its context while a turn is active", async () => {
     const check = createCheck("1");
-    const { coordinator, repository } = createFixture();
-    const context = createContext({
-      check,
-      activeUserMessageId: "message-1",
-    });
+    installCheck(check);
+    const host = createMigrationHost({ activeUserMessageId: "message-1" });
+    const { coordinator, repository } = createCoordinator();
 
-    expect(await coordinator.ensureMigrations(context, lease)).toEqual({
+    expect(await coordinator.ensureMigrations(host, lease)).toEqual({
       ok: true,
       value: { outcome: "deferred_active_turn" },
     });
-    expect(context.startupToolchain.getPrepared).not.toHaveBeenCalled();
+    expect(host.createSpriteClient).not.toHaveBeenCalled();
+    expect(vi.mocked(prepareStartupToolchain)).not.toHaveBeenCalled();
     expect(check.ensureReady).not.toHaveBeenCalled();
     expect(repository.get("sprite.startup-toolchain", "contract"))
       .toEqual({ ok: true, value: null });

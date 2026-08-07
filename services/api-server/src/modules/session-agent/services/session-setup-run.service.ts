@@ -156,11 +156,10 @@ export class SessionSetupRunService {
   }
 
   /**
-   * Recovers setup run state from saved state when the DO restarts. Only a
-   * running run is repaired; terminal runs are never reopened, so tasks added
-   * after a session finished provisioning are not applied retroactively.
+   * Recovers setup run state from durable checkpoints before provisioning.
+   * Only a running run is repaired; terminal runs are never reopened.
    */
-  repairOnStart(): void {
+  repairBeforeProvisioning(): void {
     const setupRun = this.getClientState().sessionSetupRun;
     if (!setupRun) { return; }
     const currentRun = normalizeSetupTaskMetadata(setupRun);
@@ -177,9 +176,8 @@ export class SessionSetupRunService {
       if (isTerminalSetupTask(task)) { return task; }
       switch (task.id) {
         case "cloud_container":
-          return serverState.spriteName && serverState.startupToolchain
-            ? completeSetupTaskForRepair(task, now)
-            : task;
+          // The targeted runtime migration owns toolchain recovery and currentness.
+          return task;
         case "session_connector":
           return serverState.sessionConnectorId
             ? completeSetupTaskForRepair(task, now)
