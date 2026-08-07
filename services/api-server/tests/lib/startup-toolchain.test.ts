@@ -9,10 +9,6 @@ import {
   MIN_CLAUDE_CODE_CLI_VERSION,
   OPENAI_CODEX_INSTALL_SCRIPT_URL,
   OPENAI_CODEX_STARTUP_CHECK_ID,
-  PRETTIER_STARTUP_CHECK_ID,
-  PRETTIER_STARTUP_PACKAGE_VERSION,
-  TYPESCRIPT_STARTUP_CHECK_ID,
-  TYPESCRIPT_STARTUP_PACKAGE_VERSION,
   buildStartupToolchainContract,
   ensureSpriteStartupToolchain,
   getProviderStartupToolchainChecks,
@@ -20,9 +16,6 @@ import {
   type StartupToolchainCheck,
 } from
   "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service";
-import {
-  getCommonStartupToolchainChecks,
-} from "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/checks/common";
 import { hashRuntimeMigrationContract } from
   "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
 import {
@@ -72,8 +65,6 @@ describe("startup toolchain dispatch", () => {
   it("skips execution when the startup checkpoint contract is current", async () => {
     const logger = createLogger();
     const firstSprite = createSprite([
-      { stdout: "prettier is ready: 3.8.1\n", exitCode: 0 },
-      { stdout: "typescript is ready: 5.9.3\n", exitCode: 0 },
       { stdout: "codex is ready: 0.144.0\n", exitCode: 0 },
     ]);
     const firstResult = await ensureSpriteStartupToolchain({
@@ -102,8 +93,6 @@ describe("startup toolchain dispatch", () => {
   it("reruns checks when the Codex minimum version override changes", async () => {
     const logger = createLogger();
     const firstSprite = createSprite([
-      { stdout: "prettier is ready: 3.8.1\n", exitCode: 0 },
-      { stdout: "typescript is ready: 5.9.3\n", exitCode: 0 },
       { stdout: "codex is ready: 0.144.0\n", exitCode: 0 },
     ]);
     const firstResult = await ensureSpriteStartupToolchain({
@@ -118,8 +107,6 @@ describe("startup toolchain dispatch", () => {
     }
 
     const secondSprite = createSprite([
-      { stdout: "prettier is current: 3.8.1\n", exitCode: 0 },
-      { stdout: "typescript is current: 5.9.3\n", exitCode: 0 },
       { stdout: "codex is ready: 0.140.0\n", exitCode: 0 },
     ]);
     const secondResult = await ensureSpriteStartupToolchain({
@@ -131,7 +118,7 @@ describe("startup toolchain dispatch", () => {
     });
 
     expect(secondResult.ok).toBe(true);
-    expect(secondSprite.execWs).toHaveBeenCalledTimes(3);
+    expect(secondSprite.execWs).toHaveBeenCalledOnce();
   });
 
   it("keeps provisioning and spawn call sites provider-agnostic", () => {
@@ -218,105 +205,6 @@ describe("startup toolchain dispatch", () => {
       await expect(hashRuntimeMigrationContract("sprite.startup-toolchain", changed))
         .resolves.not.toBe(baseHash);
     }
-  });
-});
-
-describe("common Prettier startup check", () => {
-  it("installs and verifies the pinned package in the user toolchain", async () => {
-    const sprite = createSprite([{
-      stdout: `prettier is ready: ${PRETTIER_STARTUP_PACKAGE_VERSION}\n`,
-      exitCode: 0,
-    }]);
-    const [check] = getCommonStartupToolchainChecks();
-
-    const result = await check!.ensureReady({ sprite });
-
-    expect(result).toEqual(success({
-      id: PRETTIER_STARTUP_CHECK_ID,
-      status: "ready",
-      requiredVersion: PRETTIER_STARTUP_PACKAGE_VERSION,
-    }));
-    const command = vi.mocked(sprite.execWs).mock.calls[0]?.[0] as string;
-    expect(command).toContain(`required_version="${PRETTIER_STARTUP_PACKAGE_VERSION}"`);
-    expect(command).toContain('npm install --global --prefix "$HOME/.local"');
-    expect(command).toContain('"prettier@$required_version"');
-    expect(command).toContain("prettier is ready");
-  });
-
-  it("fails when the package cannot be installed or verified", async () => {
-    const sprite = createSprite([{
-      stdout: "",
-      stderr: "npm install failed\n",
-      exitCode: 1,
-    }]);
-    const [check] = getCommonStartupToolchainChecks();
-
-    const result = await check!.ensureReady({ sprite });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      return;
-    }
-    expect(result.error).toMatchObject({
-      code: "CHECK_FAILED",
-      checkId: PRETTIER_STARTUP_CHECK_ID,
-      requiredVersion: PRETTIER_STARTUP_PACKAGE_VERSION,
-      exitCode: 1,
-    });
-  });
-});
-
-describe("common TypeScript startup check", () => {
-  it("installs and verifies the pinned package in the user toolchain", async () => {
-    const sprite = createSprite([{
-      stdout: `typescript is ready: ${TYPESCRIPT_STARTUP_PACKAGE_VERSION}\n`,
-      exitCode: 0,
-    }]);
-    const check = getCommonStartupToolchainChecks()
-      .find((candidate) => candidate.id === TYPESCRIPT_STARTUP_CHECK_ID);
-    if (!check) {
-      throw new Error("Expected TypeScript startup check");
-    }
-
-    const result = await check.ensureReady({ sprite });
-
-    expect(result).toEqual(success({
-      id: TYPESCRIPT_STARTUP_CHECK_ID,
-      status: "ready",
-      requiredVersion: TYPESCRIPT_STARTUP_PACKAGE_VERSION,
-    }));
-    const command = vi.mocked(sprite.execWs).mock.calls[0]?.[0] as string;
-    expect(command).toContain(`required_version="${TYPESCRIPT_STARTUP_PACKAGE_VERSION}"`);
-    expect(command).toContain("tsc --version");
-    expect(command).toContain('npm install --global --prefix "$HOME/.local"');
-    expect(command).toContain('"typescript@$required_version"');
-    expect(command).toContain("typescript is ready");
-  });
-
-  it("fails when the package cannot be installed or verified", async () => {
-    const sprite = createSprite([{
-      stdout: "",
-      stderr: "npm install failed\n",
-      exitCode: 1,
-    }]);
-    const check = getCommonStartupToolchainChecks()
-      .find((candidate) => candidate.id === TYPESCRIPT_STARTUP_CHECK_ID);
-    if (!check) {
-      throw new Error("Expected TypeScript startup check");
-    }
-
-    const result = await check.ensureReady({ sprite });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      return;
-    }
-    expect(result.error).toMatchObject({
-      code: "CHECK_FAILED",
-      checkId: TYPESCRIPT_STARTUP_CHECK_ID,
-      requiredVersion: TYPESCRIPT_STARTUP_PACKAGE_VERSION,
-      exitCode: 1,
-    });
   });
 });
 

@@ -5,7 +5,6 @@ import { sha256 } from "@/shared/utils/crypto";
 import type {
   StartupToolchainCheckpoint,
 } from "@/modules/session-agent/types/startup-toolchain.types";
-import { getCommonStartupToolchainChecks } from "./checks/common";
 import { getClaudeStartupToolchainChecks } from "./providers/claude";
 import { getOpenAICodexStartupToolchainChecks } from "./providers/openai-codex";
 import type {
@@ -17,12 +16,6 @@ import type {
 } from "./types";
 
 export * from "./types";
-export {
-  PRETTIER_STARTUP_CHECK_ID,
-  PRETTIER_STARTUP_PACKAGE_VERSION,
-  TYPESCRIPT_STARTUP_CHECK_ID,
-  TYPESCRIPT_STARTUP_PACKAGE_VERSION,
-} from "./checks/common";
 export {
   CLAUDE_CODE_STARTUP_CHECK_ID,
   MIN_CLAUDE_CODE_CLI_VERSION,
@@ -57,13 +50,10 @@ export function prepareStartupToolchain(args: {
   logger: Logger;
   codexMinVersion?: string;
 }): PreparedStartupToolchain {
-  const checks = [
-    ...getCommonStartupToolchainChecks(),
-    ...getProviderStartupToolchainChecks(args.providerId, {
-      logger: args.logger,
-      codexMinVersion: args.codexMinVersion,
-    }),
-  ];
+  const checks = getProviderStartupToolchainChecks(args.providerId, {
+    logger: args.logger,
+    codexMinVersion: args.codexMinVersion,
+  });
   return {
     contract: buildStartupToolchainContract(args.providerId, checks),
     checks,

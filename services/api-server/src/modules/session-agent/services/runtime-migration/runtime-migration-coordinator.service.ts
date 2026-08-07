@@ -398,17 +398,7 @@ export class RuntimeMigrationCoordinator {
   }
 
   private logEvent(event: RuntimeMigrationLifecycleEvent): void {
-    const fields = {
-      event: event.event,
-      migrationId: event.migrationId ?? null,
-      revisionKind: event.revisionKind ?? null,
-      revision: event.revision ?? null,
-      appliedRevision: event.appliedRevision ?? null,
-      attempt: event.attempt ?? null,
-      durationMs: event.durationMs ?? null,
-      errorCode: event.errorCode ?? null,
-      operatorAttentionRequired: event.operatorAttentionRequired ?? false,
-    };
+    const fields = { ...event };
     if (event.event === "failed" || event.event === "newer_version_skipped") {
       this.logger.warn("Runtime migration lifecycle event", { fields });
     } else {
