@@ -83,7 +83,6 @@ export interface SessionProvisionServiceDeps {
   getSessionConnectorGatewayBase: () => string | null;
   ensureRuntimeMigration: (
     migrationId: RuntimeMigrationId,
-    spriteName: string,
     lease: RuntimeBoundaryLease,
   ) => Promise<RuntimeMigrationCoordinatorResult>;
   githubTokenProvider: {
@@ -286,9 +285,11 @@ export class SessionProvisionService {
         ),
       });
     }
+    // Requires the Sprite name to already be in ServerState — the migration
+    // host reads it from there to build its client.
+    this.requireSpriteName();
     const migration = await this.ensureRuntimeMigration(
       STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
-      this.requireSpriteName(),
       lease,
     );
     if (!migration.ok) {

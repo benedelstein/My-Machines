@@ -66,6 +66,8 @@ import type { SessionProviderConnectionService } from
   "@/modules/session-agent/services/session-provider-connection.service";
 import type { RuntimeMigrationCoordinator } from
   "@/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
+import type { RuntimeMigrationId } from
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
 import type { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import type { SessionQueryService } from
@@ -138,9 +140,8 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private serverState: ServerState;
   private readonly turnCoordinator: AgentTurnCoordinator;
   private readonly processManager: SpriteAgentProcessManager;
-  private readonly runtimeMigrationCoordinator: RuntimeMigrationCoordinator;
-  private readonly buildRuntimeMigrationContext:
-    SessionAgentDependencies["buildRuntimeMigrationContext"];
+  private readonly runtimeMigrationCoordinator: RuntimeMigrationCoordinator<RuntimeMigrationId>;
+  private readonly runtimeMigrationHost: SessionAgentDependencies["runtimeMigrationHost"];
   private readonly provisionService: SessionProvisionService;
   private readonly chatDispatchService: SessionChatDispatchService;
   private readonly setupRunService: SessionSetupRunService;
@@ -213,7 +214,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.turnCoordinator = dependencies.turnCoordinator;
     this.processManager = dependencies.processManager;
     this.runtimeMigrationCoordinator = dependencies.runtimeMigrationCoordinator;
-    this.buildRuntimeMigrationContext = dependencies.buildRuntimeMigrationContext;
+    this.runtimeMigrationHost = dependencies.runtimeMigrationHost;
     this.provisionService = dependencies.provisionService;
     this.chatDispatchService = dependencies.chatDispatchService;
     this.setupRunService = dependencies.setupRunService;
@@ -236,7 +237,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     // NOTE: doing this here brecause we cant access this.name in the constructor. cf bug
     // Reset transient ClientState fields on every restart so they never get
     // stuck from a previous instance's in-progress operation.
-    this.setupRunService.repairOnStart();
     this.updatePartialState({
       status: this.synthesizeStatus(),
       lastError: null,
@@ -640,6 +640,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       });
     }
 
+    this.setupRunService.repairBeforeProvisioning();
     try {
       await this.provisionService.ensureProvisioned(_lease);
     } catch (error) {
@@ -664,7 +665,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       });
     }
     const migrations = await this.runtimeMigrationCoordinator.ensureMigrations(
-      this.buildRuntimeMigrationContext(this.serverState.spriteName),
+      this.runtimeMigrationHost,
       _lease,
     );
     if (!migrations.ok) {

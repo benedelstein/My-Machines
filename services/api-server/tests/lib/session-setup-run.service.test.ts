@@ -238,7 +238,7 @@ describe("SessionSetupRunService", () => {
       tasks: setupRun.tasks.filter((task) => task.id !== "network_policy"),
     };
 
-    service.repairOnStart();
+    service.repairBeforeProvisioning();
 
     expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual([
       "cloud_container",
@@ -259,7 +259,7 @@ describe("SessionSetupRunService", () => {
       }),
     };
 
-    service.repairOnStart();
+    service.repairBeforeProvisioning();
 
     expect(requireSetupRun(clientState).tasks.map((task) => [task.id, task.canRetry])).toEqual([
       ["cloud_container", true],
@@ -270,6 +270,23 @@ describe("SessionSetupRunService", () => {
     ]);
   });
 
+  it("leaves cloud container pending for targeted runtime migration recovery", () => {
+    const { clientState, service } = createHarness({
+      serverState: {
+        startupToolchain: {
+          contractHash: "legacy-hash",
+          checkedAt: 1,
+          results: [],
+        },
+      },
+    });
+
+    service.repairBeforeProvisioning();
+
+    expect(requireSetupRun(clientState).tasks.find((task) => task.id === "cloud_container"))
+      .toMatchObject({ status: "pending" });
+  });
+
   it("does not insert a network policy task when its checkpoint exists", () => {
     const { clientState, service } = createHarness();
     const setupRun = requireSetupRun(clientState);
@@ -278,7 +295,7 @@ describe("SessionSetupRunService", () => {
       tasks: setupRun.tasks.filter((task) => task.id !== "network_policy"),
     };
 
-    service.repairOnStart();
+    service.repairBeforeProvisioning();
 
     expect(requireSetupRun(clientState).tasks.some((task) => task.id === "network_policy"))
       .toBe(false);
@@ -308,7 +325,7 @@ describe("SessionSetupRunService", () => {
       tasks: setupRun.tasks.filter((task) => task.id !== "session_connector"),
     };
 
-    service.repairOnStart();
+    service.repairBeforeProvisioning();
 
     expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual([
       "cloud_container",
@@ -328,7 +345,7 @@ describe("SessionSetupRunService", () => {
       tasks: setupRun.tasks.filter((task) => task.id !== "session_connector"),
     };
 
-    service.repairOnStart();
+    service.repairBeforeProvisioning();
 
     expect(requireSetupRun(clientState).tasks.some((task) => task.id === "session_connector"))
       .toBe(false);
@@ -348,7 +365,7 @@ describe("SessionSetupRunService", () => {
         .map(completeTask),
     };
 
-    service.repairOnStart();
+    service.repairBeforeProvisioning();
 
     const repairedRun = requireSetupRun(clientState);
     expect(repairedRun.status).toBe("completed");
@@ -368,7 +385,7 @@ describe("SessionSetupRunService", () => {
     };
     const storedIds = requireSetupRun(clientState).tasks.map((task) => task.id);
 
-    service.repairOnStart();
+    service.repairBeforeProvisioning();
 
     expect(requireSetupRun(clientState).tasks.map((task) => task.id)).toEqual(storedIds);
     expect(requireSetupRun(clientState).status).toBe("failed");

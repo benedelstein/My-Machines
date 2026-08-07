@@ -109,6 +109,9 @@ interface TestAgentAccess {
   provisionService: {
     ensureProvisioned(...args: unknown[]): Promise<void>;
   };
+  setupRunService: {
+    repairBeforeProvisioning(): void;
+  };
   runtimeMigrationCoordinator: {
     ensureMigrations(...args: unknown[]): Promise<Result<{
       outcome: "current" | "applied" | "deferred_active_turn";
@@ -213,6 +216,21 @@ function connection(id: string): Connection {
 }
 
 describe("SessionAgentDO runtime boundary", () => {
+  it("repairs setup state before provisioning", async () => {
+    const agent = constructAgent();
+    const events: string[] = [];
+    agent.setupRunService.repairBeforeProvisioning = vi.fn(() => {
+      events.push("repair");
+    });
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {
+      events.push("provision");
+    });
+
+    await agent.ensureRuntimeReadyAndDispatchNextTurn();
+
+    expect(events).toEqual(["repair", "provision"]);
+  });
+
   it("adopts a matching legacy toolchain checkpoint without a Sprite call", async () => {
     const prepared = prepareStartupToolchain({
       providerId: "claude-code",

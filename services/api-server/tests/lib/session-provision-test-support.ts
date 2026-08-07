@@ -170,10 +170,7 @@ export function createService(
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
   });
-  const ensureRuntimeMigration = vi.fn(async (
-    migrationId: string,
-    _spriteName: string,
-  ) => {
+  const ensureRuntimeMigration = vi.fn(async (migrationId: string) => {
     const result = await mockState.ensureSpriteStartupToolchain({
       codexMinVersion: envOverrides.CODEX_MIN_VERSION,
     });
