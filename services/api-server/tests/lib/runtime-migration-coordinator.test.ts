@@ -141,6 +141,17 @@ describe("RuntimeMigrationCoordinator", () => {
         }),
       },
     );
+    expect(fixture.logger.info).toHaveBeenCalledWith(
+      "Runtime migration lifecycle event",
+      {
+        fields: {
+          event: "current",
+          migrationId: "fixture.version",
+          revisionKind: "version",
+          revision: 2,
+        },
+      },
+    );
     expect(rollbackEvents).toContainEqual(expect.objectContaining({
       event: "newer_version_skipped",
       migrationId: "fixture.version",
