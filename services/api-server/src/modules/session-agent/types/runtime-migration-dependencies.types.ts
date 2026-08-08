@@ -1,13 +1,16 @@
 import type { Logger, ProviderId } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
-import type { StartupToolchainCheckpoint } from "./startup-toolchain.types";
+import type { ServerState } from "./server-state.types";
 
-/** The slice of ServerState runtime migrations may read or write. */
-export interface RuntimeMigrationServerState {
-  readonly activeUserMessageId: string | null;
-  readonly spriteName: string | null;
-  readonly startupToolchain: StartupToolchainCheckpoint | null;
-}
+/**
+ * The slice of ServerState runtime migrations may read or write. Widen this
+ * union as adopters need more — it keeps the migration surface explicit
+ * instead of handing every migration the whole session.
+ */
+export type RuntimeMigrationServerState = Pick<
+  ServerState,
+  "activeUserMessageId" | "spriteName" | "startupToolchain"
+>;
 
 /** The slice of ClientState runtime migrations may read. */
 export interface RuntimeMigrationClientState {
@@ -15,7 +18,7 @@ export interface RuntimeMigrationClientState {
 }
 
 /** Env values a runtime migration may read while building its own context. */
-export interface RuntimeMigrationHostEnv {
+export interface RuntimeMigrationEnv {
   readonly CODEX_MIN_VERSION?: string;
 }
 
@@ -25,17 +28,16 @@ export interface RuntimeMigrationHostEnv {
  * The coordinator itself reads only `getServerState().activeUserMessageId` and
  * `isTeardownStarted()`. Everything else exists so each definition can build
  * its own typed context in `buildContext`, keeping adopter-specific
- * dependencies out of the engine. Widen the state slices above as adopters
- * need more — that keeps the migration surface explicit rather than handing
- * every migration the whole session.
+ * dependencies out of the engine.
  */
-export interface RuntimeMigrationHost {
+export interface RuntimeMigrationDependencies {
   readonly getServerState: () => RuntimeMigrationServerState;
   readonly getClientState: () => RuntimeMigrationClientState;
   readonly updateServerState: (partial: Partial<RuntimeMigrationServerState>) => void;
   readonly isTeardownStarted: () => boolean;
   /** Client for the session's current Sprite. Throws before provisioning. */
   readonly createSpriteClient: () => WorkersSpriteClient;
-  readonly env: RuntimeMigrationHostEnv;
+  readonly env: RuntimeMigrationEnv;
   readonly logger: Logger;
+  // add other dependencies as needed
 }

@@ -1,13 +1,9 @@
 import type { RuntimeBoundaryLease } from
   "@/modules/session-agent/types/runtime-boundary.types";
-import type { ServerState } from
-  "@/modules/session-agent/types/server-state.types";
 import type {
   RuntimeMigrationDefinition,
-  RuntimeMigrationHost,
+  RuntimeMigrationDependencies,
 } from "@/modules/session-agent/types/runtime-migration.types";
-import type { RuntimeMigrationServerState } from
-  "@/modules/session-agent/types/runtime-migration-host.types";
 import type { RuntimeMigrationCoordinator } from "./runtime-migration-coordinator.service";
 import type { RuntimeMigrationId } from "./runtime-migration-registry.service";
 import type { SessionProvisionService } from "../session-provision.service";
@@ -46,23 +42,10 @@ export type EnsureMigrationRejectsUnregisteredIds = Assert<Equal<
 >>;
 
 /**
- * Migrations receive the host, never a pre-built context — each definition
- * builds its own, so no adopter can smuggle an undeclared field through.
+ * Migrations receive the shared dependencies, never a pre-built context —
+ * each builds its own, so no adopter can smuggle an undeclared field through.
  */
-export type MigrationsPrepareFromHost = Assert<Equal<
+export type MigrationsPrepareFromDependencies = Assert<Equal<
   Parameters<RuntimeMigrationDefinition["prepare"]>[0],
-  RuntimeMigrationHost
->>;
-
-type Mutable<Value> = { -readonly [Key in keyof Value]: Value[Key] };
-
-/**
- * `RuntimeMigrationServerState` is hand-written rather than
- * `Pick<ServerState, ...>` because `types/` may not import `repositories/`.
- * Asserted here instead, where both layers are reachable: renaming a field,
- * changing its type, or dropping it from `ServerState` fails this build.
- */
-export type MigrationServerStateMatchesServerState = Assert<Equal<
-  Pick<ServerState, keyof RuntimeMigrationServerState>,
-  Mutable<RuntimeMigrationServerState>
+  RuntimeMigrationDependencies
 >>;

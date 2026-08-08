@@ -71,7 +71,7 @@ import { createUserSessionsPublisher } from
 import { createLogger } from "@/shared/logging";
 import type { Env } from "@/shared/types";
 import type { HandleCreatePullRequestResult } from "@/shared/types/session-agent";
-import type { RuntimeMigrationHost } from
+import type { RuntimeMigrationDependencies } from
   "@/modules/session-agent/types/runtime-migration.types";
 import { SessionAgentAttachmentProvider } from "./session-agent-attachment-provider";
 import { SessionAutoPullRequestService } from "./session-auto-pull-request.service";
@@ -98,7 +98,7 @@ export interface SessionAgentDependencies {
   turnCoordinator: AgentTurnCoordinator;
   processManager: SpriteAgentProcessManager;
   runtimeMigrationCoordinator: RuntimeMigrationCoordinator<RuntimeMigrationId>;
-  runtimeMigrationHost: RuntimeMigrationHost;
+  runtimeMigrationDependencies: RuntimeMigrationDependencies;
   provisionService: SessionProvisionService;
   chatDispatchService: SessionChatDispatchService;
   setupRunService: SessionSetupRunService;
@@ -206,7 +206,7 @@ export function createSessionAgentDependencies(input: {
    * Capability surface every runtime migration draws on. Adding an adopter
    * does not change this — the definition builds its own context from here.
    */
-  const runtimeMigrationHost: RuntimeMigrationHost = {
+  const runtimeMigrationDependencies: RuntimeMigrationDependencies = {
     getServerState: host.getServerState,
     getClientState: host.getClientState,
     updateServerState: host.updateServerState,
@@ -355,7 +355,7 @@ export function createSessionAgentDependencies(input: {
     ensureSessionConnector: (spriteName) => sessionConnectorService.ensureMinted(spriteName),
     getSessionConnectorGatewayBase: () => sessionConnectorService.getGatewayBase(),
     ensureRuntimeMigration: (migrationId, lease) =>
-      runtimeMigrationCoordinator.ensureMigration(migrationId, runtimeMigrationHost, lease),
+      runtimeMigrationCoordinator.ensureMigration(migrationId, runtimeMigrationDependencies, lease),
     githubTokenProvider: githubAppService,
     setupReporter: {
       startTask: (taskId) => setupRunService.startTask(taskId),
@@ -410,7 +410,7 @@ export function createSessionAgentDependencies(input: {
     turnCoordinator,
     processManager,
     runtimeMigrationCoordinator,
-    runtimeMigrationHost,
+    runtimeMigrationDependencies,
     provisionService,
     chatDispatchService,
     setupRunService,

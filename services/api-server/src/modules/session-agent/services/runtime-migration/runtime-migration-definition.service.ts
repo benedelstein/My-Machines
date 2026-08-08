@@ -4,7 +4,7 @@ import type {
   RuntimeMigrationApplyInput,
   RuntimeMigrationDefinition,
   RuntimeMigrationError,
-  RuntimeMigrationHost,
+  RuntimeMigrationDependencies,
   RuntimeMigrationRevisionKind,
 } from "@/modules/session-agent/types/runtime-migration.types";
 import { hashRuntimeMigrationContract } from
@@ -22,7 +22,7 @@ interface RuntimeMigrationDefinitionBase<
    * `prepare`, after the coordinator's teardown and active-turn gates, so
    * dependencies are never constructed for a migration that does not run.
    */
-  readonly buildContext: (host: RuntimeMigrationHost) => Context;
+  readonly buildContext: (dependencies: RuntimeMigrationDependencies) => Context;
   readonly apply: (
     input: RuntimeMigrationApplyInput<Context, Desired>,
   ) => Promise<Result<void, RuntimeMigrationError>>;
@@ -63,8 +63,8 @@ export function defineVersionedRuntimeMigration<const Id extends string, Context
     id: args.id,
     description: args.description,
     revisionKind: "version",
-    prepare: async (host) => {
-      const context = args.buildContext(host);
+    prepare: async (dependencies) => {
+      const context = args.buildContext(dependencies);
       const desired = { version: args.version } as const;
       const revision = { kind: "version", version: args.version } as const;
       return success({
@@ -89,9 +89,9 @@ export function defineContractRuntimeMigration<
     id: args.id,
     description: args.description,
     revisionKind: "contract",
-    prepare: async (host) => {
+    prepare: async (dependencies) => {
       try {
-        const context = args.buildContext(host);
+        const context = args.buildContext(dependencies);
         const desired = await args.buildContract(context);
         const revision = {
           kind: "contract",

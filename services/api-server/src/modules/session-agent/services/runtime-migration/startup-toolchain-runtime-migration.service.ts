@@ -37,18 +37,18 @@ export const startupToolchainRuntimeMigration = defineContractRuntimeMigration({
   id: STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
   description: "Keep the provider runtime toolchain current",
 
-  buildContext: (host): StartupToolchainMigrationContext => {
-    const logger = host.logger.scope("startup-toolchain-runtime-migration");
+  buildContext: (dependencies): StartupToolchainMigrationContext => {
+    const logger = dependencies.logger.scope("startup-toolchain-runtime-migration");
     return {
       getPrepared: once(() => prepareStartupToolchain({
-        providerId: host.getClientState().agentSettings.provider,
-        codexMinVersion: host.env.CODEX_MIN_VERSION,
+        providerId: dependencies.getClientState().agentSettings.provider,
+        codexMinVersion: dependencies.env.CODEX_MIN_VERSION,
         logger,
       })),
-      sprite: host.createSpriteClient(),
-      checkpoint: host.getServerState().startupToolchain,
+      sprite: dependencies.createSpriteClient(),
+      checkpoint: dependencies.getServerState().startupToolchain,
       logger,
-      updateCheckpoint: (startupToolchain) => host.updateServerState({ startupToolchain }),
+      updateCheckpoint: (startupToolchain) => dependencies.updateServerState({ startupToolchain }),
     };
   },
 
