@@ -24,7 +24,7 @@ import {
   createSqlFn,
   createTestDatabase,
 } from "./session-agent-do-harness";
-import { createMigrationHost } from "./runtime-migration-test-support";
+import { createMigrationDependencies } from "./runtime-migration-test-support";
 import { createTestLogger } from "./test-logger";
 
 const lease = {} as RuntimeBoundaryLease;
@@ -115,7 +115,7 @@ describe("startup toolchain runtime migration", () => {
   it("adopts a matching legacy checkpoint with zero Sprite checks", async () => {
     const check = createCheck("1");
     installCheck(check);
-    const host = createMigrationHost({
+    const host = createMigrationDependencies({
       serverState: { startupToolchain: await legacyCheckpointFor(check) },
     });
     const { coordinator, repository } = createCoordinator();
@@ -134,7 +134,7 @@ describe("startup toolchain runtime migration", () => {
   it("repairs changed desired inputs, checkpoints them, then skips locally", async () => {
     const firstCheck = createCheck("1");
     const secondCheck = createCheck("2");
-    const host = createMigrationHost();
+    const host = createMigrationDependencies();
     const { coordinator } = createCoordinator();
 
     installCheck(firstCheck);
@@ -163,7 +163,7 @@ describe("startup toolchain runtime migration", () => {
         requiredVersion: "1",
       }));
     installCheck(check);
-    const host = createMigrationHost();
+    const host = createMigrationDependencies();
     const { coordinator, repository } = createCoordinator();
 
     expect(await coordinator.ensureMigrations(host, lease)).toMatchObject({
@@ -184,7 +184,7 @@ describe("startup toolchain runtime migration", () => {
   it("adopts the verified checkpoint when recording applied state is interrupted", async () => {
     const check = createCheck("1");
     installCheck(check);
-    const host = createMigrationHost();
+    const host = createMigrationDependencies();
     const { coordinator, repository } = createCoordinator();
     const originalMarkApplied = repository.markApplied.bind(repository);
     vi.spyOn(repository, "markApplied")
@@ -209,7 +209,7 @@ describe("startup toolchain runtime migration", () => {
   it("defers the entire adopter before building its context while a turn is active", async () => {
     const check = createCheck("1");
     installCheck(check);
-    const host = createMigrationHost({ activeUserMessageId: "message-1" });
+    const host = createMigrationDependencies({ activeUserMessageId: "message-1" });
     const { coordinator, repository } = createCoordinator();
 
     expect(await coordinator.ensureMigrations(host, lease)).toEqual({

@@ -11,9 +11,9 @@ import {
   fingerprintHighEntropySecret,
   hashRuntimeMigrationContract,
 } from "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
-import { createMigrationHost } from "./runtime-migration-test-support";
+import { createMigrationDependencies } from "./runtime-migration-test-support";
 
-const host = createMigrationHost();
+const host = createMigrationDependencies();
 
 describe("runtime migration contracts", () => {
   it("canonicalizes nested objects while preserving array order and JSON scalars", () => {

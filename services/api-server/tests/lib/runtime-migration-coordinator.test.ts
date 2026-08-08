@@ -26,7 +26,7 @@ import {
   createSqlFn,
   createTestDatabase,
 } from "./session-agent-do-harness";
-import { createMigrationHost } from "./runtime-migration-test-support";
+import { createMigrationDependencies } from "./runtime-migration-test-support";
 
 const lease = {} as RuntimeBoundaryLease;
 
@@ -91,11 +91,11 @@ describe("RuntimeMigrationCoordinator", () => {
     });
     const fixture = createFixture([versionTwo]);
 
-    expect(await fixture.coordinator.ensureMigrations(createMigrationHost(), lease)).toEqual({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "applied" },
     });
-    expect(await fixture.coordinator.ensureMigrations(createMigrationHost(), lease)).toEqual({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "current" },
     });
@@ -114,7 +114,7 @@ describe("RuntimeMigrationCoordinator", () => {
       logger: createLogger(),
       observe: (event) => rollbackEvents.push(event),
     });
-    expect(await rolledBack.ensureMigrations(createMigrationHost(), lease)).toEqual({
+    expect(await rolledBack.ensureMigrations(createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "current" },
     });
@@ -161,9 +161,9 @@ describe("RuntimeMigrationCoordinator", () => {
     });
     const { coordinator } = createFixture([definition]);
 
-    await coordinator.ensureMigrations(createMigrationHost(), lease);
+    await coordinator.ensureMigrations(createMigrationDependencies(), lease);
     revision = 2;
-    expect(await coordinator.ensureMigrations(createMigrationHost(), lease)).toMatchObject({
+    expect(await coordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -194,7 +194,7 @@ describe("RuntimeMigrationCoordinator", () => {
       "2026-08-01T00:00:00.000Z",
     );
 
-    expect(await fixture.coordinator.ensureMigrations(createMigrationHost(), lease)).toMatchObject({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -244,12 +244,12 @@ describe("RuntimeMigrationCoordinator", () => {
     });
     const { coordinator } = createFixture([first, second, third]);
 
-    expect(await coordinator.ensureMigration("fixture.second", createMigrationHost(), lease)).toEqual({
+    expect(await coordinator.ensureMigration("fixture.second", createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "applied" },
     });
     expect(calls).toEqual(["first", "second"]);
-    expect(await coordinator.ensureMigration("fixture.third", createMigrationHost(), lease)).toEqual({
+    expect(await coordinator.ensureMigration("fixture.third", createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -269,7 +269,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const get = vi.spyOn(fixture.repository, "get");
 
     expect(await fixture.coordinator.ensureMigrations(
-      createMigrationHost({ activeUserMessageId: "message-1" }),
+      createMigrationDependencies({ activeUserMessageId: "message-1" }),
       lease,
     )).toEqual({ ok: true, value: { outcome: "deferred_active_turn" } });
     expect(prepare).not.toHaveBeenCalled();
@@ -293,7 +293,7 @@ describe("RuntimeMigrationCoordinator", () => {
       apply: laterApply,
     });
     const fixture = createFixture([first, later]);
-    await fixture.coordinator.ensureMigrations(createMigrationHost(), lease);
+    await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
     laterApply.mockClear();
 
     const failing = defineVersionedRuntimeMigration({
@@ -312,7 +312,7 @@ describe("RuntimeMigrationCoordinator", () => {
       logger: createLogger(),
       retryPolicy: { baseDelayMs: 0, maxDelayMs: 0, operatorThreshold: 3 },
     });
-    expect(await failingCoordinator.ensureMigrations(createMigrationHost(), lease)).toMatchObject({
+    expect(await failingCoordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: false,
       error: { code: "APPLY_FAILED" },
     });
@@ -369,7 +369,7 @@ describe("RuntimeMigrationCoordinator", () => {
       );
     }
 
-    const result = await fixture.coordinator.ensureMigrations(createMigrationHost(), lease);
+    const result = await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
     expect(result.ok).toBe(true);
     expect(completedEffects).toBe(2);
     expect(apply).toHaveBeenCalledTimes(scenario.recordApplied ? 0 : 1);
@@ -398,12 +398,12 @@ describe("RuntimeMigrationCoordinator", () => {
       message: "Safe failure",
     });
 
-    expect(await fixture.coordinator.ensureMigrations(createMigrationHost(), lease)).toMatchObject({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: false,
       error: { code: "MIGRATION_RETRY_BACKOFF" },
     });
     expect(await fixture.coordinator.ensureMigrations(
-      createMigrationHost({ teardownStarted: true }),
+      createMigrationDependencies({ teardownStarted: true }),
       lease,
     )).toMatchObject({ ok: false, error: { code: "SESSION_TEARDOWN_STARTED" } });
   });
@@ -422,7 +422,7 @@ describe("RuntimeMigrationCoordinator", () => {
       }),
     });
     const fixture = createFixture([definition]);
-    await fixture.coordinator.ensureMigrations(createMigrationHost(), lease);
+    await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
 
     const serializedLogs = JSON.stringify(fixture.logger.calls);
     const serializedRecords = JSON.stringify(
@@ -447,7 +447,7 @@ describe("RuntimeMigrationCoordinator", () => {
       },
     });
     const fixture = createFixture([legacy]);
-    await fixture.coordinator.ensureMigrations(createMigrationHost(), lease);
+    await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
 
     const retiredApply = vi.fn(async () => {
       externalState = "absent";
@@ -476,8 +476,8 @@ describe("RuntimeMigrationCoordinator", () => {
       logger: createLogger(),
     });
 
-    await coordinator.ensureMigrations(createMigrationHost(), lease);
-    await coordinator.ensureMigrations(createMigrationHost(), lease);
+    await coordinator.ensureMigrations(createMigrationDependencies(), lease);
+    await coordinator.ensureMigrations(createMigrationDependencies(), lease);
     expect(externalState).toBe("replacement");
     expect(retiredApply).toHaveBeenCalledOnce();
   });
@@ -526,7 +526,7 @@ describe("RuntimeMigrationCoordinator", () => {
       "2026-08-01T00:00:01.000Z",
     );
 
-    expect(await fixture.coordinator.ensureMigrations(createMigrationHost(), lease)).toMatchObject({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -547,7 +547,7 @@ describe("RuntimeMigrationCoordinator", () => {
       },
     });
     const fixture = createFixture([current]);
-    await fixture.coordinator.ensureMigrations(createMigrationHost(), lease);
+    await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
 
     const rolledBack = defineContractRuntimeMigration({
       id: "fixture.rollback-contract",
@@ -565,7 +565,7 @@ describe("RuntimeMigrationCoordinator", () => {
       logger: createLogger(),
     });
 
-    expect(await rollbackCoordinator.ensureMigrations(createMigrationHost(), lease)).toMatchObject({
+    expect(await rollbackCoordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -575,7 +575,7 @@ describe("RuntimeMigrationCoordinator", () => {
   it("ships an empty registry as a local no-op with no records", async () => {
     const fixture = createFixture([]);
     const beginAttempt = vi.spyOn(fixture.repository, "beginAttempt");
-    expect(await fixture.coordinator.ensureMigrations(createMigrationHost(), lease)).toEqual({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "current" },
     });

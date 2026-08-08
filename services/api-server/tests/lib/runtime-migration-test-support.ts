@@ -2,25 +2,25 @@ import { vi } from "vitest";
 import type { ProviderId } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
 import type {
-  RuntimeMigrationHost,
+  RuntimeMigrationDependencies,
   RuntimeMigrationServerState,
-} from "../../src/modules/session-agent/types/runtime-migration-host.types";
+} from "../../src/modules/session-agent/types/runtime-migration-dependencies.types";
 import { createTestLogger } from "./test-logger";
 
-export interface TestRuntimeMigrationHost extends RuntimeMigrationHost {
+export interface TestRuntimeMigrationDependencies extends RuntimeMigrationDependencies {
   readonly createSpriteClient: ReturnType<typeof vi.fn>;
   readonly updateServerState: ReturnType<typeof vi.fn>;
 }
 
-/** Host for coordinator and adopter tests, with spied writes. */
-export function createMigrationHost(args: {
+/** Migration dependencies for coordinator and adopter tests, with spied writes. */
+export function createMigrationDependencies(args: {
   activeUserMessageId?: string | null;
   teardownStarted?: boolean;
   serverState?: Partial<RuntimeMigrationServerState>;
   provider?: ProviderId;
   codexMinVersion?: string;
   sprite?: WorkersSpriteClient;
-} = {}): TestRuntimeMigrationHost {
+} = {}): TestRuntimeMigrationDependencies {
   const serverState: RuntimeMigrationServerState = {
     activeUserMessageId: args.activeUserMessageId ?? null,
     spriteName: "sprite-1",

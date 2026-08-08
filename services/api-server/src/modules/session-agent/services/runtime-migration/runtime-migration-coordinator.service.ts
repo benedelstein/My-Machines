@@ -13,7 +13,7 @@ import type {
   RuntimeMigrationDefinition,
   RuntimeMigrationEntryResult,
   RuntimeMigrationError,
-  RuntimeMigrationHost,
+  RuntimeMigrationDependencies,
   RuntimeMigrationRecord,
   RuntimeMigrationRetryPolicy,
   RuntimeMigrationRevision,
@@ -178,16 +178,16 @@ export class RuntimeMigrationCoordinator<Id extends string = string> {
 
   /** Ensures the complete static registry while the caller owns the runtime boundary. */
   async ensureMigrations(
-    host: RuntimeMigrationHost,
+    dependencies: RuntimeMigrationDependencies,
     _lease: RuntimeBoundaryLease,
   ): Promise<RuntimeMigrationCoordinatorResult> {
-    return this.ensureDefinitions(this.definitions, host);
+    return this.ensureDefinitions(this.definitions, dependencies);
   }
 
   /** Ensures the registry prefix while the caller's lease proves mutex ownership. */
   async ensureMigration(
     migrationId: Id,
-    host: RuntimeMigrationHost,
+    dependencies: RuntimeMigrationDependencies,
     _lease: RuntimeBoundaryLease,
   ): Promise<RuntimeMigrationCoordinatorResult> {
     const targetIndex = this.definitions.findIndex((definition) => definition.id === migrationId);
@@ -198,20 +198,20 @@ export class RuntimeMigrationCoordinator<Id extends string = string> {
         migrationId,
       });
     }
-    return this.ensureDefinitions(this.definitions.slice(0, targetIndex + 1), host);
+    return this.ensureDefinitions(this.definitions.slice(0, targetIndex + 1), dependencies);
   }
 
   private async ensureDefinitions(
     definitions: readonly RuntimeMigrationDefinition<Id>[],
-    host: RuntimeMigrationHost,
+    dependencies: RuntimeMigrationDependencies,
   ): Promise<RuntimeMigrationCoordinatorResult> {
-    if (host.isTeardownStarted()) {
+    if (dependencies.isTeardownStarted()) {
       return failure({
         code: "SESSION_TEARDOWN_STARTED",
         message: "Runtime migration work cannot begin during session teardown",
       });
     }
-    if (host.getServerState().activeUserMessageId !== null) {
+    if (dependencies.getServerState().activeUserMessageId !== null) {
       this.logger.debug("Runtime migrations deferred for active turn", {
         fields: { event: "deferred" },
       });
@@ -222,7 +222,7 @@ export class RuntimeMigrationCoordinator<Id extends string = string> {
     let appliedAny = false;
     this.logger.debug("Ensuring runtime migrations");
     for (const definition of definitions) {
-      const result = await this.ensureDefinition(definition, host);
+      const result = await this.ensureDefinition(definition, dependencies);
       if (!result.ok) {
         return result;
       }
@@ -235,11 +235,11 @@ export class RuntimeMigrationCoordinator<Id extends string = string> {
 
   private async ensureDefinition(
     definition: RuntimeMigrationDefinition<Id>,
-    host: RuntimeMigrationHost,
+    dependencies: RuntimeMigrationDependencies,
   ): Promise<RuntimeMigrationEntryResult> {
     let preparedResult: Awaited<ReturnType<RuntimeMigrationDefinition["prepare"]>>;
     try {
-      preparedResult = await definition.prepare(host);
+      preparedResult = await definition.prepare(dependencies);
     } catch {
       preparedResult = failure({
         code: "PREPARATION_FAILED",

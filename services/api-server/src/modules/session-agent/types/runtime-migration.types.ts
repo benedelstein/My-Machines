@@ -1,5 +1,5 @@
 import type { Result } from "@repo/shared";
-import type { RuntimeMigrationHost } from "./runtime-migration-host.types";
+import type { RuntimeMigrationDependencies } from "./runtime-migration-dependencies.types";
 
 export type JsonPrimitive = string | number | boolean | null;
 
@@ -30,7 +30,7 @@ export interface RuntimeMigrationRecord {
   readonly lastErrorMessage: string | null;
 }
 
-export type { RuntimeMigrationHost } from "./runtime-migration-host.types";
+export type { RuntimeMigrationDependencies } from "./runtime-migration-dependencies.types";
 
 export type RuntimeMigrationErrorCode =
   | "PREPARATION_FAILED"
@@ -84,12 +84,12 @@ export interface RuntimeMigrationDefinition<Id extends string = string> {
   readonly description: string;
   readonly revisionKind: RuntimeMigrationRevisionKind;
   /**
-   * Builds this migration's own context from the host, then its desired
-   * revision. The context type stays inside the definition, so the coordinator
-   * never needs to know what any individual adopter depends on.
+   * Builds this migration's own context from these dependencies, then its
+   * desired revision. The context type stays inside the definition, so the
+   * coordinator never needs to know what any individual adopter depends on.
    */
   readonly prepare: (
-    host: RuntimeMigrationHost,
+    dependencies: RuntimeMigrationDependencies,
   ) => Promise<Result<PreparedRuntimeMigration, RuntimeMigrationError>>;
 }
 

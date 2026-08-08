@@ -142,7 +142,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private readonly turnCoordinator: AgentTurnCoordinator;
   private readonly processManager: SpriteAgentProcessManager;
   private readonly runtimeMigrationCoordinator: RuntimeMigrationCoordinator<RuntimeMigrationId>;
-  private readonly runtimeMigrationHost: SessionAgentDependencies["runtimeMigrationHost"];
+  private readonly runtimeMigrationDependencies: SessionAgentDependencies["runtimeMigrationDependencies"];
   private readonly provisionService: SessionProvisionService;
   private readonly chatDispatchService: SessionChatDispatchService;
   private readonly setupRunService: SessionSetupRunService;
@@ -215,7 +215,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.turnCoordinator = dependencies.turnCoordinator;
     this.processManager = dependencies.processManager;
     this.runtimeMigrationCoordinator = dependencies.runtimeMigrationCoordinator;
-    this.runtimeMigrationHost = dependencies.runtimeMigrationHost;
+    this.runtimeMigrationDependencies = dependencies.runtimeMigrationDependencies;
     this.provisionService = dependencies.provisionService;
     this.chatDispatchService = dependencies.chatDispatchService;
     this.setupRunService = dependencies.setupRunService;
@@ -666,7 +666,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       });
     }
     const migrations = await this.runtimeMigrationCoordinator.ensureMigrations(
-      this.runtimeMigrationHost,
+      this.runtimeMigrationDependencies,
       _lease,
     );
     if (!migrations.ok) {
