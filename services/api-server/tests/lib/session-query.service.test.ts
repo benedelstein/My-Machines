@@ -4,7 +4,8 @@ import type { UIMessage } from "ai";
 import type { LatestPlanRepository } from "../../src/modules/session-agent/repositories/latest-plan.repository";
 import type { MessageRepository } from "../../src/modules/session-agent/repositories/message.repository";
 import type { SetupOutputRepository } from "../../src/modules/session-agent/repositories/setup-output.repository";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import { SessionQueryService } from "../../src/modules/session-agent/services/session-query.service";
 
 const sessionId = "123e4567-e89b-12d3-a456-426614174000";

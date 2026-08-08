@@ -18,7 +18,8 @@ import {
   SETUP_OUTPUT_STORE_CAP,
   type SetupOutputRepository,
 } from "../repositories/setup-output.repository";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
 
 export interface SessionQueryServiceDeps {
   messageRepository: MessageRepository;

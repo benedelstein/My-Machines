@@ -21,7 +21,8 @@ import { createLogger } from "@/shared/logging";
 import VM_AGENT_WEBHOOK_SCRIPT from "@repo/vm-agent/dist/vm-agent-webhook.bundle.js";
 import { AgentAttachmentService } from "../agent-attachment.service";
 import type { SecretRepository } from "../../repositories/secret.repository";
-import type { ServerState } from "../../repositories/server-state.repository";
+import type { ServerState } from
+  "../../types/server-state.types";
 import type {
   DispatchMessageInput,
   SpriteAgentProcessManagerError,

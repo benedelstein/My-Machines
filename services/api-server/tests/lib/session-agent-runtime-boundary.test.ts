@@ -12,7 +12,7 @@ import { SessionAgentDO } from "../../src/runtime/session-agent.do";
 import type { ClaimedTurn, PreparedChatMessage } from
   "../../src/modules/session-agent/services/session-chat-dispatch.service";
 import type { ServerState } from
-  "../../src/modules/session-agent/repositories/server-state.repository";
+  "../../src/modules/session-agent/types/server-state.types";
 import type { Env } from "../../src/shared/types";
 import type { InitSessionAgentRequest } from "../../src/shared/types/session-agent";
 import {

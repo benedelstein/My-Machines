@@ -1,7 +1,7 @@
 import type { RuntimeBoundaryLease } from
   "@/modules/session-agent/types/runtime-boundary.types";
 import type { ServerState } from
-  "@/modules/session-agent/repositories/server-state.repository";
+  "@/modules/session-agent/types/server-state.types";
 import type {
   RuntimeMigrationDefinition,
   RuntimeMigrationHost,

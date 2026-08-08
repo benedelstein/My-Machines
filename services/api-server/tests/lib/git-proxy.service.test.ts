@@ -5,7 +5,8 @@ import { GitProxyService } from "../../src/shared/integrations/git/git-proxy.ser
 import type { GitProxyTokenProvider } from "../../src/shared/integrations/git/git.providers";
 import { SessionGitProxyService } from "../../src/modules/session-agent/services/session-git-proxy.service";
 import type { SecretRepository } from "../../src/modules/session-agent/repositories/secret.repository";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import type { Env } from "../../src/shared/types";
 
 function createService(params: {

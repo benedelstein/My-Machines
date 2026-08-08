@@ -20,7 +20,8 @@ import type { AttachmentRecord } from "@/shared/types/attachments";
 import { createUserUiMessage, getUserMessageTextContent } from "@/shared/utils/uimessage-utils";
 import { updateSessionHistoryData } from "./session-agent-history.service";
 import type { MessageRepository } from "../repositories/message.repository";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
 import type { AgentTurnCoordinator } from "./agent-turn-coordinator.service";
 import type { SpriteAgentProcessManager } from "./agent-process/sprite-agent-process-manager.service";
 import type { SpriteAgentProcessManagerError } from "../types/agent-process-manager.types";

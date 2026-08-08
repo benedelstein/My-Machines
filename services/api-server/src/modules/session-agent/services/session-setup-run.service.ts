@@ -7,7 +7,8 @@ import type {
   SessionSetupTaskOutput,
   StartupScriptSetupTaskSkipReason,
 } from "@repo/shared";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
 
 const SETUP_TASK_DEFINITIONS = [
   { id: "cloud_container", isBlocking: true, canRetry: true },

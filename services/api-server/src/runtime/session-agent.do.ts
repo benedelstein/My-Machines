@@ -17,8 +17,9 @@ import { Agent, type Connection } from "agents";
 import type { SpriteLifecycleClient } from "@repo/sprites-client";
 import type { SecretRepository } from
   "@/modules/session-agent/repositories/secret.repository";
-import type { ServerStateRepository, ServerState } from
+import type { ServerStateRepository } from
   "@/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from "@/modules/session-agent/types/server-state.types";
 import type { SessionEnvironmentSnapshotRepository } from
   "@/modules/session-agent/repositories/session-environment-snapshot.repository";
 import { createLogger, initializeLogger } from "@/shared/logging";

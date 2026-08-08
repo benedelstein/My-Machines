@@ -17,7 +17,8 @@ import type {
   PendingChunkRepository,
 } from "../repositories/pending-chunk.repository";
 import type { LatestPlanRepository } from "../repositories/latest-plan.repository";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
 import { SpritesError, WorkersSpriteClient } from "@repo/sprites-client";
 
 export interface FinishedAssistantTurn {

@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_AGENT_SETTINGS, type ClientState } from "@repo/shared";
 import type { UIMessage, UIMessageChunk } from "ai";
 import type { MessageRepository } from "../../src/modules/session-agent/repositories/message.repository";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import { SessionSyncService } from "../../src/modules/session-agent/services/session-sync.service";
 
 const sessionId = "123e4567-e89b-12d3-a456-426614174000";

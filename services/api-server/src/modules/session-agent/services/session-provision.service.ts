@@ -22,7 +22,8 @@ import { createLogger } from "@/shared/logging";
 import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
 import type { GitHubAppResult } from "@/shared/types/github";
 import EPHEMERAL_GIT_CREDENTIAL_HELPER from "@repo/vm-agent/dist/git-credential-helper.bundle.js";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
 import type { RuntimeBoundaryLease } from "../types/runtime-boundary.types";
 import type { RuntimeMigrationCoordinatorResult } from "../types/runtime-migration.types";
 import type { RuntimeMigrationId } from

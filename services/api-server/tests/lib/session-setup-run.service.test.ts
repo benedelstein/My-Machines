@@ -4,7 +4,8 @@ import type {
   SessionSetupRun,
   SessionSetupTask,
 } from "@repo/shared";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import { SessionSetupRunService } from "../../src/modules/session-agent/services/session-setup-run.service";
 
 function createServerState(overrides: Partial<ServerState> = {}): ServerState {
