@@ -24,8 +24,9 @@ import { RuntimeMigrationRepository } from
 import type { SqlFn } from "@/modules/session-agent/repositories/repository.types";
 import { migrateAll } from "@/modules/session-agent/repositories/schema-manager.repository";
 import { SecretRepository } from "@/modules/session-agent/repositories/secret.repository";
-import { ServerStateRepository, type ServerState } from
+import { ServerStateRepository } from
   "@/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from "@/modules/session-agent/types/server-state.types";
 import { SessionConnectorsRepository } from
   "@/modules/session-agent/repositories/session-connectors.repository";
 import { SessionEnvironmentSnapshotRepository } from

@@ -6,7 +6,8 @@ import type {
   SessionSetupTask,
 } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import {
   SessionProvisionService,
   type SessionSetupTaskReporter,

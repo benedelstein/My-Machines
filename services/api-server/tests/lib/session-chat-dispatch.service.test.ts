@@ -14,7 +14,8 @@ import type {
   StoredMessage,
   MessageRepository,
 } from "../../src/modules/session-agent/repositories/message.repository";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import type { AgentTurnCoordinator } from "../../src/modules/session-agent/services/agent-turn-coordinator.service";
 import type { SpriteAgentProcessManager } from "../../src/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
 import {

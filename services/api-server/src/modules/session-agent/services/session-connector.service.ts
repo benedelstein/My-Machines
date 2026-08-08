@@ -13,7 +13,8 @@ import {
 } from "@/shared/integrations/sprite-connectors";
 import type { CleanupStatus } from "@/shared/integrations/sprite-connectors";
 import type { SessionConnectorsRepository } from "../repositories/session-connectors.repository";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
 
 /**
  * Builds the Sprite labels a session's VM must carry: the unique session
