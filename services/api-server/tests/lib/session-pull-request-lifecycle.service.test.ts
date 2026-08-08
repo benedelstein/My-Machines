@@ -11,7 +11,8 @@ import type {
   PullRequestData,
 } from "../../src/shared/types/github";
 import type { MessageRepository } from "../../src/modules/session-agent/repositories/message.repository";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import type { SessionSummaryService } from "../../src/modules/session-agent/services/session-summary.service";
 
 function createLogger(): Logger {

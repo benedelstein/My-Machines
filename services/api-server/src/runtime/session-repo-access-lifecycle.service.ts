@@ -8,7 +8,8 @@ import { GitHubAppService } from "@/modules/github/services/github-app.service";
 import { assertSessionRepoAccess } from "@/modules/sessions/services/session-repo-access.service";
 import type { Env } from "@/shared/types";
 import type { SessionRepoAccessResult } from "@/shared/types/repo-access";
-import type { ServerState } from "@/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "@/modules/session-agent/types/server-state.types";
 
 const repoAccessBlockedMessage =
   "Repository access for this session is blocked. Update the GitHub App installation or your GitHub access to continue.";

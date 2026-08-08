@@ -4,7 +4,8 @@ import {
 } from "@repo/shared";
 import type { ClientState, ServerMessage } from "@repo/shared";
 import type { MessageRepository } from "../repositories/message.repository";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
 import type { PendingChunkRecord } from "../repositories/pending-chunk.repository";
 
 type ConnectedMessage = Extract<ServerMessage, { type: "connected" }>;

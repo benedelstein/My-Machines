@@ -4,20 +4,16 @@ import {
   assertRuntimeMigrationRegistry,
   defineContractRuntimeMigration,
   defineVersionedRuntimeMigration,
-} from "../../src/modules/session-agent/services/runtime-migration-definition.service";
-import type { RuntimeMigrationContext } from
-  "../../src/modules/session-agent/types/runtime-migration.types";
+} from "../../src/modules/session-agent/services/runtime-migration/runtime-migration-definition.service";
 import {
   canonicalJson,
   durableSecretVersion,
   fingerprintHighEntropySecret,
   hashRuntimeMigrationContract,
 } from "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
+import { createMigrationDependencies } from "./runtime-migration-test-support";
 
-const context: RuntimeMigrationContext = {
-  getServerState: () => ({ activeUserMessageId: null }),
-  isTeardownStarted: () => false,
-};
+const host = createMigrationDependencies();
 
 describe("runtime migration contracts", () => {
   it("canonicalizes nested objects while preserving array order and JSON scalars", () => {
@@ -104,11 +100,12 @@ describe("runtime migration contracts", () => {
     const definition = defineContractRuntimeMigration({
       id: "fixture.contract",
       description: "Fixture contract",
+      buildContext: () => null,
       buildContract: () => desired,
       apply,
     });
 
-    const prepared = await definition.prepare(context);
+    const prepared = await definition.prepare(host);
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) {
       return;
@@ -121,6 +118,7 @@ describe("runtime migration contracts", () => {
     const versioned = defineVersionedRuntimeMigration({
       id: "fixture.versioned",
       description: "Fixture version",
+      buildContext: () => null,
       version: 1,
       apply: async () => success(undefined),
     });
@@ -128,6 +126,7 @@ describe("runtime migration contracts", () => {
     expect(() => defineVersionedRuntimeMigration({
       id: "fixture.invalid",
       description: "Invalid version",
+      buildContext: () => null,
       version: 0,
       apply: async () => success(undefined),
     })).toThrow(/positive safe integers/u);

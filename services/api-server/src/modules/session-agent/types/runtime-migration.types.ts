@@ -1,4 +1,5 @@
 import type { Result } from "@repo/shared";
+import type { RuntimeMigrationDependencies } from "./runtime-migration-dependencies.types";
 
 export type JsonPrimitive = string | number | boolean | null;
 
@@ -15,6 +16,7 @@ export type RuntimeMigrationRevisionKind = RuntimeMigrationRevision["kind"];
 
 export type RuntimeMigrationStatus = "running" | "failed" | "applied";
 
+/** DB record for a runtime migration. */
 export interface RuntimeMigrationRecord {
   readonly migrationId: string;
   readonly appliedRevision: RuntimeMigrationRevision | null;
@@ -28,14 +30,7 @@ export interface RuntimeMigrationRecord {
   readonly lastErrorMessage: string | null;
 }
 
-export interface RuntimeMigrationState {
-  readonly activeUserMessageId: string | null;
-}
-
-export interface RuntimeMigrationContext {
-  readonly getServerState: () => RuntimeMigrationState;
-  readonly isTeardownStarted: () => boolean;
-}
+export type { RuntimeMigrationDependencies } from "./runtime-migration-dependencies.types";
 
 export type RuntimeMigrationErrorCode =
   | "PREPARATION_FAILED"
@@ -71,8 +66,9 @@ export type RuntimeMigrationEntryResult = Result<
   RuntimeMigrationError
 >;
 
-export interface RuntimeMigrationApplyInput<Desired extends JsonValue> {
-  readonly context: RuntimeMigrationContext;
+export interface RuntimeMigrationApplyInput<Context, Desired extends JsonValue> {
+  /** The definition's own context, produced by its `buildContext`. */
+  readonly context: Context;
   readonly desired: Desired;
   readonly revision: RuntimeMigrationRevision;
   readonly attempt: number;
@@ -83,12 +79,17 @@ export interface PreparedRuntimeMigration {
   readonly apply: (attempt: number) => Promise<Result<void, RuntimeMigrationError>>;
 }
 
-export interface RuntimeMigrationDefinition {
-  readonly id: string;
+export interface RuntimeMigrationDefinition<Id extends string = string> {
+  readonly id: Id;
   readonly description: string;
   readonly revisionKind: RuntimeMigrationRevisionKind;
+  /**
+   * Builds this migration's own context from these dependencies, then its
+   * desired revision. The context type stays inside the definition, so the
+   * coordinator never needs to know what any individual adopter depends on.
+   */
   readonly prepare: (
-    context: RuntimeMigrationContext,
+    dependencies: RuntimeMigrationDependencies,
   ) => Promise<Result<PreparedRuntimeMigration, RuntimeMigrationError>>;
 }
 

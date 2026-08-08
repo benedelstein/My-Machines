@@ -6,7 +6,8 @@ import type {
   SessionSetupTask,
 } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import {
   SessionProvisionService,
   type SessionSetupTaskReporter,
@@ -170,6 +171,23 @@ export function createService(
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
   });
+  const ensureRuntimeMigration = vi.fn(async (migrationId: string) => {
+    const result = await mockState.ensureSpriteStartupToolchain({
+      codexMinVersion: envOverrides.CODEX_MIN_VERSION,
+    });
+    if (!result.ok) {
+      return {
+        ok: false as const,
+        error: {
+          code: "APPLY_FAILED" as const,
+          message: result.error.message,
+          migrationId,
+        },
+      };
+    }
+    updateServerState({ startupToolchain: result.value });
+    return { ok: true as const, value: { outcome: "applied" as const } };
+  });
   const service = new SessionProvisionService({
     logger: createTestLogger(),
     env: {
@@ -189,6 +207,7 @@ export function createService(
     ensureSessionConnector,
     getSessionConnectorGatewayBase: () =>
       serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
+    ensureRuntimeMigration,
     githubTokenProvider: {
       getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
     },
@@ -202,6 +221,7 @@ export function createService(
     spriteLifecycleClient,
     retireGitProxySecret,
     ensureSessionConnector,
+    ensureRuntimeMigration,
   };
 }
 

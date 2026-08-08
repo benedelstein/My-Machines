@@ -44,10 +44,10 @@ readiness extension. The production registry must be exactly empty.
 Scope: setup immutability/targeted-ensure foundation in task group 7 and all of
 task group 8. The production registry contains only `sprite.startup-toolchain`.
 
-- [ ] P4.1 Make stored setup task arrays immutable before using setup as a targeted migration caller.
-- [ ] P4.2 Register only `sprite.startup-toolchain` and keep the legacy ServerState checkpoint compatibility path enabled.
+- [x] P4.1 Make stored setup task arrays immutable before using setup as a targeted migration caller.
+- [x] P4.2 Register only `sprite.startup-toolchain` and keep the legacy ServerState checkpoint compatibility path enabled.
 - [ ] P4.3 Canary new sessions, completed legacy sessions, incomplete historical setup, active turns, and failed toolchain checks.
-- [ ] P4.4 Confirm no connector, Git, network-policy, or process migration records/effects exist.
+- [x] P4.4 Confirm no connector, Git, network-policy, or process migration records/effects exist.
 - [ ] P4.5 Complete an observation window before removing the legacy checkpoint or advancing to Phase 5.
 
 ## Phase 5 — Connector, Git, and Network Adopters
@@ -174,40 +174,39 @@ marked against that decision.
 - [x] 6.16b Add chat-during-migration and turn-completion-after-deferral cases in Phase 3.
 - [x] 6.17 Add a regression test for the current await-sized race: no Sprite mutation may begin between direct-chat readiness and `beginTurn`.
 - [x] 6.18a Add compile-time tests/fixtures rejecting Phase 2 ownership-requiring calls without a lease, plus runtime non-reentrancy tests proving direct chat `_ensureReady(lease)` reuses the existing boundary without reacquiring the mutex.
-- [ ] 6.18b In Phases 3–4 prove setup targeted ensure and coordinator ownership-requiring calls reuse the existing lease at compile time and runtime.
+- [x] 6.18b In Phases 3–4 prove setup targeted ensure and coordinator ownership-requiring calls reuse the existing lease at compile time and runtime.
 
 ## 7. Immutable Setup and Targeted Ensure Integration — Foundation in Phase 4, Additional Call Sites in Phase 5
 
-- [ ] 7.1 Replace object-key enumeration with one canonical ordered setup task-definition array.
-- [ ] 7.2 Remove `ensureBackfilledTasksPresent`, `ensureSessionConnectorTaskPresent`, and `ensureNetworkPolicyTaskPresent`.
-- [ ] 7.3 Limit `repairOnStart()` to metadata/state repair for task IDs already present in the stored run.
-- [ ] 7.4 Preserve incomplete, completed, and failed stored task arrays byte-for-byte in membership and order.
-- [ ] 7.5 Gate post-setup runtime migrations on terminal setup success.
-- [ ] 7.6 Preserve retry of failed stored tasks that explicitly have `canRetry`; exclude failed runs with no retryable task from post-setup runtime work.
-- [ ] 7.7 Inject targeted coordinator access into setup executors without allowing them to call `RuntimeMigrationRepository.markApplied`.
-- [ ] 7.8 Make the cloud-container task call `ensureMigration("sprite.startup-toolchain", context, lease)` after Sprite creation and before repository/startup-script work.
+- [x] 7.1 Replace object-key enumeration with one canonical ordered setup task-definition array.
+- [x] 7.2 Remove `ensureBackfilledTasksPresent`, `ensureSessionConnectorTaskPresent`, and `ensureNetworkPolicyTaskPresent`.
+- [x] 7.3 Limit `repairOnStart()` to metadata/state repair for task IDs already present in the stored run.
+- [x] 7.4 Preserve incomplete, completed, and failed stored task arrays byte-for-byte in membership and order.
+- [x] 7.5 Gate post-setup runtime migrations on terminal setup success.
+- [x] 7.6 Preserve retry of failed stored tasks that explicitly have `canRetry`; exclude failed runs with no retryable task from post-setup runtime work.
+- [x] 7.7 Inject targeted coordinator access into setup executors without allowing them to call `RuntimeMigrationRepository.markApplied`.
+- [x] 7.8 Make the cloud-container task call `ensureMigration("sprite.startup-toolchain", context, lease)` after Sprite creation and before repository/startup-script work.
 - [ ] 7.9 Make the session-connector task call `ensureMigration("session.connector-resource", context, lease)`.
 - [ ] 7.10 Make repository setup call the versioned Git cutover at the point its complete postcondition can be verified.
 - [ ] 7.11 Make network-policy setup call `ensureMigration("sprite.network-policy", context, lease)`.
 - [ ] 7.12 For any migration spanning multiple tasks, call low-level reconcilers early as needed but call targeted ensure only at the earliest complete postcondition.
-- [ ] 7.13 Add tests for canonical new order, unchanged old incomplete arrays, unchanged terminal arrays, compatibility prerequisites inside old executors, and no creation-time pre-stamping.
-- [ ] 7.14 Add two crash tests: effect before migration-record write and migration-record write before setup-task completion.
-- [ ] 7.15 Add a new-Sprite test where the required state already exists and targeted ensure verifies/no-ops rather than reinstalling.
+- [x] 7.13 Add tests for canonical new order, unchanged old incomplete arrays, unchanged terminal arrays, compatibility prerequisites inside old executors, and no creation-time pre-stamping.
+- [x] 7.14 Add two crash tests: effect before migration-record write and migration-record write before setup-task completion.
+- [x] 7.15 Add a new-Sprite test where the required state already exists and targeted ensure verifies/no-ops rather than reinstalling.
 
 ## 8. Startup Toolchain Contract Migration — Phase 4
 
-- [ ] 8.1 Register `sprite.startup-toolchain` as an awaited contract migration.
-- [ ] 8.2 Reuse common and provider-specific check contract objects as desired inputs.
-- [ ] 8.3 Reuse each check's idempotent apply/verification logic while moving hash comparison and applied revision ownership to the coordinator.
-- [ ] 8.4 Add common-check coverage proving a shared binary/version/script change alters every affected provider's desired hash.
-- [ ] 8.5 Add provider coverage for minimum version, install URL, explicit script revision, and script body changes.
-- [ ] 8.6 Add one-time compatibility adoption from `ServerState.startupToolchain.contractHash`: matching legacy hash creates the applied migration record with zero Sprite calls; mismatching hash reconciles.
-- [ ] 8.7 Remove the setup-time `!startupToolchain` guard and replace the call site with targeted coordinator ensure.
-- [ ] 8.8 Remove the separate readiness-time toolchain stage from the old plan; readiness uses only the runtime registry.
-- [ ] 8.9 Preserve first-run ordering before repository clone and environment startup script.
-- [ ] 8.10 Add tests for completed legacy setup, incomplete historical setup, current hash skip, changed hash repair, failed check, retry, and setup checklist failure reporting.
+- [x] 8.1 Register `sprite.startup-toolchain` as an awaited contract migration.
+- [x] 8.2 Reuse common and provider-specific check contract objects as desired inputs.
+- [x] 8.3 Reuse each check's idempotent apply/verification logic while moving hash comparison and applied revision ownership to the coordinator.
+- [x] 8.4 Add common-check coverage proving a shared binary/version/script change alters every affected provider's desired hash.
+- [x] 8.5 Add provider coverage for minimum version, install URL, explicit script revision, and script body changes.
+- [x] 8.6 Add one-time compatibility adoption from `ServerState.startupToolchain.contractHash`: matching legacy hash creates the applied migration record with zero Sprite calls; mismatching hash reconciles.
+- [x] 8.7 Remove the setup-time `!startupToolchain` guard and replace the call site with targeted coordinator ensure.
+- [x] 8.8 Remove the separate readiness-time toolchain stage from the old plan; readiness uses only the runtime registry.
+- [x] 8.9 Preserve first-run ordering before repository clone and environment startup script.
+- [x] 8.10 Add tests for completed legacy setup, incomplete historical setup, current hash skip, changed hash repair, failed check, retry, and setup checklist failure reporting.
 - [ ] 8.11 After the compatibility window, add a local ServerState migration to remove the legacy checkpoint and delete compatibility reads/writes.
-- [ ] 8.12 Assert the Phase 4 production registry is exactly `[sprite.startup-toolchain]` and that no other runtime migration ID can produce a migration record.
 
 ## 9. Reusable Agent Process Contract — Phase 6
 

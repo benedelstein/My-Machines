@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as SpritesClientModule from "@repo/sprites-client";
 import type { AgentSettings, ClientState, SessionSetupRun } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 
 // FIXME - THESE TESTS TAKE VERY LONG.
 const mockState = vi.hoisted(() => ({

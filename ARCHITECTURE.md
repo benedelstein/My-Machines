@@ -21,7 +21,7 @@ The VM owns the execution runtime for its workflows, and the Durable Object disp
 ## Key Files
 
 - `services/api-server/src/runtime/session-agent.do.ts` - Core session management, VM lifecycle, WebSocket handling, and webhook RPC handlers.
-- `services/api-server/src/modules/session-agent/services/runtime-migration-coordinator.service.ts` - Serial per-session runtime reconciliation, backed by Durable Object-local attempt records and gated by the runtime boundary.
+- `services/api-server/src/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service.ts` - Serial per-session runtime reconciliation, backed by Durable Object-local attempt records and gated by the runtime boundary.
 - `packages/vm-agent/src/index-webhook.ts` - Current vm-agent webhook entrypoint.
 - `packages/api-contract/src/websocket-api.ts` - WebSocket message schemas.
 

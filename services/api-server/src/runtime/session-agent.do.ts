@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import {
   type ClientState,
   type Logger,
@@ -16,8 +17,9 @@ import { Agent, type Connection } from "agents";
 import type { SpriteLifecycleClient } from "@repo/sprites-client";
 import type { SecretRepository } from
   "@/modules/session-agent/repositories/secret.repository";
-import type { ServerStateRepository, ServerState } from
+import type { ServerStateRepository } from
   "@/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from "@/modules/session-agent/types/server-state.types";
 import type { SessionEnvironmentSnapshotRepository } from
   "@/modules/session-agent/repositories/session-environment-snapshot.repository";
 import { createLogger, initializeLogger } from "@/shared/logging";
@@ -64,7 +66,9 @@ import type { SessionGitProxyService } from
 import type { SessionProviderConnectionService } from
   "@/modules/session-agent/services/session-provider-connection.service";
 import type { RuntimeMigrationCoordinator } from
-  "@/modules/session-agent/services/runtime-migration-coordinator.service";
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
+import type { RuntimeMigrationId } from
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
 import type { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import type { SessionQueryService } from
@@ -94,13 +98,13 @@ import type { SessionTurnNotificationService } from
 import {
   createSessionAgentDependencies,
   createSessionAgentRepositories,
+  type SessionAgentDependencies,
 } from "./session-agent-dependencies";
 
 type EnsureReadyOutcome =
   | { outcome: "ready" }
   | { outcome: "setup_incomplete" }
   | { outcome: "deferred_active_turn" };
-
 type EnsureReadyError = {
   code:
     | "SESSION_NOT_INITIALIZED"
@@ -109,7 +113,6 @@ type EnsureReadyError = {
     | "RUNTIME_MIGRATION_FAILED";
   message: string;
 };
-
 type EnsureReadyResult = Result<EnsureReadyOutcome, EnsureReadyError>;
 
 type ChatAdmissionError = {
@@ -138,7 +141,8 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private serverState: ServerState;
   private readonly turnCoordinator: AgentTurnCoordinator;
   private readonly processManager: SpriteAgentProcessManager;
-  private readonly runtimeMigrationCoordinator: RuntimeMigrationCoordinator;
+  private readonly runtimeMigrationCoordinator: RuntimeMigrationCoordinator<RuntimeMigrationId>;
+  private readonly runtimeMigrationDependencies: SessionAgentDependencies["runtimeMigrationDependencies"];
   private readonly provisionService: SessionProvisionService;
   private readonly chatDispatchService: SessionChatDispatchService;
   private readonly setupRunService: SessionSetupRunService;
@@ -211,6 +215,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.turnCoordinator = dependencies.turnCoordinator;
     this.processManager = dependencies.processManager;
     this.runtimeMigrationCoordinator = dependencies.runtimeMigrationCoordinator;
+    this.runtimeMigrationDependencies = dependencies.runtimeMigrationDependencies;
     this.provisionService = dependencies.provisionService;
     this.chatDispatchService = dependencies.chatDispatchService;
     this.setupRunService = dependencies.setupRunService;
@@ -224,7 +229,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     this.repoAccessLifecycleService = dependencies.repoAccessLifecycleService;
     this.autoPullRequestService = dependencies.autoPullRequestService;
     this.turnNotificationService = dependencies.turnNotificationService;
-
     this.logger.info("Constructed agent DO", {
       fields: { sessionId: this.serverState.sessionId },
     });
@@ -234,7 +238,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     // NOTE: doing this here brecause we cant access this.name in the constructor. cf bug
     // Reset transient ClientState fields on every restart so they never get
     // stuck from a previous instance's in-progress operation.
-    this.setupRunService.repairOnStart();
     this.updatePartialState({
       status: this.synthesizeStatus(),
       lastError: null,
@@ -243,7 +246,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         ? { userMessageId: this.serverState.activeUserMessageId }
         : null,
     });
-    this.logger.debug("onStart");
   }
 
   private disableClientStateUpdates(): void {
@@ -330,7 +332,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       });
       return;
     }
-
     await this.turnNotificationService.publishTurnFinished({
       toUserId: userId,
       sessionId,
@@ -640,8 +641,9 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       });
     }
 
+    this.setupRunService.repairBeforeProvisioning();
     try {
-      await this.provisionService.ensureProvisioned();
+      await this.provisionService.ensureProvisioned(_lease);
     } catch (error) {
       return failure({
         code: "PROVISIONING_FAILED",
@@ -657,11 +659,14 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       return success({ outcome: "deferred_active_turn" });
     }
 
+    if (!this.serverState.spriteName) {
+      return failure({
+        code: "PROVISIONING_FAILED",
+        message: "Sprite name is missing after completed setup",
+      });
+    }
     const migrations = await this.runtimeMigrationCoordinator.ensureMigrations(
-      {
-        getServerState: () => this.serverState,
-        isTeardownStarted: () => this.serverState.teardownStarted,
-      },
+      this.runtimeMigrationDependencies,
       _lease,
     );
     if (!migrations.ok) {
@@ -771,6 +776,9 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         attachmentService: this.attachmentService,
       },
     );
+    // the setup run tasks are frozen at init time.
+    // later changes to the run do not affect the frozen task list,
+    // and older sessions should use migrations to ensure they are up to date.
     const sessionSetupRun = this.setupRunService.buildRun();
 
     // Mark initialized in ServerState
@@ -939,7 +947,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       this.sendMessage(accessGuard.message, connection);
       return;
     }
-
     this.sendMessage(this.syncService.buildSyncResponse(), connection);
   }
 

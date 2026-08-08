@@ -12,9 +12,14 @@ import { SessionAgentDO } from "../../src/runtime/session-agent.do";
 import type { ClaimedTurn, PreparedChatMessage } from
   "../../src/modules/session-agent/services/session-chat-dispatch.service";
 import type { ServerState } from
-  "../../src/modules/session-agent/repositories/server-state.repository";
+  "../../src/modules/session-agent/types/server-state.types";
 import type { Env } from "../../src/shared/types";
 import type { InitSessionAgentRequest } from "../../src/shared/types/session-agent";
+import {
+  buildLegacyStartupToolchainContractHash,
+  prepareStartupToolchain,
+} from
+  "../../src/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service";
 import type { FakeAgent } from "./session-agent-do-harness";
 import {
   createFakeDurableObjectState,
@@ -23,6 +28,7 @@ import {
   seedClientStateRow,
   seedServerStateRow,
 } from "./session-agent-do-harness";
+import { createTestLogger } from "./test-logger";
 
 vi.mock("agents", async () => {
   const harness = await import("./session-agent-do-harness");
@@ -101,7 +107,10 @@ interface TestAgentAccess {
   ): Promise<Result<void, object>>;
   onConnect(connection: Connection): void;
   provisionService: {
-    ensureProvisioned(): Promise<void>;
+    ensureProvisioned(...args: unknown[]): Promise<void>;
+  };
+  setupRunService: {
+    repairBeforeProvisioning(): void;
   };
   runtimeMigrationCoordinator: {
     ensureMigrations(...args: unknown[]): Promise<Result<{
@@ -153,6 +162,7 @@ interface TestAgentAccess {
 function constructAgent(args: {
   serverState?: ServerState;
   clientState?: ClientState;
+  useProductionMigrations?: boolean;
 } = {}): TestAgentAccess & FakeAgent<Env, ClientState> {
   const database = createTestDatabase();
   seedServerStateRow(database, JSON.stringify(args.serverState ?? createServerState()));
@@ -177,6 +187,10 @@ function constructAgent(args: {
     queueRefresh: vi.fn(),
   };
   testAgent.turnCoordinator.logger.error = vi.fn();
+  if (!args.useProductionMigrations) {
+    testAgent.runtimeMigrationCoordinator.ensureMigrations = vi.fn(async () =>
+      success({ outcome: "current" as const }));
+  }
   return testAgent;
 }
 
@@ -202,17 +216,48 @@ function connection(id: string): Connection {
 }
 
 describe("SessionAgentDO runtime boundary", () => {
-  it("keeps the production Phase 3 engine inert with zero migration records", async () => {
+  it("repairs setup state before provisioning", async () => {
     const agent = constructAgent();
+    const events: string[] = [];
+    agent.setupRunService.repairBeforeProvisioning = vi.fn(() => {
+      events.push("repair");
+    });
+    agent.provisionService.ensureProvisioned = vi.fn(async () => {
+      events.push("provision");
+    });
+
+    await agent.ensureRuntimeReadyAndDispatchNextTurn();
+
+    expect(events).toEqual(["repair", "provision"]);
+  });
+
+  it("adopts a matching legacy toolchain checkpoint without a Sprite call", async () => {
+    const prepared = prepareStartupToolchain({
+      providerId: "claude-code",
+      logger: createTestLogger(),
+    });
+    const contractHash = await buildLegacyStartupToolchainContractHash(prepared.contract);
+    const agent = constructAgent({
+      useProductionMigrations: true,
+      serverState: createServerState({
+        startupToolchain: { contractHash, checkedAt: 1, results: [] },
+      }),
+    });
     agent.provisionService.ensureProvisioned = vi.fn(async () => {});
+    expect(agent.testDatabase.prepare(
+      "SELECT migration_id FROM session_runtime_migrations",
+    ).all()).toEqual([]);
 
     const result = await agent.ensureRuntimeReadyAndDispatchNextTurn();
     const rows = agent.testDatabase.prepare(
-      "SELECT migration_id FROM session_runtime_migrations",
+      "SELECT migration_id, status FROM session_runtime_migrations",
     ).all();
 
     expect(result).toEqual({ ok: true, value: { outcome: "ready" } });
-    expect(rows).toEqual([]);
+    expect(rows).toEqual([{
+      migration_id: "sprite.startup-toolchain",
+      status: "applied",
+    }]);
   });
 
   it("preserves the teardown guard across Durable Object reconstruction", async () => {
@@ -284,7 +329,11 @@ describe("SessionAgentDO runtime boundary", () => {
     const ensureMigrations = vi.spyOn(
       agent.runtimeMigrationCoordinator,
       "ensureMigrations",
-    );
+    ).mockImplementation(async () => success({
+      outcome: agent.serverState.activeUserMessageId
+        ? "deferred_active_turn" as const
+        : "current" as const,
+    }));
 
     const deferred = await agent.ensureRuntimeReadyAndDispatchNextTurn();
     expect(deferred).toEqual({ ok: true, value: { outcome: "deferred_active_turn" } });
@@ -463,6 +512,11 @@ describe("SessionAgentDO runtime boundary", () => {
       }
     });
     const directPrepared = preparedChatMessage();
+    agent.runtimeMigrationCoordinator.ensureMigrations = vi.fn(async () => success({
+      outcome: agent.serverState.activeUserMessageId
+        ? "deferred_active_turn" as const
+        : "current" as const,
+    }));
     const claimPreparedMessage = vi.fn((): ClaimedTurn => ({
       userMessageId: directPrepared.userMessage.id,
       content: directPrepared.content,

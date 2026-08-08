@@ -16,7 +16,7 @@ vi.mock("@repo/sprites-client", async (importOriginal) => {
   return mocks.mockSpriteClientModule(actual);
 });
 
-vi.mock("@/shared/integrations/sprite-startup-toolchain", async () => {
+vi.mock("@/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service", async () => {
   const mocks = await import("./session-provision-mocks");
   return { ensureSpriteStartupToolchain: mocks.mockState.ensureSpriteStartupToolchain };
 });
@@ -145,21 +145,20 @@ describe("SessionProvisionService session connector", () => {
     expect(serverState.gitAuthMode).toBe("legacy_secret");
   });
 
-  it("fails the repository task when the connector gateway base is missing", async () => {
+  it("reconciles the connector inside an immutable historical repository task", async () => {
     const serverState = createServerState();
-    const { service, retireGitProxySecret } = createService(
+    const { service, ensureSessionConnector, retireGitProxySecret } = createService(
       serverState,
       createClientState({ includeSessionConnector: false }),
     );
 
-    await expect(service.ensureProvisioned()).rejects.toThrow(
-      "Session connector gateway base is missing",
-    );
+    await service.ensureProvisioned();
 
     const remoteConfigCall = mockState.execWs.mock.calls.find(([command]) =>
       String(command).includes("git remote set-url origin"));
-    expect(remoteConfigCall).toBeUndefined();
-    expect(retireGitProxySecret).not.toHaveBeenCalled();
-    expect(serverState.gitAuthMode).toBe("legacy_secret");
+    expect(ensureSessionConnector).toHaveBeenCalledWith("sprite-1");
+    expect(remoteConfigCall).toBeDefined();
+    expect(retireGitProxySecret).toHaveBeenCalledOnce();
+    expect(serverState.gitAuthMode).toBe("ephemeral_token");
   });
 });

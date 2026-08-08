@@ -9,11 +9,11 @@ import type { RuntimeMigrationRepository } from
 import type { RuntimeBoundaryLease } from
   "@/modules/session-agent/types/runtime-boundary.types";
 import type {
-  RuntimeMigrationContext,
   RuntimeMigrationCoordinatorResult,
   RuntimeMigrationDefinition,
   RuntimeMigrationEntryResult,
   RuntimeMigrationError,
+  RuntimeMigrationDependencies,
   RuntimeMigrationRecord,
   RuntimeMigrationRetryPolicy,
   RuntimeMigrationRevision,
@@ -47,9 +47,9 @@ export interface RuntimeMigrationLifecycleEvent {
   readonly operatorAttentionRequired?: boolean;
 }
 
-interface RuntimeMigrationCoordinatorDependencies {
+interface RuntimeMigrationCoordinatorDependencies<Id extends string> {
   readonly repository: RuntimeMigrationRepository;
-  readonly definitions: readonly RuntimeMigrationDefinition[];
+  readonly definitions: readonly RuntimeMigrationDefinition<Id>[];
   readonly logger: Logger;
   readonly now?: () => Date;
   readonly retryPolicy?: RuntimeMigrationRetryPolicy;
@@ -158,15 +158,15 @@ function safeApplyError(
   };
 }
 
-export class RuntimeMigrationCoordinator {
+export class RuntimeMigrationCoordinator<Id extends string = string> {
   private readonly repository: RuntimeMigrationRepository;
-  private readonly definitions: readonly RuntimeMigrationDefinition[];
+  private readonly definitions: readonly RuntimeMigrationDefinition<Id>[];
   private readonly logger: Logger;
   private readonly now: () => Date;
   private readonly retryPolicy: RuntimeMigrationRetryPolicy;
   private readonly observe: (event: RuntimeMigrationLifecycleEvent) => void;
 
-  constructor(dependencies: RuntimeMigrationCoordinatorDependencies) {
+  constructor(dependencies: RuntimeMigrationCoordinatorDependencies<Id>) {
     assertRuntimeMigrationRegistry(dependencies.definitions);
     this.repository = dependencies.repository;
     this.definitions = dependencies.definitions;
@@ -178,16 +178,16 @@ export class RuntimeMigrationCoordinator {
 
   /** Ensures the complete static registry while the caller owns the runtime boundary. */
   async ensureMigrations(
-    context: RuntimeMigrationContext,
+    dependencies: RuntimeMigrationDependencies,
     _lease: RuntimeBoundaryLease,
   ): Promise<RuntimeMigrationCoordinatorResult> {
-    return this.ensureDefinitions(this.definitions, context);
+    return this.ensureDefinitions(this.definitions, dependencies);
   }
 
   /** Ensures the registry prefix while the caller's lease proves mutex ownership. */
   async ensureMigration(
-    migrationId: string,
-    context: RuntimeMigrationContext,
+    migrationId: Id,
+    dependencies: RuntimeMigrationDependencies,
     _lease: RuntimeBoundaryLease,
   ): Promise<RuntimeMigrationCoordinatorResult> {
     const targetIndex = this.definitions.findIndex((definition) => definition.id === migrationId);
@@ -198,20 +198,20 @@ export class RuntimeMigrationCoordinator {
         migrationId,
       });
     }
-    return this.ensureDefinitions(this.definitions.slice(0, targetIndex + 1), context);
+    return this.ensureDefinitions(this.definitions.slice(0, targetIndex + 1), dependencies);
   }
 
   private async ensureDefinitions(
-    definitions: readonly RuntimeMigrationDefinition[],
-    context: RuntimeMigrationContext,
+    definitions: readonly RuntimeMigrationDefinition<Id>[],
+    dependencies: RuntimeMigrationDependencies,
   ): Promise<RuntimeMigrationCoordinatorResult> {
-    if (context.isTeardownStarted()) {
+    if (dependencies.isTeardownStarted()) {
       return failure({
         code: "SESSION_TEARDOWN_STARTED",
         message: "Runtime migration work cannot begin during session teardown",
       });
     }
-    if (context.getServerState().activeUserMessageId !== null) {
+    if (dependencies.getServerState().activeUserMessageId !== null) {
       this.logger.debug("Runtime migrations deferred for active turn", {
         fields: { event: "deferred" },
       });
@@ -220,8 +220,9 @@ export class RuntimeMigrationCoordinator {
     }
 
     let appliedAny = false;
+    this.logger.debug("Ensuring runtime migrations");
     for (const definition of definitions) {
-      const result = await this.ensureDefinition(definition, context);
+      const result = await this.ensureDefinition(definition, dependencies);
       if (!result.ok) {
         return result;
       }
@@ -233,12 +234,12 @@ export class RuntimeMigrationCoordinator {
   }
 
   private async ensureDefinition(
-    definition: RuntimeMigrationDefinition,
-    context: RuntimeMigrationContext,
+    definition: RuntimeMigrationDefinition<Id>,
+    dependencies: RuntimeMigrationDependencies,
   ): Promise<RuntimeMigrationEntryResult> {
     let preparedResult: Awaited<ReturnType<RuntimeMigrationDefinition["prepare"]>>;
     try {
-      preparedResult = await definition.prepare(context);
+      preparedResult = await definition.prepare(dependencies);
     } catch {
       preparedResult = failure({
         code: "PREPARATION_FAILED",
@@ -376,6 +377,7 @@ export class RuntimeMigrationCoordinator {
       migrationId: definition.id,
       revisionKind: prepared.revision.kind,
       revision: revisionValue(prepared.revision),
+      appliedRevision: revisionValue(prepared.revision),
       attempt,
       durationMs: Math.max(0, appliedAt.getTime() - startedAt.getTime()),
     });
@@ -396,17 +398,7 @@ export class RuntimeMigrationCoordinator {
   }
 
   private logEvent(event: RuntimeMigrationLifecycleEvent): void {
-    const fields = {
-      event: event.event,
-      migrationId: event.migrationId ?? null,
-      revisionKind: event.revisionKind ?? null,
-      revision: event.revision ?? null,
-      appliedRevision: event.appliedRevision ?? null,
-      attempt: event.attempt ?? null,
-      durationMs: event.durationMs ?? null,
-      errorCode: event.errorCode ?? null,
-      operatorAttentionRequired: event.operatorAttentionRequired ?? false,
-    };
+    const fields = { ...event };
     if (event.event === "failed" || event.event === "newer_version_skipped") {
       this.logger.warn("Runtime migration lifecycle event", { fields });
     } else {

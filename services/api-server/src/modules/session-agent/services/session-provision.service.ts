@@ -20,12 +20,18 @@ import {
 } from "@repo/sprites-client";
 import { createLogger } from "@/shared/logging";
 import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
-import { ensureSpriteStartupToolchain } from "@/shared/integrations/sprite-startup-toolchain";
 import type { GitHubAppResult } from "@/shared/types/github";
 import EPHEMERAL_GIT_CREDENTIAL_HELPER from "@repo/vm-agent/dist/git-credential-helper.bundle.js";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
+import type { RuntimeBoundaryLease } from "../types/runtime-boundary.types";
+import type { RuntimeMigrationCoordinatorResult } from "../types/runtime-migration.types";
+import type { RuntimeMigrationId } from
+  "./runtime-migration/runtime-migration-registry.service";
 import { buildSessionSpriteLabels } from "./session-connector.service";
 import { isTerminalSetupTask } from "./session-setup-run.service";
+import { STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID } from
+  "./runtime-migration/startup-toolchain-runtime-migration.service";
 import {
   SessionStartupScriptService,
   type SessionStartupScriptRunResult,
@@ -76,6 +82,10 @@ export interface SessionProvisionServiceDeps {
   retireGitProxySecret: () => void;
   ensureSessionConnector: (spriteName: string) => Promise<void>;
   getSessionConnectorGatewayBase: () => string | null;
+  ensureRuntimeMigration: (
+    migrationId: RuntimeMigrationId,
+    lease: RuntimeBoundaryLease,
+  ) => Promise<RuntimeMigrationCoordinatorResult>;
   githubTokenProvider: {
     getReadOnlyTokenForRepo(
       repoFullName: string,
@@ -108,6 +118,7 @@ export class SessionProvisionService {
   private readonly ensureSessionConnector: SessionProvisionServiceDeps["ensureSessionConnector"];
   private readonly getSessionConnectorGatewayBase:
     SessionProvisionServiceDeps["getSessionConnectorGatewayBase"];
+  private readonly ensureRuntimeMigration: SessionProvisionServiceDeps["ensureRuntimeMigration"];
   private readonly githubTokenProvider: SessionProvisionServiceDeps["githubTokenProvider"];
   private readonly setupReporter: SessionProvisionServiceDeps["setupReporter"];
   private readonly setupOutputCollector: SessionProvisionServiceDeps["setupOutputCollector"];
@@ -130,6 +141,7 @@ export class SessionProvisionService {
     this.retireGitProxySecret = deps.retireGitProxySecret;
     this.ensureSessionConnector = deps.ensureSessionConnector;
     this.getSessionConnectorGatewayBase = deps.getSessionConnectorGatewayBase;
+    this.ensureRuntimeMigration = deps.ensureRuntimeMigration;
     this.githubTokenProvider = deps.githubTokenProvider;
     this.setupReporter = deps.setupReporter;
     this.setupOutputCollector = deps.setupOutputCollector;
@@ -140,17 +152,17 @@ export class SessionProvisionService {
    * Ensures the sprite is created and the repo is cloned. Safe to call
    * concurrently — all callers share one in-flight promise.
    */
-  ensureProvisioned(): Promise<void> {
+  ensureProvisioned(lease: RuntimeBoundaryLease): Promise<void> {
     if (this.ensureProvisionedPromise) {
       return this.ensureProvisionedPromise;
     }
-    this.ensureProvisionedPromise = this._provision().finally(() => {
+    this.ensureProvisionedPromise = this._provision(lease).finally(() => {
       this.ensureProvisionedPromise = null;
     });
     return this.ensureProvisionedPromise;
   }
 
-  private async _provision(): Promise<void> {
+  private async _provision(lease: RuntimeBoundaryLease): Promise<void> {
     this.spriteName = this.getServerState().spriteName;
     const setupRun = this.getClientState().sessionSetupRun;
     if (!setupRun) { return; }
@@ -174,12 +186,17 @@ export class SessionProvisionService {
         this.setupReporter?.startTask(task.id);
         switch (task.id) {
           case "cloud_container":
-            await this.ensureCloudContainerTask();
+            await this.ensureCloudContainerTask(lease);
             break;
           case "session_connector":
             await this.ensureSessionConnectorTask(this.requireSpriteName());
             break;
           case "repository":
+            // Historical persisted runs do not gain setup tasks added later.
+            // Reconcile the connector here when this run predates that task.
+            if (!setupRun.tasks.some((candidate) => candidate.id === "session_connector")) {
+              await this.ensureSessionConnectorTask(this.requireSpriteName());
+            }
             await this.ensureRepositoryTask(
               this.requireSpriteName(),
             );
@@ -231,7 +248,7 @@ export class SessionProvisionService {
     });
   }
 
-  private async ensureCloudContainerTask(): Promise<void> {
+  private async ensureCloudContainerTask(lease: RuntimeBoundaryLease): Promise<void> {
     if (!this.spriteName) {
       const sessionId = this.getServerState().sessionId;
       if (!sessionId) {
@@ -269,8 +286,19 @@ export class SessionProvisionService {
         ),
       });
     }
-    if (!this.getServerState().startupToolchain) {
-      await this.ensureStartupToolchain(this.spriteName);
+    // Requires the Sprite name to already be in ServerState — the migration
+    // host reads it from there to build its client.
+    this.requireSpriteName();
+    const migration = await this.ensureRuntimeMigration(
+      STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
+      lease,
+    );
+    if (!migration.ok) {
+      throw new Error(migration.error.message);
+    }
+    if (migration.value.outcome === "deferred_active_turn") {
+      // this should never happen during setup.
+      throw new Error("Startup toolchain migration deferred during setup");
     }
   }
 
@@ -374,59 +402,6 @@ export class SessionProvisionService {
       throw new Error("Sprite name is missing");
     }
     return spriteName;
-  }
-
-  private async ensureStartupToolchain(spriteName: string): Promise<void> {
-    const providerId = this.getClientState().agentSettings.provider;
-    const serverState = this.getServerState();
-    const sprite = new WorkersSpriteClient(
-      spriteName,
-      this.env.SPRITES_API_KEY,
-      this.env.SPRITES_API_URL,
-      createLogger("sprite-websocket.session.ts"),
-    );
-
-    this.logger.info("Ensuring startup toolchain", {
-      fields: {
-        sessionId: serverState.sessionId,
-        spriteName,
-        provider: providerId,
-        checkpointPresent: serverState.startupToolchain !== null,
-      },
-    });
-
-    const result = await ensureSpriteStartupToolchain({
-      providerId,
-      sprite,
-      checkpoint: serverState.startupToolchain,
-      logger: this.logger,
-      codexMinVersion: this.env.CODEX_MIN_VERSION,
-    });
-    if (!result.ok) {
-      this.logger.warn("Startup toolchain failed", {
-        fields: {
-          sessionId: serverState.sessionId,
-          spriteName,
-          provider: providerId,
-          checkId: result.error.checkId,
-          code: result.error.code,
-        },
-      });
-      throw new Error(result.error.message);
-    }
-
-    this.updateServerState({
-      startupToolchain: result.value,
-    });
-    this.logger.info("Startup toolchain ready", {
-      fields: {
-        sessionId: serverState.sessionId,
-        spriteName,
-        provider: providerId,
-        contractHash: result.value.contractHash,
-        checkCount: result.value.results.length,
-      },
-    });
   }
 
   /**

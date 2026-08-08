@@ -1,4 +1,4 @@
-import { SpriteLifecycleClient } from "@repo/sprites-client";
+import { SpriteLifecycleClient, WorkersSpriteClient } from "@repo/sprites-client";
 import type {
   ClientState,
   Logger,
@@ -24,8 +24,9 @@ import { RuntimeMigrationRepository } from
 import type { SqlFn } from "@/modules/session-agent/repositories/repository.types";
 import { migrateAll } from "@/modules/session-agent/repositories/schema-manager.repository";
 import { SecretRepository } from "@/modules/session-agent/repositories/secret.repository";
-import { ServerStateRepository, type ServerState } from
+import { ServerStateRepository } from
   "@/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from "@/modules/session-agent/types/server-state.types";
 import { SessionConnectorsRepository } from
   "@/modules/session-agent/repositories/session-connectors.repository";
 import { SessionEnvironmentSnapshotRepository } from
@@ -47,9 +48,9 @@ import { SessionGitProxyService } from
 import { SessionProviderConnectionService } from
   "@/modules/session-agent/services/session-provider-connection.service";
 import { RuntimeMigrationCoordinator } from
-  "@/modules/session-agent/services/runtime-migration-coordinator.service";
-import { RUNTIME_MIGRATIONS } from
-  "@/modules/session-agent/services/runtime-migration-registry.service";
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
+import { RUNTIME_MIGRATIONS, type RuntimeMigrationId } from
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
 import { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import { SessionQueryService } from "@/modules/session-agent/services/session-query.service";
@@ -70,6 +71,8 @@ import { createUserSessionsPublisher } from
 import { createLogger } from "@/shared/logging";
 import type { Env } from "@/shared/types";
 import type { HandleCreatePullRequestResult } from "@/shared/types/session-agent";
+import type { RuntimeMigrationDependencies } from
+  "@/modules/session-agent/types/runtime-migration.types";
 import { SessionAgentAttachmentProvider } from "./session-agent-attachment-provider";
 import { SessionAutoPullRequestService } from "./session-auto-pull-request.service";
 import { SessionPullRequestLifecycleService } from
@@ -94,7 +97,8 @@ export interface SessionAgentDependencies {
   attachmentService: SessionAgentAttachmentProvider;
   turnCoordinator: AgentTurnCoordinator;
   processManager: SpriteAgentProcessManager;
-  runtimeMigrationCoordinator: RuntimeMigrationCoordinator;
+  runtimeMigrationCoordinator: RuntimeMigrationCoordinator<RuntimeMigrationId>;
+  runtimeMigrationDependencies: RuntimeMigrationDependencies;
   provisionService: SessionProvisionService;
   chatDispatchService: SessionChatDispatchService;
   setupRunService: SessionSetupRunService;
@@ -198,6 +202,30 @@ export function createSessionAgentDependencies(input: {
     apiKey: env.SPRITES_API_KEY,
     logger: createLogger("sprites.ts"),
   });
+  /**
+   * Capability surface every runtime migration draws on. Adding an adopter
+   * does not change this — the definition builds its own context from here.
+   */
+  const runtimeMigrationDependencies: RuntimeMigrationDependencies = {
+    getServerState: host.getServerState,
+    getClientState: host.getClientState,
+    updateServerState: host.updateServerState,
+    isTeardownStarted: () => host.getServerState().teardownStarted,
+    createSpriteClient: () => {
+      const { spriteName } = host.getServerState();
+      if (!spriteName) {
+        throw new Error("Sprite name is missing");
+      }
+      return new WorkersSpriteClient(
+        spriteName,
+        env.SPRITES_API_KEY,
+        env.SPRITES_API_URL,
+        createLogger("sprite-websocket.session.ts"),
+      );
+    },
+    env: { CODEX_MIN_VERSION: env.CODEX_MIN_VERSION },
+    logger,
+  };
   const attachmentService = new SessionAgentAttachmentProvider(env.DB);
   const githubAppService = new GitHubAppService(env, logger);
   const notificationPublisher = new NotificationPublisher(env);
@@ -326,6 +354,8 @@ export function createSessionAgentDependencies(input: {
     retireGitProxySecret: () => gitProxyService.retireGitProxySecret(),
     ensureSessionConnector: (spriteName) => sessionConnectorService.ensureMinted(spriteName),
     getSessionConnectorGatewayBase: () => sessionConnectorService.getGatewayBase(),
+    ensureRuntimeMigration: (migrationId, lease) =>
+      runtimeMigrationCoordinator.ensureMigration(migrationId, runtimeMigrationDependencies, lease),
     githubTokenProvider: githubAppService,
     setupReporter: {
       startTask: (taskId) => setupRunService.startTask(taskId),
@@ -380,6 +410,7 @@ export function createSessionAgentDependencies(input: {
     turnCoordinator,
     processManager,
     runtimeMigrationCoordinator,
+    runtimeMigrationDependencies,
     provisionService,
     chatDispatchService,
     setupRunService,

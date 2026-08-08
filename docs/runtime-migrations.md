@@ -5,8 +5,9 @@ with Durable Object SQLite, such as Sprite files, connector configuration, and
 process state. They are separate from constructor-time repository migrations and
 deployment-managed D1 migrations.
 
-Phase 3 deploys only the engine. The production registry is exactly empty, so
-readiness returns `current` without migration records or external calls.
+Phase 4 registers only `sprite.startup-toolchain`. Readiness reconciles that
+migration after terminal setup and before admitting the next turn; connector,
+Git, network-policy, and reusable-process migrations remain inactive.
 
 ## Declaration API
 
