@@ -139,6 +139,20 @@ describe("WorkersSpriteClient", () => {
       expect.objectContaining({ method: "GET" }),
     );
   });
+
+  it("returns null when a successful network-policy apply has no response body", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const client = new WorkersSpriteClient(
+      "sprite-1",
+      "sprites-key",
+      "https://api.sprites.test",
+      testLogger,
+    );
+
+    await expect(client.setNetworkPolicy([
+      { domain: "*", action: "deny" },
+    ])).resolves.toBeNull();
+  });
 });
 
 function createFrame(streamId: number, payload: string): Uint8Array {

@@ -117,7 +117,9 @@ export class WorkersSpriteClient {
     }, this.logger);
   }
 
-  async setNetworkPolicy(rules: NetworkPolicyRule[]): Promise<NetworkPolicyRule[]> {
+  async setNetworkPolicy(
+    rules: NetworkPolicyRule[],
+  ): Promise<NetworkPolicyRule[] | null> {
     const url = `${this.baseUrl}/v1/sprites/${this.name}/policy/network`;
     const response = await fetch(url, {
       method: "POST",
@@ -135,7 +137,11 @@ export class WorkersSpriteClient {
         text,
       );
     }
-    return NetworkPolicyResponseSchema.parse(await response.json()).rules;
+    const body = await response.text();
+    if (!body.trim()) {
+      return null;
+    }
+    return NetworkPolicyResponseSchema.parse(JSON.parse(body)).rules;
   }
 
   /** Reads the Sprite's normalized network policy for post-apply verification. */

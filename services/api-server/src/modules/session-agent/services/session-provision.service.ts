@@ -594,7 +594,7 @@ export class SessionProvisionService {
     );
     const desiredRules = contract.rules.map((rule) => ({ ...rule }));
     const appliedRules = await sprite.setNetworkPolicy(desiredRules);
-    const verifiedRules = policiesEqual(appliedRules, desiredRules)
+    const verifiedRules = appliedRules && policiesEqual(appliedRules, desiredRules)
       ? appliedRules
       : await sprite.getNetworkPolicy();
     if (!policiesEqual(verifiedRules, desiredRules)) {
