@@ -11,15 +11,20 @@ history live in `openspec/changes/automate-sprites-custom-connectors/`.
 
 - **In-VM root is untrusted.** The agent process runs arbitrary code, so
   anything readable on the Sprite — files, env vars, process memory — is
-  extractable. Long-lived credentials therefore never rest on the VM.
+  extractable. Current webhook and post-clone Git credentials avoid resting on
+  the VM for new connector-backed sessions. Provider OAuth credentials do still
+  follow the legacy VM delivery path until S4 moves inference through the
+  control plane.
 - **Identity comes from the platform, not the VM.** Sprites carry
   `session:<sessionId>` labels that in-VM root cannot change. Fly's connector
   gateway verifies the calling Sprite's labels before injecting any credential,
   so possession of a URL is never authority by itself.
-- **Credentials are injected at boundaries the Sprite can't cross.** The
-  connector gateway injects session credentials after the identity check; the
-  Worker injects upstream credentials (GitHub installation tokens, provider
-  OAuth) after validating the session credential. The Sprite sees neither.
+- **Credentials are injected at boundaries the Sprite can't cross where that
+  path is implemented.** The connector gateway injects session credentials after
+  the identity check. The Worker injects GitHub installation tokens after
+  validating session Git credentials. Provider OAuth is still written into
+  provider-specific credential files and env vars on the Sprite by
+  `SpriteAgentProcessManager` using `getProviderCredentialAdapter(...)`.
 
 ## Credential classes
 
@@ -33,11 +38,12 @@ Every outbound flow is classified and routed exactly one way
 | C | Direct egress allowed by environment | npm, pypi, user-allowlisted hosts | Direct, no connector credential, per `open`/`default`/`custom`/`locked` | **Implemented** |
 | D | Direct egress denied by environment | hosts outside a restricted mode's rules | Denied by network policy (empty under `open`) | **Implemented** |
 
-Class A never enters the transparent proxy: every class-A client (webhook base
-URL, Git credential helper, provider CLI base URLs) is written by our
-provisioning code, so it points straight at the connector gateway. The proxy
-exists only for class B, where arbitrary unmodified tools address the real
-hostname and can't be reconfigured.
+Class A never enters the planned transparent proxy. The implemented class-A
+clients today are the webhook base URL and Git credential helper mint URL; both
+are written by provisioning/runtime code and point at the connector gateway.
+Provider CLI base URLs are part of the planned S4 inference proxy, not the
+current runtime. The transparent proxy exists only for class B, where arbitrary
+unmodified tools address the real hostname and can't be reconfigured.
 
 ## Implemented today
 
@@ -61,10 +67,16 @@ hostname and can't be reconfigured.
 - **Network policy (classes C/D).** L3/L4 allow/deny built per environment
   network mode; the Worker hostname and connector gateway hostname are always
   reachable; denied hosts are blocked at the policy layer, not the proxy.
+- **Provider credential delivery.** Before each fresh vm-agent spawn,
+  `SpriteAgentProcessManager` calls `getProviderCredentialAdapter(...)`, writes
+  the returned files with `writeCredentialFiles(...)`, and passes returned env
+  vars to the Sprite process. For Claude this includes
+  `/home/sprite/.claude/.credentials.json`; for OpenAI Codex this includes
+  `/home/sprite/.codex/auth.json`.
 - **Teardown revocation.** Session deletion revokes ephemeral Git tokens and
   the webhook token before slow external cleanup, then deletes the connector.
 - **Encrypted credential storage.** D1 holds session metadata, GitHub
-  installations, and encrypted GitHub user credentials; session secrets
+  installations, and encrypted user/provider credentials; session secrets
   (webhook token, ephemeral Git tokens) live in the DO's SQLite.
 
 ## Planned
