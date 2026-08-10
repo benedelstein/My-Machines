@@ -20,7 +20,6 @@ export type SpriteNetworkPolicyContract = {
   readonly requestedNetwork: NetworkAccessConfig;
   readonly workerHostname: string;
   readonly connectorGatewayHostname: string;
-  readonly defaultAllowlistRevision: number;
   readonly rules: readonly {
     readonly domain: string;
     readonly action: "allow" | "deny";

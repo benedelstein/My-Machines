@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { SpritesError } from "@repo/sprites-client";
 import { RUNTIME_MIGRATIONS } from
   "../../src/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
 import { sessionConnectorRuntimeMigration } from
@@ -43,7 +44,6 @@ describe("Phase 5 runtime migrations", () => {
         requiredSpriteLabels: ["session:session-1"],
       }),
       desiredRevision: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      attempt: 3,
     });
     const reconcileInput = vi.mocked(dependencies.reconcileSessionConnector).mock.calls[0]?.[0];
     expect(JSON.stringify(reconcileInput?.contract)).not.toContain("allocated-connector-id");
@@ -87,15 +87,19 @@ describe("Phase 5 runtime migrations", () => {
         requestedNetwork: { mode: "locked" },
         workerHostname: "worker.test",
         connectorGatewayHostname: "api.sprites.test",
-        defaultAllowlistRevision: 1,
       }),
     );
   });
 
   it("turns adopter exceptions into secret-safe migration failures", async () => {
     const dependencies = createMigrationDependencies();
+    const warn = vi.spyOn(dependencies.logger, "warn");
     vi.mocked(dependencies.reconcileGitEphemeralTokenCutover)
-      .mockRejectedValue(new Error("secret raw integration output"));
+      .mockRejectedValue(new SpritesError(
+        "secret raw integration output",
+        401,
+        "secret provider body",
+      ));
     const prepared = await gitEphemeralTokenRuntimeMigration.prepare(dependencies);
     if (!prepared.ok) {
       throw new Error("Git migration preparation failed unexpectedly");
@@ -109,5 +113,12 @@ describe("Phase 5 runtime migrations", () => {
         migrationId: "sprite.git-ephemeral-token-cutover",
       },
     });
+    expect(warn).toHaveBeenCalledWith("Runtime migration adopter failed", {
+      fields: {
+        migrationId: "sprite.git-ephemeral-token-cutover",
+        cause: "provider_authentication_failed",
+      },
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret");
   });
 });

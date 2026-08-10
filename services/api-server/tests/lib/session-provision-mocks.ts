@@ -22,7 +22,6 @@ export function mockSpriteClientModule(actual: Record<string, unknown>) {
       this.name = name;
     }
     setNetworkPolicy = mockState.setNetworkPolicy;
-    getNetworkPolicy = mockState.setNetworkPolicy;
     execWs = mockState.execWs;
     writeFile = mockState.writeFile;
   }

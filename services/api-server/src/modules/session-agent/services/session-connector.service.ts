@@ -88,7 +88,6 @@ export class SessionConnectorService {
   async reconcile(input: {
     contract: SessionConnectorContract;
     desiredRevision: string;
-    attempt: number;
   }): Promise<void> {
     const serverState = this.getServerState();
     const sessionId = serverState.sessionId;

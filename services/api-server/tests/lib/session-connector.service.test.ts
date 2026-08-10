@@ -269,7 +269,6 @@ async function reconcileConnector(
   await service.reconcile({
     contract,
     desiredRevision: "a".repeat(64),
-    attempt: 1,
   });
 }
 

@@ -81,6 +81,30 @@ describe("SessionProvisionService startup toolchain", () => {
     );
   });
 
+  it("accepts a successful no-content network-policy apply without readback", async () => {
+    const serverState = createServerState({ spriteName: "sprite-1" });
+    const { service, updateServerState } = createService(
+      serverState,
+      createClientState(),
+    );
+    mockState.setNetworkPolicy.mockResolvedValueOnce(undefined);
+
+    await service.reconcileNetworkPolicy({
+      contractSchema: 1,
+      providerId: "openai-codex",
+      requestedNetwork: { mode: "default" },
+      workerHostname: "worker.test",
+      connectorGatewayHostname: "api.sprites.test",
+      rules: [
+        { domain: "api.github.com", action: "allow" },
+        { domain: "*", action: "deny" },
+      ],
+    });
+
+    expect(mockState.setNetworkPolicy).toHaveBeenCalledOnce();
+    expect(updateServerState).toHaveBeenCalledWith({ finalNetworkPolicyApplied: true });
+  });
+
   it("rechecks targeted ensure after migration success precedes task completion", async () => {
     const effect = vi.fn();
     const setupReporter = createSetupReporter();

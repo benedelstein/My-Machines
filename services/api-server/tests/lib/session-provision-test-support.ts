@@ -199,6 +199,9 @@ export function createService(
         await ensureSessionConnector();
         break;
       case "sprite.git-ephemeral-token-cutover":
+        if (!serverState.sessionConnectorId) {
+          await ensureSessionConnector();
+        }
         await serviceReference.current?.reconcileGitEphemeralTokenCutover();
         break;
       case "sprite.network-policy":
@@ -208,7 +211,6 @@ export function createService(
           requestedNetwork: environmentSnapshot.network,
           workerHostname: "worker.test",
           connectorGatewayHostname: "api.sprites.test",
-          defaultAllowlistRevision: 1,
           rules: [{ domain: "final", action: "allow" }],
         });
         break;

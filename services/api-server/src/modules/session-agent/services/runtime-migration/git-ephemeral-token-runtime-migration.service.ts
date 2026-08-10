@@ -1,4 +1,6 @@
 import { failure, success } from "@repo/shared";
+import { logRuntimeMigrationApplyFailure } from
+  "./runtime-migration-apply-failure.service";
 import { defineVersionedRuntimeMigration } from "./runtime-migration-definition.service";
 
 export const GIT_EPHEMERAL_TOKEN_RUNTIME_MIGRATION_ID =
@@ -15,7 +17,12 @@ export const gitEphemeralTokenRuntimeMigration = defineVersionedRuntimeMigration
     try {
       await context.reconcileGitEphemeralTokenCutover();
       return success(undefined);
-    } catch {
+    } catch (error) {
+      logRuntimeMigrationApplyFailure(
+        context.logger,
+        GIT_EPHEMERAL_TOKEN_RUNTIME_MIGRATION_ID,
+        error,
+      );
       return failure({
         code: "APPLY_FAILED",
         message: "Ephemeral Git token cutover apply or verification failed",

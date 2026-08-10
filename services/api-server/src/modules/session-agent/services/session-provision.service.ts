@@ -197,11 +197,6 @@ export class SessionProvisionService {
             await this.ensureSessionConnectorTask(lease);
             break;
           case "repository":
-            // Historical persisted runs do not gain setup tasks added later.
-            // Reconcile the connector here when this run predates that task.
-            if (!setupRun.tasks.some((candidate) => candidate.id === "session_connector")) {
-              await this.ensureSessionConnectorTask(lease);
-            }
             await this.ensureRepositoryTask(
               this.requireSpriteName(),
               lease,
@@ -580,7 +575,7 @@ export class SessionProvisionService {
     this.updateServerState({ gitAuthMode: "ephemeral_token" });
   }
 
-  /** Applies the exact prepared policy and verifies the normalized provider readback. */
+  /** Applies the exact policy prepared by the runtime migration. */
   async reconcileNetworkPolicy(contract: SpriteNetworkPolicyContract): Promise<void> {
     const spriteName = this.getServerState().spriteName;
     if (!spriteName) {
@@ -593,13 +588,7 @@ export class SessionProvisionService {
       createLogger("sprite-websocket.session.ts"),
     );
     const desiredRules = contract.rules.map((rule) => ({ ...rule }));
-    const appliedRules = await sprite.setNetworkPolicy(desiredRules);
-    const verifiedRules = appliedRules && policiesEqual(appliedRules, desiredRules)
-      ? appliedRules
-      : await sprite.getNetworkPolicy();
-    if (!policiesEqual(verifiedRules, desiredRules)) {
-      throw new Error("Network policy readback did not match the desired policy");
-    }
+    await sprite.setNetworkPolicy(desiredRules);
     this.updateServerState({ finalNetworkPolicyApplied: true });
   }
 
@@ -616,17 +605,6 @@ export class SessionProvisionService {
       throw new Error(`${label} migration deferred during setup`);
     }
   }
-}
-
-function policiesEqual(
-  left: readonly { readonly domain: string; readonly action: "allow" | "deny" }[],
-  right: readonly { readonly domain: string; readonly action: "allow" | "deny" }[],
-): boolean {
-  return left.length === right.length
-    && left.every((rule, index) => {
-      const expected = right[index];
-      return expected?.domain === rule.domain && expected.action === rule.action;
-    });
 }
 
 function getErrorMessage(error: unknown): string {

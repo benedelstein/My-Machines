@@ -60,7 +60,6 @@ export interface RuntimeMigrationDependencies {
   readonly reconcileSessionConnector: (input: {
     readonly contract: SessionConnectorContract;
     readonly desiredRevision: string;
-    readonly attempt: number;
   }) => Promise<void>;
   readonly reconcileGitEphemeralTokenCutover: () => Promise<void>;
   readonly reconcileNetworkPolicy: (

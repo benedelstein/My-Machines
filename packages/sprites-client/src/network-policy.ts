@@ -254,8 +254,6 @@ const DEFAULT_NETWORK_ALLOW_RULES: NetworkPolicyRule[] = [
 ];
 
 /** Bump when the deployment-owned default allowlist changes semantically. */
-export const DEFAULT_NETWORK_ALLOWLIST_REVISION = 1;
-
 export const DEFAULT_NETWORK_POLICY: NetworkPolicyRule[] = appendDenyAll(
   DEFAULT_NETWORK_ALLOW_RULES,
 );

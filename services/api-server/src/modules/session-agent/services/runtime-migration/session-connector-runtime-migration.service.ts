@@ -2,6 +2,8 @@ import { failure, success } from "@repo/shared";
 import type { SessionConnectorContract } from
   "@/modules/session-agent/types/runtime-migration-adopters.types";
 import { buildSessionSpriteLabels } from "../session-connector.service";
+import { logRuntimeMigrationApplyFailure } from
+  "./runtime-migration-apply-failure.service";
 import { defineContractRuntimeMigration } from "./runtime-migration-definition.service";
 
 export const SESSION_CONNECTOR_RUNTIME_MIGRATION_ID = "session.connector-resource";
@@ -44,7 +46,7 @@ export const sessionConnectorRuntimeMigration = defineContractRuntimeMigration({
     };
   },
 
-  apply: async ({ context, desired, revision, attempt }) => {
+  apply: async ({ context, desired, revision }) => {
     if (revision.kind !== "contract") {
       return failure({
         code: "MIGRATION_REVISION_KIND_CHANGED",
@@ -56,10 +58,14 @@ export const sessionConnectorRuntimeMigration = defineContractRuntimeMigration({
       await context.dependencies.reconcileSessionConnector({
         contract: desired,
         desiredRevision: revision.hash,
-        attempt,
       });
       return success(undefined);
-    } catch {
+    } catch (error) {
+      logRuntimeMigrationApplyFailure(
+        context.dependencies.logger,
+        SESSION_CONNECTOR_RUNTIME_MIGRATION_ID,
+        error,
+      );
       return failure({
         code: "APPLY_FAILED",
         message: "Session connector apply or verification failed",

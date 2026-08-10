@@ -111,7 +111,7 @@ describe("WorkersSpriteClient", () => {
     );
   });
 
-  it("returns parsed network-policy apply and readback responses", async () => {
+  it("treats any successful network-policy response as applied", async () => {
     const rules = [
       { domain: "api.github.com", action: "allow" as const },
       { domain: "*", action: "deny" as const },
@@ -127,20 +127,16 @@ describe("WorkersSpriteClient", () => {
       testLogger,
     );
 
-    await expect(client.setNetworkPolicy(rules)).resolves.toEqual(rules);
-    await expect(client.getNetworkPolicy()).resolves.toEqual(rules);
+    await expect(client.setNetworkPolicy(rules)).resolves.toBeUndefined();
 
-    expect(fetchSpy).toHaveBeenNthCalledWith(1,
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledWith(
       "https://api.sprites.test/v1/sprites/sprite-1/policy/network",
       expect.objectContaining({ method: "POST" }),
     );
-    expect(fetchSpy).toHaveBeenNthCalledWith(2,
-      "https://api.sprites.test/v1/sprites/sprite-1/policy/network",
-      expect.objectContaining({ method: "GET" }),
-    );
   });
 
-  it("returns null when a successful network-policy apply has no response body", async () => {
+  it("accepts the provider's no-content network-policy response", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
     const client = new WorkersSpriteClient(
       "sprite-1",
@@ -151,7 +147,7 @@ describe("WorkersSpriteClient", () => {
 
     await expect(client.setNetworkPolicy([
       { domain: "*", action: "deny" },
-    ])).resolves.toBeNull();
+    ])).resolves.toBeUndefined();
   });
 });
 

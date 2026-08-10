@@ -1,10 +1,9 @@
 import { failure, success } from "@repo/shared";
-import {
-  buildFinalNetworkPolicy,
-  DEFAULT_NETWORK_ALLOWLIST_REVISION,
-} from "@repo/sprites-client";
+import { buildFinalNetworkPolicy } from "@repo/sprites-client";
 import type { SpriteNetworkPolicyContract } from
   "@/modules/session-agent/types/runtime-migration-adopters.types";
+import { logRuntimeMigrationApplyFailure } from
+  "./runtime-migration-apply-failure.service";
 import { defineContractRuntimeMigration } from "./runtime-migration-definition.service";
 
 export const NETWORK_POLICY_RUNTIME_MIGRATION_ID = "sprite.network-policy";
@@ -28,7 +27,6 @@ export const networkPolicyRuntimeMigration = defineContractRuntimeMigration({
       requestedNetwork: snapshot.network,
       workerHostname,
       connectorGatewayHostname,
-      defaultAllowlistRevision: DEFAULT_NETWORK_ALLOWLIST_REVISION,
       rules: buildFinalNetworkPolicy({
         workerHostname,
         providerId,
@@ -42,10 +40,15 @@ export const networkPolicyRuntimeMigration = defineContractRuntimeMigration({
     try {
       await context.dependencies.reconcileNetworkPolicy(desired);
       return success(undefined);
-    } catch {
+    } catch (error) {
+      logRuntimeMigrationApplyFailure(
+        context.dependencies.logger,
+        NETWORK_POLICY_RUNTIME_MIGRATION_ID,
+        error,
+      );
       return failure({
         code: "APPLY_FAILED",
-        message: "Sprite network policy apply or verification failed",
+        message: "Sprite network policy apply failed",
         migrationId: NETWORK_POLICY_RUNTIME_MIGRATION_ID,
       });
     }
