@@ -47,7 +47,6 @@ task group 8. The production registry contains only `sprite.startup-toolchain`.
 - [x] P4.1 Make stored setup task arrays immutable before using setup as a targeted migration caller.
 - [x] P4.2 Register only `sprite.startup-toolchain` and keep the legacy ServerState checkpoint compatibility path enabled.
 - [ ] P4.3 Canary new sessions, completed legacy sessions, incomplete historical setup, active turns, and failed toolchain checks.
-- [x] P4.4 Confirm no connector, Git, network-policy, or process migration records/effects exist.
 - [ ] P4.5 Complete an observation window before removing the legacy checkpoint or advancing to Phase 5.
 
 ## Phase 5 — Connector, Git, and Network Adopters
