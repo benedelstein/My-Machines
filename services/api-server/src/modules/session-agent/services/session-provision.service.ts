@@ -14,17 +14,19 @@ import { dedent } from "@repo/shared";
 import type { Env } from "@/shared/types";
 import {
   buildBootstrapNetworkPolicy,
-  buildFinalNetworkPolicy,
   WorkersSpriteClient,
   type SpriteLifecycleClient,
 } from "@repo/sprites-client";
 import { createLogger } from "@/shared/logging";
+import { sha256 } from "@/shared/utils/crypto";
 import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
 import type { GitHubAppResult } from "@/shared/types/github";
 import EPHEMERAL_GIT_CREDENTIAL_HELPER from "@repo/vm-agent/dist/git-credential-helper.bundle.js";
 import type { ServerState } from
   "../types/server-state.types";
 import type { RuntimeBoundaryLease } from "../types/runtime-boundary.types";
+import type { SpriteNetworkPolicyContract } from
+  "../types/runtime-migration-adopters.types";
 import type { RuntimeMigrationCoordinatorResult } from "../types/runtime-migration.types";
 import type { RuntimeMigrationId } from
   "./runtime-migration/runtime-migration-registry.service";
@@ -32,6 +34,12 @@ import { buildSessionSpriteLabels } from "./session-connector.service";
 import { isTerminalSetupTask } from "./session-setup-run.service";
 import { STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID } from
   "./runtime-migration/startup-toolchain-runtime-migration.service";
+import { SESSION_CONNECTOR_RUNTIME_MIGRATION_ID } from
+  "./runtime-migration/session-connector-runtime-migration.service";
+import { GIT_EPHEMERAL_TOKEN_RUNTIME_MIGRATION_ID } from
+  "./runtime-migration/git-ephemeral-token-runtime-migration.service";
+import { NETWORK_POLICY_RUNTIME_MIGRATION_ID } from
+  "./runtime-migration/network-policy-runtime-migration.service";
 import {
   SessionStartupScriptService,
   type SessionStartupScriptRunResult,
@@ -80,7 +88,6 @@ export interface SessionProvisionServiceDeps {
   updatePartialState: (partial: ProvisionClientStateUpdate) => void;
   synthesizeStatus: () => SessionStatus;
   retireGitProxySecret: () => void;
-  ensureSessionConnector: (spriteName: string) => Promise<void>;
   getSessionConnectorGatewayBase: () => string | null;
   ensureRuntimeMigration: (
     migrationId: RuntimeMigrationId,
@@ -115,7 +122,6 @@ export class SessionProvisionService {
   private readonly updatePartialState: SessionProvisionServiceDeps["updatePartialState"];
   private readonly synthesizeStatus: () => SessionStatus;
   private readonly retireGitProxySecret: () => void;
-  private readonly ensureSessionConnector: SessionProvisionServiceDeps["ensureSessionConnector"];
   private readonly getSessionConnectorGatewayBase:
     SessionProvisionServiceDeps["getSessionConnectorGatewayBase"];
   private readonly ensureRuntimeMigration: SessionProvisionServiceDeps["ensureRuntimeMigration"];
@@ -139,7 +145,6 @@ export class SessionProvisionService {
     this.updatePartialState = deps.updatePartialState;
     this.synthesizeStatus = deps.synthesizeStatus;
     this.retireGitProxySecret = deps.retireGitProxySecret;
-    this.ensureSessionConnector = deps.ensureSessionConnector;
     this.getSessionConnectorGatewayBase = deps.getSessionConnectorGatewayBase;
     this.ensureRuntimeMigration = deps.ensureRuntimeMigration;
     this.githubTokenProvider = deps.githubTokenProvider;
@@ -189,16 +194,17 @@ export class SessionProvisionService {
             await this.ensureCloudContainerTask(lease);
             break;
           case "session_connector":
-            await this.ensureSessionConnectorTask(this.requireSpriteName());
+            await this.ensureSessionConnectorTask(lease);
             break;
           case "repository":
             // Historical persisted runs do not gain setup tasks added later.
             // Reconcile the connector here when this run predates that task.
             if (!setupRun.tasks.some((candidate) => candidate.id === "session_connector")) {
-              await this.ensureSessionConnectorTask(this.requireSpriteName());
+              await this.ensureSessionConnectorTask(lease);
             }
             await this.ensureRepositoryTask(
               this.requireSpriteName(),
+              lease,
             );
             break;
           case "setup_script": {
@@ -211,7 +217,7 @@ export class SessionProvisionService {
             continue; 
           }
           case "network_policy":
-            await this.ensureNetworkPolicyTask(this.requireSpriteName());
+            await this.ensureNetworkPolicyTask(lease);
             break;
           default: {
             const exhaustiveCheck: never = task;
@@ -302,8 +308,12 @@ export class SessionProvisionService {
     }
   }
 
-  private async ensureSessionConnectorTask(spriteName: string): Promise<void> {
-    await this.ensureSessionConnector(spriteName);
+  private async ensureSessionConnectorTask(lease: RuntimeBoundaryLease): Promise<void> {
+    await this.ensureTargetedMigration(
+      SESSION_CONNECTOR_RUNTIME_MIGRATION_ID,
+      lease,
+      "Session connector",
+    );
   }
 
   /** Gateway hostname kept reachable in restricted network modes. */
@@ -313,11 +323,17 @@ export class SessionProvisionService {
 
   private async ensureRepositoryTask(
     spriteName: string,
+    lease: RuntimeBoundaryLease,
   ): Promise<void> {
     if (!this.getServerState().repoCloned) {
       await this.cloneRepo(spriteName);
       this.updateServerState({ repoCloned: true });
     }
+    await this.ensureTargetedMigration(
+      GIT_EPHEMERAL_TOKEN_RUNTIME_MIGRATION_ID,
+      lease,
+      "Ephemeral Git token cutover",
+    );
     this.updatePartialState({ lastError: null });
   }
 
@@ -387,13 +403,12 @@ export class SessionProvisionService {
     }
   }
 
-  private async ensureNetworkPolicyTask(
-    spriteName: string,
-  ): Promise<void> {
-    if (!this.getServerState().finalNetworkPolicyApplied) {
-      await this.applyFinalNetworkPolicy(spriteName);
-      this.updateServerState({ finalNetworkPolicyApplied: true });
-    }
+  private async ensureNetworkPolicyTask(lease: RuntimeBoundaryLease): Promise<void> {
+    await this.ensureTargetedMigration(
+      NETWORK_POLICY_RUNTIME_MIGRATION_ID,
+      lease,
+      "Network policy",
+    );
   }
 
   private requireSpriteName(): string {
@@ -410,9 +425,7 @@ export class SessionProvisionService {
    */
   private async cloneRepo(spriteName: string): Promise<void> {
     const clientState = this.getClientState();
-    const serverState = this.getServerState();
     const repoFullName = clientState.repoFullName!;
-    const sessionId = serverState.sessionId!;
 
     const sprite = new WorkersSpriteClient(
       spriteName,
@@ -421,8 +434,6 @@ export class SessionProvisionService {
       createLogger("sprite-websocket.session.ts"),
     );
 
-    const proxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
-    const cloneUrl = `${proxyBaseUrl}/github.com/${repoFullName}.git`;
     const githubRemoteUrl = `https://github.com/${repoFullName}.git`;
 
     // Check if the repo is already cloned (sprite may be persistent)
@@ -494,9 +505,27 @@ export class SessionProvisionService {
       this.updatePartialState({ baseBranch: actualBaseBranch });
     }
 
-    // The session_connector task is blocking and ordered before this one
-    // (including back-filled pre-connector runs), so a missing gateway base
-    // is an invariant violation, not a fallback case.
+  }
+
+  /** Reconciles and locally verifies the historical ephemeral-token Git cutover. */
+  async reconcileGitEphemeralTokenCutover(): Promise<void> {
+    const spriteName = this.getServerState().spriteName;
+    const sessionId = this.getServerState().sessionId;
+    const repoFullName = this.getClientState().repoFullName;
+    if (!spriteName || !sessionId || !repoFullName) {
+      throw new Error("Git cutover prerequisites are missing");
+    }
+    if (!this.getServerState().repoCloned) {
+      throw new Error("Repository must be cloned before Git cutover");
+    }
+    const sprite = new WorkersSpriteClient(
+      spriteName,
+      this.env.SPRITES_API_KEY,
+      this.env.SPRITES_API_URL,
+      createLogger("sprite-websocket.session.ts"),
+    );
+    const proxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
+    const cloneUrl = `${proxyBaseUrl}/github.com/${repoFullName}.git`;
     const connectorGatewayBase = this.getSessionConnectorGatewayBase();
     if (!connectorGatewayBase) {
       throw new Error("Session connector gateway base is missing");
@@ -509,6 +538,7 @@ export class SessionProvisionService {
     const helperCommand = `!${[helperPath, cloneUrl, mintUrl]
       .map(shellQuote)
       .join(" ")}`;
+    const helperHash = await sha256(EPHEMERAL_GIT_CREDENTIAL_HELPER);
     await sprite.writeFile(
       helperPath,
       EPHEMERAL_GIT_CREDENTIAL_HELPER,
@@ -530,6 +560,13 @@ export class SessionProvisionService {
       git config ${shellQuote(`credential.${cloneUrl}.username`)} x-ephemeral-git-token
       git config credential.useHttpPath true
       git config ${shellQuote(`http.${proxyBaseUrl}/.proactiveAuth`)} basic
+      test "$(git remote get-url origin)" = ${shellQuote(cloneUrl)}
+      test "$(git remote get-url --push origin)" = ${shellQuote(cloneUrl)}
+      test "$(git config --get ${shellQuote(`credential.${cloneUrl}.helper`)})" = ${shellQuote(helperCommand)}
+      test "$(git config --get ${shellQuote(`credential.${cloneUrl}.username`)})" = x-ephemeral-git-token
+      test "$(git config --get credential.useHttpPath)" = true
+      test "$(git config --get ${shellQuote(`http.${proxyBaseUrl}/.proactiveAuth`)})" = basic
+      test "$(sha256sum ${shellQuote(helperPath)} | cut -d ' ' -f 1)" = ${shellQuote(helperHash)}
     `,
       {},
     );
@@ -543,26 +580,53 @@ export class SessionProvisionService {
     this.updateServerState({ gitAuthMode: "ephemeral_token" });
   }
 
-  private async applyFinalNetworkPolicy(spriteName: string): Promise<void> {
-    const environmentSnapshot = this.getEnvironmentSnapshot();
-    const providerId = this.getClientState().agentSettings.provider;
+  /** Applies the exact prepared policy and verifies the normalized provider readback. */
+  async reconcileNetworkPolicy(contract: SpriteNetworkPolicyContract): Promise<void> {
+    const spriteName = this.getServerState().spriteName;
+    if (!spriteName) {
+      throw new Error("Sprite name is missing");
+    }
     const sprite = new WorkersSpriteClient(
       spriteName,
       this.env.SPRITES_API_KEY,
       this.env.SPRITES_API_URL,
       createLogger("sprite-websocket.session.ts"),
     );
-    const workerHostname = new URL(this.env.WORKER_URL).hostname;
-
-    await sprite.setNetworkPolicy(
-      buildFinalNetworkPolicy({
-        workerHostname,
-        providerId,
-        network: environmentSnapshot.network,
-        connectorGatewayHostname: this.connectorGatewayHostname(),
-      }),
-    );
+    const desiredRules = contract.rules.map((rule) => ({ ...rule }));
+    const appliedRules = await sprite.setNetworkPolicy(desiredRules);
+    const verifiedRules = policiesEqual(appliedRules, desiredRules)
+      ? appliedRules
+      : await sprite.getNetworkPolicy();
+    if (!policiesEqual(verifiedRules, desiredRules)) {
+      throw new Error("Network policy readback did not match the desired policy");
+    }
+    this.updateServerState({ finalNetworkPolicyApplied: true });
   }
+
+  private async ensureTargetedMigration(
+    migrationId: RuntimeMigrationId,
+    lease: RuntimeBoundaryLease,
+    label: string,
+  ): Promise<void> {
+    const migration = await this.ensureRuntimeMigration(migrationId, lease);
+    if (!migration.ok) {
+      throw new Error(migration.error.message);
+    }
+    if (migration.value.outcome === "deferred_active_turn") {
+      throw new Error(`${label} migration deferred during setup`);
+    }
+  }
+}
+
+function policiesEqual(
+  left: readonly { readonly domain: string; readonly action: "allow" | "deny" }[],
+  right: readonly { readonly domain: string; readonly action: "allow" | "deny" }[],
+): boolean {
+  return left.length === right.length
+    && left.every((rule, index) => {
+      const expected = right[index];
+      return expected?.domain === rule.domain && expected.action === rule.action;
+    });
 }
 
 function getErrorMessage(error: unknown): string {

@@ -6,6 +6,8 @@ import type {
   SessionSetupTask,
 } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
+import type { RuntimeBoundaryLease } from
+  "../../src/modules/session-agent/types/runtime-boundary.types";
 import type { ServerState } from
   "../../src/modules/session-agent/types/server-state.types";
 import {
@@ -20,6 +22,8 @@ import { createTestLogger } from "./test-logger";
 
 export { mockState, resetProvisionMocks } from "./session-provision-mocks";
 export { createTestLogger } from "./test-logger";
+
+export const TEST_RUNTIME_BOUNDARY_LEASE = {} as RuntimeBoundaryLease;
 
 export function createClientState(args: {
   prepareTask?: (task: SessionSetupTask) => SessionSetupTask;
@@ -171,21 +175,44 @@ export function createService(
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
   });
+  const serviceReference: { current: SessionProvisionService | null } = { current: null };
   const ensureRuntimeMigration = vi.fn(async (migrationId: string) => {
-    const result = await mockState.ensureSpriteStartupToolchain({
-      codexMinVersion: envOverrides.CODEX_MIN_VERSION,
-    });
-    if (!result.ok) {
-      return {
-        ok: false as const,
-        error: {
-          code: "APPLY_FAILED" as const,
-          message: result.error.message,
-          migrationId,
-        },
-      };
+    switch (migrationId) {
+      case "sprite.startup-toolchain": {
+        const result = await mockState.ensureSpriteStartupToolchain({
+          codexMinVersion: envOverrides.CODEX_MIN_VERSION,
+        });
+        if (!result.ok) {
+          return {
+            ok: false as const,
+            error: {
+              code: "APPLY_FAILED" as const,
+              message: result.error.message,
+              migrationId,
+            },
+          };
+        }
+        updateServerState({ startupToolchain: result.value });
+        break;
+      }
+      case "session.connector-resource":
+        await ensureSessionConnector();
+        break;
+      case "sprite.git-ephemeral-token-cutover":
+        await serviceReference.current?.reconcileGitEphemeralTokenCutover();
+        break;
+      case "sprite.network-policy":
+        await serviceReference.current?.reconcileNetworkPolicy({
+          contractSchema: 1,
+          providerId: clientState.agentSettings.provider,
+          requestedNetwork: environmentSnapshot.network,
+          workerHostname: "worker.test",
+          connectorGatewayHostname: "api.sprites.test",
+          defaultAllowlistRevision: 1,
+          rules: [{ domain: "final", action: "allow" }],
+        });
+        break;
     }
-    updateServerState({ startupToolchain: result.value });
     return { ok: true as const, value: { outcome: "applied" as const } };
   });
   const service = new SessionProvisionService({
@@ -204,7 +231,6 @@ export function createService(
     updatePartialState,
     synthesizeStatus: () => "preparing",
     retireGitProxySecret,
-    ensureSessionConnector,
     getSessionConnectorGatewayBase: () =>
       serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
     ensureRuntimeMigration,
@@ -214,6 +240,7 @@ export function createService(
     setupReporter,
     setupOutputCollector,
   });
+  serviceReference.current = service;
 
   return {
     service,

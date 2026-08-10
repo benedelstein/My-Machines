@@ -54,9 +54,9 @@ task group 8. The production registry contains only `sprite.startup-toolchain`.
 Scope: Phase 5 setup call sites from task group 7 and task group 10. The
 production registry is toolchain, connector, Git cutover, then network policy.
 
-- [ ] P5.1 Append `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and `sprite.network-policy` without reordering `sprite.startup-toolchain`.
-- [ ] P5.2 Add targeted setup ensures only at each complete postcondition and retain all legacy cleanup material required for rollback.
-- [ ] P5.3 Prove the production registry does not contain `agent.reusable-process` and no contract-driven process termination occurs.
+- [x] P5.1 Append `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and `sprite.network-policy` without reordering `sprite.startup-toolchain`.
+- [x] P5.2 Add targeted setup ensures only at each complete postcondition and retain all legacy cleanup material required for rollback.
+- [x] P5.3 Prove the production registry does not contain `agent.reusable-process` and no contract-driven process termination occurs.
 - [ ] P5.4 Canary connector disagreement, uncertain create, existing-clone Git repair, policy update, active-turn deferral, and late-waking legacy sessions.
 - [ ] P5.5 Complete the legacy end-to-end cohort and an observation window before Phase 6.
 
@@ -185,10 +185,10 @@ marked against that decision.
 - [x] 7.6 Preserve retry of failed stored tasks that explicitly have `canRetry`; exclude failed runs with no retryable task from post-setup runtime work.
 - [x] 7.7 Inject targeted coordinator access into setup executors without allowing them to call `RuntimeMigrationRepository.markApplied`.
 - [x] 7.8 Make the cloud-container task call `ensureMigration("sprite.startup-toolchain", context, lease)` after Sprite creation and before repository/startup-script work.
-- [ ] 7.9 Make the session-connector task call `ensureMigration("session.connector-resource", context, lease)`.
-- [ ] 7.10 Make repository setup call the versioned Git cutover at the point its complete postcondition can be verified.
-- [ ] 7.11 Make network-policy setup call `ensureMigration("sprite.network-policy", context, lease)`.
-- [ ] 7.12 For any migration spanning multiple tasks, call low-level reconcilers early as needed but call targeted ensure only at the earliest complete postcondition.
+- [x] 7.9 Make the session-connector task call `ensureMigration("session.connector-resource", context, lease)`.
+- [x] 7.10 Make repository setup call the versioned Git cutover at the point its complete postcondition can be verified.
+- [x] 7.11 Make network-policy setup call `ensureMigration("sprite.network-policy", context, lease)`.
+- [x] 7.12 For any migration spanning multiple tasks, call low-level reconcilers early as needed but call targeted ensure only at the earliest complete postcondition.
 - [x] 7.13 Add tests for canonical new order, unchanged old incomplete arrays, unchanged terminal arrays, compatibility prerequisites inside old executors, and no creation-time pre-stamping.
 - [x] 7.14 Add two crash tests: effect before migration-record write and migration-record write before setup-task completion.
 - [x] 7.15 Add a new-Sprite test where the required state already exists and targeted ensure verifies/no-ops rather than reinstalling.
@@ -234,29 +234,29 @@ marked against that decision.
 
 ## 10. Connector, Git, and Network Migrations — Phase 5
 
-- [ ] 10.1 Extend `@repo/sprites-client` with the official connector access-policy update operation and parsed response types if not already present.
-- [ ] 10.2 Build `SessionConnectorContract` from provider, base/test URLs, required labels, and allowed/blocked endpoints; exclude the webhook token, which `apply` ensures exists locally before minting and which is not rotated today.
-- [ ] 10.3 Exclude allocated connector ID and incidental connector name from the desired contract.
-- [ ] 10.4 Register `session.connector-resource` as an awaited contract migration.
-- [ ] 10.5 Extract an idempotent connector reconciler that treats external state as authoritative, ServerState ID as a hint, D1 as a mirror, and writes ServerState last.
-- [ ] 10.6 PATCH and read back policy-only changes, including newly allowed internal endpoints.
-- [ ] 10.7 Replace rather than falsely checkpoint connectors when base URL or credential changes cannot be applied in place.
-- [ ] 10.8 Persist secret-safe desired-revision and attempt-identity metadata sufficient to distinguish a connector created by the current attempt from an unverifiable abandoned connector.
-- [ ] 10.8a Handle uncertain create, abandoned external connector, replacement rollback window, failed cleanup, and D1 write failure without losing the authoritative external ID; replace rather than adopt when attempt provenance cannot be proven.
-- [ ] 10.9 Verify connector configuration through API readback and do not ping the connector URL.
-- [ ] 10.10 Register `sprite.git-ephemeral-token-cutover` as an awaited versioned migration for historical existing-clone repair.
-- [ ] 10.11 Make Git apply inspect and reconcile existing remote URLs, helper bundle contents, credential settings, proactive auth, and persisted `gitAuthMode`.
-- [ ] 10.12 Verify Git locally and do not ping the proxy/gateway.
-- [ ] 10.13 Retire the legacy Git proxy secret only after the new local Git configuration verifies.
-- [ ] 10.14 Register `sprite.network-policy` as an awaited contract migration based on the persisted session environment snapshot, provider, Worker/gateway hostnames, and deployment allowlist revision.
-- [ ] 10.15 Verify network policy through normalized apply response or readback rather than endpoint reachability.
-- [ ] 10.16 Preserve the current behavior that source environment edits do not mutate existing session snapshots.
+- [x] 10.1 Extend `@repo/sprites-client` with the official connector access-policy update operation and parsed response types if not already present.
+- [x] 10.2 Build `SessionConnectorContract` from provider, base/test URLs, required labels, and allowed/blocked endpoints; exclude the webhook token, which `apply` ensures exists locally before minting and which is not rotated today.
+- [x] 10.3 Exclude allocated connector ID and incidental connector name from the desired contract.
+- [x] 10.4 Register `session.connector-resource` as an awaited contract migration.
+- [x] 10.5 Extract an idempotent connector reconciler that treats external state as authoritative, ServerState ID as a hint, D1 as a mirror, and writes ServerState last.
+- [x] 10.6 Update and read back policy-only changes, including newly allowed internal endpoints.
+- [x] 10.7 Replace rather than falsely checkpoint connectors when base URL or credential changes cannot be applied in place.
+- [x] 10.8 Persist secret-safe desired-revision and attempt-identity metadata sufficient to distinguish a connector created by the current attempt from an unverifiable abandoned connector.
+- [x] 10.8a Handle uncertain create, abandoned external connector, replacement rollback window, failed cleanup, and D1 write failure without losing the authoritative external ID; replace rather than adopt when attempt provenance cannot be proven.
+- [x] 10.9 Verify connector configuration through API readback and do not ping the connector URL.
+- [x] 10.10 Register `sprite.git-ephemeral-token-cutover` as an awaited versioned migration for historical existing-clone repair.
+- [x] 10.11 Make Git apply inspect and reconcile existing remote URLs, helper bundle contents, credential settings, proactive auth, and persisted `gitAuthMode`.
+- [x] 10.12 Verify Git locally and do not ping the proxy/gateway.
+- [x] 10.13 Retire the legacy Git proxy secret only after the new local Git configuration verifies.
+- [x] 10.14 Register `sprite.network-policy` as an awaited contract migration based on the persisted session environment snapshot, provider, Worker/gateway hostnames, and deployment allowlist revision.
+- [x] 10.15 Verify network policy through normalized apply response or readback rather than endpoint reachability.
+- [x] 10.16 Preserve the current behavior that source environment edits do not mutate existing session snapshots.
 - [ ] 10.17 Add tests showing an intentional future snapshot-row update would change the network and process contracts without coordinator redesign.
-- [ ] 10.18 Add the Phase 5 registry order: toolchain, connector, Git cutover, network policy; explicitly keep reusable process unregistered until Phase 6.
+- [x] 10.18 Add the Phase 5 registry order: toolchain, connector, Git cutover, network policy; explicitly keep reusable process unregistered until Phase 6.
 - [ ] 10.19 Add an end-to-end legacy-session test with terminal setup, existing clone, connector creation/reuse, label repair, Git cutover, network policy, old-process termination, and next-turn gateway webhook delivery.
-- [ ] 10.20 Add connector tests for endpoint addition, policy correction, base URL change, missing checkpointed connector, abandoned create, D1 disagreement, and no secret leakage.
+- [x] 10.20 Add connector tests for endpoint addition, policy correction, base URL change, missing checkpointed connector, abandoned create, D1 disagreement, and no secret leakage.
 - [ ] 10.21 Define but do not prematurely enable a later versioned cleanup migration for obsolete Sprite-held Git/webhook delivery material; retain the connector-injected server-held webhook credential.
-- [ ] 10.22 Assert the Phase 5 production registry exactly matches its four-entry snapshot and cannot perform contract-driven process termination.
+- [x] 10.22 Assert the Phase 5 production registry exactly matches its four-entry snapshot and cannot perform contract-driven process termination.
 
 ## 11. Extensibility and Regression Scenarios — Engine Fixtures in Phase 3, Adopter Regressions Thereafter
 

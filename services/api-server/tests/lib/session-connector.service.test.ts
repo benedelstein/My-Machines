@@ -12,9 +12,12 @@ import type { Env } from "../../src/shared/types";
 import type { ServerState } from
   "../../src/modules/session-agent/types/server-state.types";
 import type {
+  SessionConnectorAttemptRecord,
   SessionConnectorRecord,
   SessionConnectorsRepository,
 } from "../../src/modules/session-agent/repositories/session-connectors.repository";
+import type { SessionConnectorContract } from
+  "../../src/modules/session-agent/types/runtime-migration-adopters.types";
 import {
   buildSessionSpriteLabels,
   SessionConnectorService,
@@ -26,6 +29,7 @@ class FakeSpritesClient implements SpriteConnectorsClient {
   readonly deletedIds: string[] = [];
   connection: SpritesConnection | null = null;
   createError: SpritesRestError | null = null;
+  createBeforeError = false;
   deleteError: SpritesRestError | null = null;
   private nextConnectionId = 1;
 
@@ -34,12 +38,25 @@ class FakeSpritesClient implements SpriteConnectorsClient {
   ): Promise<Result<SpritesConnection, SpritesRestError>> {
     this.createdRequests.push(request);
     if (this.createError) {
+      if (this.createBeforeError) {
+        this.connection = {
+          id: `gateway-conn-${this.nextConnectionId++}`,
+          provider: "custom_api",
+          providerAccountName: request.name,
+          providerInfo: { base_api_url: request.baseApiUrl },
+          accessPolicy: request.accessPolicy,
+        };
+      }
       return failure(this.createError);
     }
     this.connection = {
       id: `gateway-conn-${this.nextConnectionId++}`,
       provider: "custom_api",
       providerAccountName: request.name,
+      providerInfo: {
+        base_api_url: request.baseApiUrl,
+        test_url: request.testUrl,
+      },
       accessPolicy: request.accessPolicy,
     };
     return success(this.connection);
@@ -49,8 +66,15 @@ class FakeSpritesClient implements SpriteConnectorsClient {
     return success(this.connection ? [this.connection] : []);
   }
 
-  async updateAccessPolicy(): Promise<Result<SpritesConnection, SpritesRestError>> {
-    throw new Error("Mint must set the final policy during creation.");
+  async updateAccessPolicy(
+    connectionId: string,
+    accessPolicy: CreateCustomApiConnectionRequest["accessPolicy"],
+  ): Promise<Result<SpritesConnection, SpritesRestError>> {
+    if (!this.connection || this.connection.id !== connectionId) {
+      return failure({ code: "sprites_request_failed", retryable: false });
+    }
+    this.connection = { ...this.connection, accessPolicy };
+    return success(this.connection);
   }
 
   async getConnection(
@@ -110,8 +134,10 @@ function createEnvironmentSnapshot(
 
 function createFakeRepository() {
   const rows = new Map<string, SessionConnectorRecord>();
+  const attempts = new Map<string, SessionConnectorAttemptRecord>();
   const repository = {
     rows,
+    attempts,
     get: vi.fn(async (sessionId: string) => rows.get(sessionId) ?? null),
     upsertActive: vi.fn(
       async (params: {
@@ -125,12 +151,27 @@ function createFakeRepository() {
           gatewayConnectionId: params.gatewayConnectionId,
           connectorName: params.connectorName,
           policySummary: params.policySummary,
+          desiredRevision: params.desiredRevision ?? null,
+          attemptIdentity: params.attemptIdentity ?? null,
           status: "active",
           createdAt: "2026-07-26T00:00:00.000Z",
           updatedAt: "2026-07-26T00:00:00.000Z",
         });
       },
     ),
+    getAttempt: vi.fn(async (sessionId: string) => attempts.get(sessionId) ?? null),
+    beginAttempt: vi.fn(async (params: SessionConnectorAttemptRecord) => {
+      attempts.set(params.sessionId, { ...params, gatewayConnectionId: null });
+    }),
+    setAttemptConnectionId: vi.fn(async (sessionId: string, gatewayConnectionId: string) => {
+      const attempt = attempts.get(sessionId);
+      if (attempt) {
+        attempts.set(sessionId, { ...attempt, gatewayConnectionId });
+      }
+    }),
+    deleteAttempt: vi.fn(async (sessionId: string) => {
+      attempts.delete(sessionId);
+    }),
     markPendingRevocation: vi.fn(async (sessionId: string) => {
       const row = rows.get(sessionId);
       if (row) {
@@ -155,6 +196,12 @@ function createService(args: {
   const setSessionConnectorId = vi.fn((gatewayConnectionId: string) => {
     serverState.sessionConnectorId = gatewayConnectionId;
   });
+  const updateServerState = vi.fn((partial: Partial<ServerState>) => {
+    Object.assign(serverState, partial);
+    if (partial.sessionConnectorId) {
+      setSessionConnectorId(partial.sessionConnectorId);
+    }
+  });
   const updateSpriteLabels = vi.fn(async (_name: string, labels: string[]) => labels);
   const spriteLifecycleClient = {
     getSprite: vi.fn(async () => ({
@@ -175,9 +222,7 @@ function createService(args: {
     spriteLifecycleClient: spriteLifecycleClient as never,
     repository: repository as unknown as SessionConnectorsRepository,
     getServerState: () => serverState,
-    setSessionConnectorId,
-    getEnvironmentSnapshot: () =>
-      args.environmentSnapshot ?? createEnvironmentSnapshot(),
+    updateServerState,
     ensureWebhookToken,
     spritesClient,
   });
@@ -193,6 +238,41 @@ function createService(args: {
   };
 }
 
+function createConnectorContract(
+  snapshot: SessionEnvironmentSnapshot = createEnvironmentSnapshot(),
+): SessionConnectorContract {
+  return {
+    contractSchema: 1,
+    provider: "custom_api",
+    baseApiUrl: "https://worker.test",
+    testUrl: "https://worker.test/health",
+    requiredSpriteLabels: buildSessionSpriteLabels(
+      "session-1",
+      snapshot.sourceEnvironmentId,
+    ),
+    accessPolicy: {
+      allowedEndpoints: [
+        "/internal/session/session-1/chunks",
+        "/internal/session/session-1/events",
+        "/internal/session/session-1/git-token",
+        "/health",
+      ],
+      blockedEndpoints: [],
+    },
+  };
+}
+
+async function reconcileConnector(
+  service: SessionConnectorService,
+  contract = createConnectorContract(),
+): Promise<void> {
+  await service.reconcile({
+    contract,
+    desiredRevision: "a".repeat(64),
+    attempt: 1,
+  });
+}
+
 describe("buildSessionSpriteLabels", () => {
   it("includes the environment label only when an environment exists", () => {
     expect(buildSessionSpriteLabels("session-1", null)).toEqual(["session:session-1"]);
@@ -203,13 +283,13 @@ describe("buildSessionSpriteLabels", () => {
   });
 });
 
-describe("SessionConnectorService.ensureMinted", () => {
+describe("SessionConnectorService.reconcile", () => {
   it("mints a session-labelled connector and persists metadata", async () => {
     const { service, serverState, spritesClient, repository } = createService({
       spriteLabels: ["session:session-1"],
     });
 
-    await service.ensureMinted("sprite-1");
+    await reconcileConnector(service);
 
     expect(spritesClient.createdRequests).toHaveLength(1);
     const created = spritesClient.createdRequests[0]!;
@@ -226,6 +306,7 @@ describe("SessionConnectorService.ensureMinted", () => {
         "/internal/session/session-1/git-token",
         "/health",
       ],
+      blockedEndpoints: [],
     });
     expect(serverState.sessionConnectorId).toBe("gateway-conn-1");
     expect(repository.rows.get("session-1")).toMatchObject({
@@ -239,7 +320,7 @@ describe("SessionConnectorService.ensureMinted", () => {
       serverState: createServerState({ spriteLabelsApplied: true }),
     });
 
-    await service.ensureMinted("sprite-1");
+    await reconcileConnector(service);
 
     expect(spriteLifecycleClient.getSprite).not.toHaveBeenCalled();
     expect(spriteLifecycleClient.updateSpriteLabels).not.toHaveBeenCalled();
@@ -254,7 +335,12 @@ describe("SessionConnectorService.ensureMinted", () => {
       }),
     });
 
-    await service.ensureMinted("sprite-1");
+    await reconcileConnector(
+      service,
+      createConnectorContract(createEnvironmentSnapshot({
+        sourceEnvironmentId: "environment-1",
+      })),
+    );
 
     expect(spriteLifecycleClient.updateSpriteLabels).toHaveBeenCalledWith("sprite-1", [
       "session:session-1",
@@ -268,7 +354,7 @@ describe("SessionConnectorService.ensureMinted", () => {
     });
     spriteLifecycleClient.updateSpriteLabels.mockResolvedValue([]);
 
-    await expect(service.ensureMinted("sprite-1")).rejects.toThrow(
+    await expect(reconcileConnector(service)).rejects.toThrow(
       "Sprite label update did not persist required labels: session:session-1",
     );
 
@@ -276,12 +362,31 @@ describe("SessionConnectorService.ensureMinted", () => {
     expect(spritesClient.createdRequests).toHaveLength(0);
   });
 
-  it("is a no-op when the connector checkpoint exists", async () => {
-    const { service, spritesClient } = createService({
+  it("adopts a verified legacy connector checkpoint without creating", async () => {
+    const { service, spritesClient, repository } = createService({
       serverState: createServerState({ sessionConnectorId: "gateway-conn-9" }),
+      spriteLabels: ["session:session-1"],
+    });
+    spritesClient.connection = {
+      id: "gateway-conn-9",
+      provider: "custom_api",
+      providerAccountName: "session-session-1-legacy",
+      providerInfo: { base_api_url: "https://worker.test" },
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: ["session:session-1"],
+        allowedEndpoints: createConnectorContract().accessPolicy.allowedEndpoints,
+        blockedEndpoints: [],
+      },
+    };
+    await repository.upsertActive({
+      sessionId: "session-1",
+      gatewayConnectionId: "gateway-conn-9",
+      connectorName: "session-session-1-legacy",
+      policySummary: spritesClient.connection.accessPolicy,
     });
 
-    await service.ensureMinted("sprite-1");
+    await reconcileConnector(service);
 
     expect(spritesClient.createdRequests).toHaveLength(0);
   });
@@ -297,7 +402,7 @@ describe("SessionConnectorService.ensureMinted", () => {
       policySummary: null,
     });
 
-    await service.ensureMinted("sprite-1");
+    await reconcileConnector(service);
 
     expect(spritesClient.deletedIds).toContain("gateway-conn-stale");
     expect(repository.rows.get("session-1")).toMatchObject({
@@ -316,21 +421,132 @@ describe("SessionConnectorService.ensureMinted", () => {
       retryable: false,
     };
 
-    await expect(service.ensureMinted("sprite-1")).rejects.toThrow(
-      "Session connector mint failed",
+    await expect(reconcileConnector(service)).rejects.toThrow(
+      "Session connector create failed",
     );
     expect(serverState.sessionConnectorId).toBeNull();
   });
 
-  it("deletes the connector when metadata persistence fails", async () => {
+  it("retains attempt provenance when active metadata persistence fails", async () => {
     const { service, serverState, spritesClient, repository } = createService({
       spriteLabels: ["session:session-1"],
     });
     repository.upsertActive.mockRejectedValue(new Error("D1 unavailable"));
 
-    await expect(service.ensureMinted("sprite-1")).rejects.toThrow("D1 unavailable");
-    expect(spritesClient.deletedIds).toContain("gateway-conn-1");
+    await expect(reconcileConnector(service)).rejects.toThrow("D1 unavailable");
+    expect(repository.attempts.get("session-1")).toMatchObject({
+      gatewayConnectionId: "gateway-conn-1",
+      desiredRevision: "a".repeat(64),
+    });
+    expect(spritesClient.deletedIds).not.toContain("gateway-conn-1");
     expect(serverState.sessionConnectorId).toBeNull();
+  });
+
+  it("updates and reads back a changed endpoint policy in place", async () => {
+    const { service, spritesClient, repository } = createService({
+      serverState: createServerState({ sessionConnectorId: "gateway-conn-9" }),
+      spriteLabels: ["session:session-1"],
+    });
+    spritesClient.connection = {
+      id: "gateway-conn-9",
+      provider: "custom_api",
+      providerAccountName: "session-session-1-legacy",
+      providerInfo: { base_api_url: "https://worker.test" },
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: ["session:session-1"],
+        allowedEndpoints: ["/health"],
+      },
+    };
+    await repository.upsertActive({
+      sessionId: "session-1",
+      gatewayConnectionId: "gateway-conn-9",
+      connectorName: "session-session-1-legacy",
+      policySummary: spritesClient.connection.accessPolicy,
+    });
+
+    await reconcileConnector(service);
+
+    expect(spritesClient.createdRequests).toHaveLength(0);
+    expect(spritesClient.connection.accessPolicy?.allowedEndpoints).toContain(
+      "/internal/session/session-1/git-token",
+    );
+  });
+
+  it("replaces a connector whose base URL cannot be updated in place", async () => {
+    const { service, spritesClient, repository, serverState } = createService({
+      serverState: createServerState({ sessionConnectorId: "gateway-conn-old" }),
+      spriteLabels: ["session:session-1"],
+    });
+    spritesClient.connection = {
+      id: "gateway-conn-old",
+      provider: "custom_api",
+      providerAccountName: "session-session-1-legacy",
+      providerInfo: { base_api_url: "https://old-worker.test" },
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: ["session:session-1"],
+      },
+    };
+    await repository.upsertActive({
+      sessionId: "session-1",
+      gatewayConnectionId: "gateway-conn-old",
+      connectorName: "session-session-1-legacy",
+      policySummary: spritesClient.connection.accessPolicy,
+    });
+
+    await reconcileConnector(service);
+
+    expect(spritesClient.createdRequests).toHaveLength(1);
+    expect(serverState.sessionConnectorId).toBe("gateway-conn-1");
+    expect(spritesClient.deletedIds).toContain("gateway-conn-old");
+  });
+
+  it("adopts an uncertain create only through its durable attempt name", async () => {
+    const { service, spritesClient, repository } = createService({
+      spriteLabels: ["session:session-1"],
+    });
+    spritesClient.createBeforeError = true;
+    spritesClient.createError = { code: "sprites_request_failed", retryable: true };
+
+    await reconcileConnector(service);
+
+    expect(repository.rows.get("session-1")).toMatchObject({
+      gatewayConnectionId: "gateway-conn-1",
+      desiredRevision: "a".repeat(64),
+    });
+    expect(repository.attempts.has("session-1")).toBe(false);
+  });
+
+  it("rewrites a stale D1 mirror from verified external state without storing the token", async () => {
+    const { service, spritesClient, repository, serverState } = createService({
+      spriteLabels: ["session:session-1"],
+    });
+    spritesClient.connection = {
+      id: "gateway-conn-9",
+      provider: "custom_api",
+      providerAccountName: "session-session-1-legacy",
+      providerInfo: { base_api_url: "https://worker.test" },
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: ["session:session-1"],
+        allowedEndpoints: [...createConnectorContract().accessPolicy.allowedEndpoints],
+        blockedEndpoints: [],
+      },
+    };
+    await repository.upsertActive({
+      sessionId: "session-1",
+      gatewayConnectionId: "gateway-conn-9",
+      connectorName: "session-session-1-legacy",
+      policySummary: spritesClient.connection.accessPolicy,
+    });
+
+    await reconcileConnector(service);
+
+    expect(serverState.sessionConnectorId).toBe("gateway-conn-9");
+    expect(JSON.stringify(repository.rows.get("session-1"))).not.toContain(
+      "webhook-token-value",
+    );
   });
 });
 
@@ -356,7 +572,7 @@ describe("SessionConnectorService.deleteForTeardown", () => {
     const { service, spritesClient, repository, serverState } = createService({
       spriteLabels: ["session:session-1"],
     });
-    await service.ensureMinted("sprite-1");
+    await reconcileConnector(service);
     expect(serverState.sessionConnectorId).toBe("gateway-conn-1");
 
     await service.deleteForTeardown();
@@ -369,7 +585,7 @@ describe("SessionConnectorService.deleteForTeardown", () => {
     const { service, spritesClient, repository } = createService({
       spriteLabels: ["session:session-1"],
     });
-    await service.ensureMinted("sprite-1");
+    await reconcileConnector(service);
     spritesClient.deleteError = {
       code: "sprites_request_failed",
       message: "boom",

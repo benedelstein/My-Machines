@@ -223,7 +223,18 @@ export function createSessionAgentDependencies(input: {
         createLogger("sprite-websocket.session.ts"),
       );
     },
-    env: { CODEX_MIN_VERSION: env.CODEX_MIN_VERSION },
+    getEnvironmentSnapshot: () => environmentSnapshotRepository.get(),
+    reconcileSessionConnector: (migrationInput) =>
+      sessionConnectorService.reconcile(migrationInput),
+    reconcileGitEphemeralTokenCutover: () =>
+      provisionService.reconcileGitEphemeralTokenCutover(),
+    reconcileNetworkPolicy: (contract) =>
+      provisionService.reconcileNetworkPolicy(contract),
+    env: {
+      CODEX_MIN_VERSION: env.CODEX_MIN_VERSION,
+      SPRITES_API_URL: env.SPRITES_API_URL,
+      WORKER_URL: env.WORKER_URL,
+    },
     logger,
   };
   const attachmentService = new SessionAgentAttachmentProvider(env.DB);
@@ -336,9 +347,7 @@ export function createSessionAgentDependencies(input: {
     spriteLifecycleClient,
     repository: new SessionConnectorsRepository(env.DB),
     getServerState: host.getServerState,
-    setSessionConnectorId: (gatewayConnectionId) =>
-      host.updateServerState({ sessionConnectorId: gatewayConnectionId }),
-    getEnvironmentSnapshot: () => environmentSnapshotRepository.get(),
+    updateServerState: host.updateServerState,
     ensureWebhookToken: () => processManager.ensureWebhookToken(),
   });
   const provisionService = new SessionProvisionService({
@@ -352,7 +361,6 @@ export function createSessionAgentDependencies(input: {
     updatePartialState: host.updatePartialState,
     synthesizeStatus: host.synthesizeStatus,
     retireGitProxySecret: () => gitProxyService.retireGitProxySecret(),
-    ensureSessionConnector: (spriteName) => sessionConnectorService.ensureMinted(spriteName),
     getSessionConnectorGatewayBase: () => sessionConnectorService.getGatewayBase(),
     ensureRuntimeMigration: (migrationId, lease) =>
       runtimeMigrationCoordinator.ensureMigration(migrationId, runtimeMigrationDependencies, lease),

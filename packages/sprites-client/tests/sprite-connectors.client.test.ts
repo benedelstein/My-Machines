@@ -106,7 +106,7 @@ describe("HttpSpriteConnectorsClient", () => {
     expect(result.ok && result.value[0]?.accessPolicy).toBeUndefined();
   });
 
-  it("sends the access policy as snake_case and authenticates the request", async () => {
+  it("puts the access policy as snake_case and authenticates the request", async () => {
     const fetchSpy = vi.fn<typeof fetch>().mockResolvedValue(
       Response.json({ connection: connectionPayload }),
     );
@@ -119,7 +119,7 @@ describe("HttpSpriteConnectorsClient", () => {
     expect(result).toMatchObject({ ok: true });
     const [url, init] = fetchSpy.mock.calls[0] ?? [];
     expect(url).toBe("https://api.sprites.dev/v1/oauth/connections/connection-1");
-    expect(init?.method).toBe("PATCH");
+    expect(init?.method).toBe("PUT");
     expect(init?.headers).toMatchObject({ Authorization: "Bearer test-token" });
     expect(JSON.parse(String(init?.body))).toEqual({
       access_policy: {

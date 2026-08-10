@@ -8,6 +8,7 @@ import {
   getRemoteConfigCommand,
   mockState,
   resetProvisionMocks,
+  TEST_RUNTIME_BOUNDARY_LEASE,
 } from "./session-provision-test-support";
 
 vi.mock("@repo/sprites-client", async (importOriginal) => {
@@ -36,7 +37,7 @@ describe("SessionProvisionService session connector", () => {
       createEnvironmentSnapshot({ sourceEnvironmentId: "environment-1" }),
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(spriteLifecycleClient.createSprite).toHaveBeenCalledWith({
       name: "session-1",
@@ -51,7 +52,7 @@ describe("SessionProvisionService session connector", () => {
       createClientState(),
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(mockState.events).toEqual([
       "createSprite",
@@ -62,7 +63,7 @@ describe("SessionProvisionService session connector", () => {
       "cloneRepo",
       "setNetworkPolicy",
     ]);
-    expect(ensureSessionConnector).toHaveBeenCalledWith("sprite-1");
+    expect(ensureSessionConnector).toHaveBeenCalledOnce();
   });
 
   it("configures direct Worker remotes with an exact-url credential helper", async () => {
@@ -72,7 +73,7 @@ describe("SessionProvisionService session connector", () => {
       createClientState(),
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     const remoteConfigCommand = getRemoteConfigCommand();
     expect(remoteConfigCommand).toContain(
@@ -117,7 +118,7 @@ describe("SessionProvisionService session connector", () => {
       createEnvironmentSnapshot({ network: { mode: "locked" } }),
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(getRemoteConfigCommand()).toContain(
       "git remote set-url origin 'https://worker.test/git-proxy/session-1/github.com/ben/repo.git'",
@@ -138,7 +139,7 @@ describe("SessionProvisionService session connector", () => {
       return defaultExec(command, options);
     });
 
-    await expect(service.ensureProvisioned()).rejects.toThrow(
+    await expect(service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE)).rejects.toThrow(
       "Ephemeral git token setup failed (exit 1): git config failed",
     );
     expect(retireGitProxySecret).not.toHaveBeenCalled();
@@ -152,11 +153,11 @@ describe("SessionProvisionService session connector", () => {
       createClientState({ includeSessionConnector: false }),
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     const remoteConfigCall = mockState.execWs.mock.calls.find(([command]) =>
       String(command).includes("git remote set-url origin"));
-    expect(ensureSessionConnector).toHaveBeenCalledWith("sprite-1");
+    expect(ensureSessionConnector).toHaveBeenCalledOnce();
     expect(remoteConfigCall).toBeDefined();
     expect(retireGitProxySecret).toHaveBeenCalledOnce();
     expect(serverState.gitAuthMode).toBe("ephemeral_token");

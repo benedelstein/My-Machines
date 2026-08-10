@@ -1,4 +1,5 @@
 import type { Logger } from "@repo/shared";
+import { z } from "zod";
 import { SpriteWebsocketSession } from "./sprite-websocket.session";
 import type {
   AttachSessionOptions,
@@ -11,6 +12,13 @@ export interface NetworkPolicyRule {
   domain: string;
   action: "allow" | "deny";
 }
+
+const NetworkPolicyResponseSchema = z.object({
+  rules: z.array(z.object({
+    domain: z.string(),
+    action: z.enum(["allow", "deny"]),
+  })),
+});
 
 export interface SpriteUrlSettings {
   auth: "public" | "sprite";
@@ -109,7 +117,7 @@ export class WorkersSpriteClient {
     }, this.logger);
   }
 
-  async setNetworkPolicy(rules: NetworkPolicyRule[]): Promise<void> {
+  async setNetworkPolicy(rules: NetworkPolicyRule[]): Promise<NetworkPolicyRule[]> {
     const url = `${this.baseUrl}/v1/sprites/${this.name}/policy/network`;
     const response = await fetch(url, {
       method: "POST",
@@ -127,6 +135,25 @@ export class WorkersSpriteClient {
         text,
       );
     }
+    return NetworkPolicyResponseSchema.parse(await response.json()).rules;
+  }
+
+  /** Reads the Sprite's normalized network policy for post-apply verification. */
+  async getNetworkPolicy(): Promise<NetworkPolicyRule[]> {
+    const url = `${this.baseUrl}/v1/sprites/${this.name}/policy/network`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new SpritesError(
+        `Failed to get network policy: ${response.status}`,
+        response.status,
+        text,
+      );
+    }
+    return NetworkPolicyResponseSchema.parse(await response.json()).rules;
   }
 
   /**

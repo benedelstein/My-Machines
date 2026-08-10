@@ -116,6 +116,9 @@ interface TestAgentAccess {
     ensureMigrations(...args: unknown[]): Promise<Result<{
       outcome: "current" | "applied" | "deferred_active_turn";
     }, object>>;
+    ensureMigration(...args: unknown[]): Promise<Result<{
+      outcome: "current" | "applied" | "deferred_active_turn";
+    }, object>>;
   };
   repoAccessLifecycleService: {
     guardSessionRepoAccess(): Promise<{ ok: true }>;
@@ -244,6 +247,16 @@ describe("SessionAgentDO runtime boundary", () => {
       }),
     });
     agent.provisionService.ensureProvisioned = vi.fn(async () => {});
+    const ensureMigration = agent.runtimeMigrationCoordinator.ensureMigration.bind(
+      agent.runtimeMigrationCoordinator,
+    );
+    agent.runtimeMigrationCoordinator.ensureMigrations = vi.fn(
+      async (dependencies, lease) => ensureMigration(
+        "sprite.startup-toolchain",
+        dependencies,
+        lease,
+      ),
+    );
     expect(agent.testDatabase.prepare(
       "SELECT migration_id FROM session_runtime_migrations",
     ).all()).toEqual([]);

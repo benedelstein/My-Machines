@@ -22,6 +22,7 @@ export function mockSpriteClientModule(actual: Record<string, unknown>) {
       this.name = name;
     }
     setNetworkPolicy = mockState.setNetworkPolicy;
+    getNetworkPolicy = mockState.setNetworkPolicy;
     execWs = mockState.execWs;
     writeFile = mockState.writeFile;
   }
@@ -36,8 +37,9 @@ export function mockSpriteClientModule(actual: Record<string, unknown>) {
 /** Default sprite exec behavior: successful clone, toolchain, and policy. */
 export function resetProvisionMocks(): void {
   mockState.events.length = 0;
-  mockState.setNetworkPolicy.mockImplementation(async () => {
+  mockState.setNetworkPolicy.mockImplementation(async (rules: unknown) => {
     mockState.events.push("setNetworkPolicy");
+    return rules;
   });
   mockState.ensureSpriteStartupToolchain.mockImplementation(async () => {
     mockState.events.push("startupToolchain");

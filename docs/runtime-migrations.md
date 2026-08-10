@@ -5,9 +5,11 @@ with Durable Object SQLite, such as Sprite files, connector configuration, and
 process state. They are separate from constructor-time repository migrations and
 deployment-managed D1 migrations.
 
-Phase 4 registers only `sprite.startup-toolchain`. Readiness reconciles that
-migration after terminal setup and before admitting the next turn; connector,
-Git, network-policy, and reusable-process migrations remain inactive.
+Phase 5 registers `sprite.startup-toolchain`, `session.connector-resource`,
+`sprite.git-ephemeral-token-cutover`, and `sprite.network-policy` in that order.
+Readiness reconciles them after terminal setup and before admitting the next
+turn. `agent.reusable-process` remains inactive until Phase 6, so Phase 5 never
+terminates an idle process solely because a launch contract changed.
 
 ## Declaration API
 

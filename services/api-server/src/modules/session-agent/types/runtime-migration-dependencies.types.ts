@@ -1,5 +1,13 @@
-import type { Logger, ProviderId } from "@repo/shared";
+import type {
+  Logger,
+  ProviderId,
+  SessionEnvironmentSnapshot,
+} from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
+import type {
+  SessionConnectorContract,
+  SpriteNetworkPolicyContract,
+} from "./runtime-migration-adopters.types";
 import type { ServerState } from "./server-state.types";
 
 /**
@@ -9,17 +17,28 @@ import type { ServerState } from "./server-state.types";
  */
 export type RuntimeMigrationServerState = Pick<
   ServerState,
-  "activeUserMessageId" | "spriteName" | "startupToolchain"
+  | "activeUserMessageId"
+  | "finalNetworkPolicyApplied"
+  | "gitAuthMode"
+  | "repoCloned"
+  | "sessionConnectorId"
+  | "sessionId"
+  | "spriteLabelsApplied"
+  | "spriteName"
+  | "startupToolchain"
 >;
 
 /** The slice of ClientState runtime migrations may read. */
 export interface RuntimeMigrationClientState {
+  readonly repoFullName: string | null;
   readonly agentSettings: { readonly provider: ProviderId };
 }
 
 /** Env values a runtime migration may read while building its own context. */
 export interface RuntimeMigrationEnv {
   readonly CODEX_MIN_VERSION?: string;
+  readonly SPRITES_API_URL: string;
+  readonly WORKER_URL: string;
 }
 
 /**
@@ -37,6 +56,16 @@ export interface RuntimeMigrationDependencies {
   readonly isTeardownStarted: () => boolean;
   /** Client for the session's current Sprite. Throws before provisioning. */
   readonly createSpriteClient: () => WorkersSpriteClient;
+  readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
+  readonly reconcileSessionConnector: (input: {
+    readonly contract: SessionConnectorContract;
+    readonly desiredRevision: string;
+    readonly attempt: number;
+  }) => Promise<void>;
+  readonly reconcileGitEphemeralTokenCutover: () => Promise<void>;
+  readonly reconcileNetworkPolicy: (
+    contract: SpriteNetworkPolicyContract,
+  ) => Promise<void>;
   readonly env: RuntimeMigrationEnv;
   readonly logger: Logger;
   // add other dependencies as needed

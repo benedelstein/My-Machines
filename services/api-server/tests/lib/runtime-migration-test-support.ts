@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { ProviderId } from "@repo/shared";
+import type { ProviderId, SessionEnvironmentSnapshot } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
 import type {
   RuntimeMigrationDependencies,
@@ -20,14 +20,22 @@ export function createMigrationDependencies(args: {
   provider?: ProviderId;
   codexMinVersion?: string;
   sprite?: WorkersSpriteClient;
+  environmentSnapshot?: SessionEnvironmentSnapshot;
 } = {}): TestRuntimeMigrationDependencies {
   const serverState: RuntimeMigrationServerState = {
     activeUserMessageId: args.activeUserMessageId ?? null,
+    finalNetworkPolicyApplied: false,
+    gitAuthMode: "legacy_secret",
+    repoCloned: true,
+    sessionConnectorId: null,
+    sessionId: "session-1",
+    spriteLabelsApplied: false,
     spriteName: "sprite-1",
     startupToolchain: null,
     ...args.serverState,
   };
   const clientState = {
+    repoFullName: "ben/repo",
     agentSettings: { provider: args.provider ?? "openai-codex" },
   };
 
@@ -39,7 +47,24 @@ export function createMigrationDependencies(args: {
     }),
     isTeardownStarted: () => args.teardownStarted ?? false,
     createSpriteClient: vi.fn(() => args.sprite ?? ({} as WorkersSpriteClient)),
-    env: { CODEX_MIN_VERSION: args.codexMinVersion },
+    getEnvironmentSnapshot: () => args.environmentSnapshot ?? {
+      sourceEnvironmentId: null,
+      sourceEnvironmentName: null,
+      repoId: 1,
+      network: { mode: "default" },
+      plainEnvVars: {},
+      startupScript: null,
+      resolvedAt: "2026-05-29T00:00:00.000Z",
+      schemaVersion: 1,
+    },
+    reconcileSessionConnector: vi.fn(async () => {}),
+    reconcileGitEphemeralTokenCutover: vi.fn(async () => {}),
+    reconcileNetworkPolicy: vi.fn(async () => {}),
+    env: {
+      CODEX_MIN_VERSION: args.codexMinVersion,
+      SPRITES_API_URL: "https://api.sprites.test",
+      WORKER_URL: "https://worker.test",
+    },
     logger: createTestLogger(),
   };
 }
