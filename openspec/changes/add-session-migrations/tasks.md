@@ -58,6 +58,11 @@ production registry is toolchain, connector, Git cutover, then network policy.
 - [x] P5.2 Add targeted setup ensures only at each complete postcondition and retain all legacy cleanup material required for rollback.
 - [x] P5.3 Prove the production registry does not contain `agent.reusable-process` and no contract-driven process termination occurs.
 - [ ] P5.4 Canary connector disagreement, uncertain create, existing-clone Git repair, policy update, active-turn deferral, and late-waking legacy sessions.
+  - [x] On 2026-08-14, use a late-waking completed local session to verify active-turn deferral occurs before attempt writes or provider calls.
+  - [x] After clearing the active turn, verify connector ID disagreement repairs ServerState from the existing external connector and restores `/health`.
+  - [x] Verify the same pass repairs an existing clone's `credential.useHttpPath`, replaces a drifted two-rule network policy, and records each adopter once in registry order.
+  - [x] Restart `pnpm dev:local` and verify all four migrations are `current`, with unchanged attempt counts and timestamps and no repeated provider mutations.
+  - [ ] Run the exact uncertain-create response-loss canary cohort; automated coverage exists, but this local run did not inject a lost provider response.
 - [ ] P5.5 Complete the legacy end-to-end cohort and an observation window before Phase 6.
 
 ## Phase 6 — Reusable Agent Process Adopter
@@ -248,12 +253,12 @@ marked against that decision.
 - [x] 10.11 Make Git apply inspect and reconcile existing remote URLs, helper bundle contents, credential settings, proactive auth, and persisted `gitAuthMode`.
 - [x] 10.12 Verify Git locally and do not ping the proxy/gateway.
 - [x] 10.13 Retire the legacy Git proxy secret only after the new local Git configuration verifies.
-- [x] 10.14 Register `sprite.network-policy` as an awaited contract migration based on the persisted session environment snapshot, provider, Worker/gateway hostnames, and deployment allowlist revision.
-- [x] 10.15 Verify network policy through normalized apply response or readback rather than endpoint reachability.
+- [x] 10.14 Register `sprite.network-policy` as an awaited contract migration based on the persisted session environment snapshot, provider, Worker/gateway hostnames, and exact deployment-owned allowlist rules.
+- [x] 10.15 Treat a successful provider policy mutation response as the apply postcondition; do not add policy readback or endpoint reachability to readiness.
 - [x] 10.16 Preserve the current behavior that source environment edits do not mutate existing session snapshots.
 - [ ] 10.17 Add tests showing an intentional future snapshot-row update would change the network and process contracts without coordinator redesign.
 - [x] 10.18 Add the Phase 5 registry order: toolchain, connector, Git cutover, network policy; explicitly keep reusable process unregistered until Phase 6.
-- [ ] 10.19 Add an end-to-end legacy-session test with terminal setup, existing clone, connector creation/reuse, label repair, Git cutover, network policy, old-process termination, and next-turn gateway webhook delivery.
+- [ ] 10.19 Add an end-to-end Phase 5 legacy-session test with terminal setup, existing clone, connector creation/reuse, label repair, Git cutover, network policy, and next-turn gateway webhook delivery. Keep old-process termination in the Phase 6 process-adopter validation.
 - [x] 10.20 Add connector tests for endpoint addition, policy correction, base URL change, missing checkpointed connector, abandoned create, D1 disagreement, and no secret leakage.
 - [ ] 10.21 Define but do not prematurely enable a later versioned cleanup migration for obsolete Sprite-held Git/webhook delivery material; retain the connector-injected server-held webhook credential.
 - [x] 10.22 Assert the Phase 5 production registry exactly matches its four-entry snapshot and cannot perform contract-driven process termination.

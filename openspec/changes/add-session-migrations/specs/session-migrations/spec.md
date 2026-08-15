@@ -480,21 +480,21 @@ configuration during readiness.
 - **WHEN** authorized future code updates the Durable Object's persisted session snapshot
 - **THEN** the next readiness pass SHALL naturally derive new relevant contract hashes and reconcile them
 
-### Requirement: Network policy is contract-based and readback-verified
+### Requirement: Network policy is contract-based and mutation-confirmed
 The system SHALL hash the desired normalized network policy derived from the
 session snapshot, provider, Worker/gateway hosts, and deployment policy inputs.
 
 #### Scenario: Allowed policy input changes
 - **WHEN** a persisted snapshot or deployment-owned default policy input changes
-- **THEN** the desired network-policy hash SHALL change and the Sprite policy SHALL be reapplied and verified
+- **THEN** the desired network-policy hash SHALL change and the Sprite policy SHALL be reapplied
 
 #### Scenario: Network policy is unchanged
 - **WHEN** the applied hash matches the normalized desired policy
 - **THEN** readiness SHALL not contact the Sprite network-policy API
 
-#### Scenario: Network policy verification runs
+#### Scenario: Network policy mutation succeeds
 - **WHEN** policy apply succeeds
-- **THEN** verification SHALL use normalized API response or policy readback and SHALL NOT ping an allowed endpoint
+- **THEN** the successful provider response SHALL be the apply postcondition, including a no-content response, and readiness SHALL NOT add policy readback or ping an allowed endpoint
 
 ### Requirement: Connector desired state is contract-based and identity-independent
 The system SHALL hash functional connector desired state, including base URL,

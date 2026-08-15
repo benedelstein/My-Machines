@@ -1587,14 +1587,25 @@ contract-input change and rollout plan.
 The network-policy contract uses the session's persisted environment snapshot:
 
 ```ts
-buildContract: (context) => ({
-  contractSchema: 1,
-  providerId: context.clientState.agentSettings.provider,
-  requestedNetwork: context.environmentSnapshot.network,
-  workerHostname: new URL(context.env.WORKER_URL).hostname,
-  connectorGatewayHostname: new URL(context.env.SPRITES_API_URL).hostname,
-  defaultAllowlistRevision: CURRENT_DEFAULT_ALLOWLIST_REVISION,
-});
+buildContract: (context) => {
+  const providerId = context.clientState.agentSettings.provider;
+  const network = context.environmentSnapshot.network;
+  const workerHostname = new URL(context.env.WORKER_URL).hostname;
+  const connectorGatewayHostname = new URL(context.env.SPRITES_API_URL).hostname;
+  return {
+    contractSchema: 1,
+    providerId,
+    requestedNetwork: network,
+    workerHostname,
+    connectorGatewayHostname,
+    rules: buildFinalNetworkPolicy({
+      workerHostname,
+      providerId,
+      network,
+      connectorGatewayHostname,
+    }),
+  };
+};
 ```
 
 This change does not begin reading the mutable source environment row on every
@@ -1606,8 +1617,9 @@ inside the Durable Object, the next readiness pass naturally builds a different
 network contract and reconciles it. No runtime migration framework change is
 needed.
 
-Network verification uses the provider's policy readback or the normalized
-response from setting the policy. It does not ping allowed URLs.
+The successful provider mutation response is the network-policy apply
+postcondition, including the provider's observed `204 No Content` response. The
+readiness path does not read the policy back or ping allowed URLs.
 
 ### 14. Model connector desired state independently from allocated identity
 
