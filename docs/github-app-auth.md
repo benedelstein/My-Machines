@@ -141,7 +141,7 @@ The session connector task is blocking and ordered before repository setup, so a
 
 | File | Purpose |
 |------|---------|
-| `services/api-server/src/modules/github/services/github-app.service.ts` | `GitHubAppService` - token resolution, installation lookup, webhook handling |
+| `services/api-server/src/modules/github/services/github-app.service.ts` | `GitHubAppService` - token resolution, installation lookup, and GitHub pull-request creation |
 | `services/api-server/src/modules/sessions/services/session-repo-access.service.ts` | Session repo access checks for create/read/connect/chat paths |
 | `services/api-server/src/modules/repo-environments/services/repo-environments.service.ts` | Repo environment ownership/access checks and session environment snapshot resolution |
 | `services/api-server/src/modules/session-agent/services/session-provision.service.ts` | Sprite provisioning, read-only clone, git remote setup |
@@ -177,6 +177,7 @@ The app listens at `POST /webhooks/github` for:
 | `installation_repositories.added` | Update installation repo rows and invalidate affected repo-access/listing caches |
 | `installation_repositories.removed` | Delete repo rows, invalidate affected caches, and block sessions for removed repos |
 | `github_app_authorization.revoked` | Delete stored GitHub user credentials for the sender without deleting app auth sessions |
+| `pull_request` | Update stored session pull-request state for matching GitHub App installation/repo/PR number |
 
 Webhook signature verification is handled by `octokit`'s `app.webhooks.verifyAndReceive()`.
 
@@ -221,8 +222,8 @@ Set these via `wrangler secret put`:
 
 1. Create a GitHub App at https://github.com/settings/apps/new
 2. Set webhook URL to `https://<api-domain>/webhooks/github`
-3. Grant permissions: `Contents: Read & write`, `Metadata: Read-only`
-4. Subscribe to events: `Installation`, `Repository`
+3. Grant permissions: `Contents: Read & write`, `Metadata: Read-only`, `Pull requests: Read & write`
+4. Subscribe to events: `Installation`, `Repository`, `Pull request`
 5. Generate a private key and download it
 6. Ensure `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_SLUG` are configured in `wrangler.jsonc`, then set secrets:
    ```bash

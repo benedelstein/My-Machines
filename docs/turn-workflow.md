@@ -51,11 +51,14 @@ Active turn fields live in `server_state`:
 {
   activeUserMessageId: string | null;
   agentProcessId: number | null;
+  agentProcessRunId: string | null;
   agentSessionId: string | null;
 }
 ```
 
 Only one user turn may be active per session. A second `chat.message` while `activeUserMessageId` or `pendingUserMessage` is set is rejected with `CHAT_MESSAGE_FAILED`.
+`agentProcessRunId` is generated on fresh vm-agent spawn and is used to ignore
+stale `process_exit` events from an older process run.
 
 ## Dispatch
 
@@ -85,7 +88,9 @@ If provisioning runs a startup script, `SessionProvisionService` sends stdout/st
 
 ## Webhooks
 
-Internal routes in `services/api-server/src/modules/session-agent/routes/internal.routes.ts` authenticate with a per-session bearer token stored as `webhook_token` in `SecretRepository`.
+Internal routes in `services/api-server/src/modules/session-agent/routes/internal.routes.ts` authenticate with the
+per-session `webhook_token` stored in `SecretRepository`. New connector-backed sessions receive it from the gateway;
+legacy sessions send it as a bearer token from the Sprite.
 
 - `POST /internal/session/:sessionId/chunks` accepts `{ userMessageId, chunks: [{ sequence, chunk }] }`.
 - `POST /internal/session/:sessionId/events` accepts `{ event }` for non-stream agent events such as `ready`, `error`, `sessionId`, and `process_exit`.
