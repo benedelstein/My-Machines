@@ -23,7 +23,6 @@ export type RuntimeMigrationServerState = Pick<
   | "repoCloned"
   | "sessionConnectorId"
   | "sessionId"
-  | "spriteLabelsApplied"
   | "spriteName"
   | "startupToolchain"
 >;
@@ -59,7 +58,6 @@ export interface RuntimeMigrationDependencies {
   readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
   readonly reconcileSessionConnector: (input: {
     readonly contract: SessionConnectorContract;
-    readonly desiredRevision: string;
   }) => Promise<void>;
   readonly reconcileGitEphemeralTokenCutover: () => Promise<void>;
   readonly reconcileNetworkPolicy: (

@@ -1,38 +1,55 @@
 import { describe, expect, it } from "vitest";
-import { MintConnectorRequestSchema } from "../../src/shared/integrations/sprite-connectors/connector-provisioning.schema";
+import { ConnectorProvisioningRequestSchema } from
+  "../../src/shared/integrations/sprite-connectors/connector-provisioning.schema";
 
 const validRequest = {
   name: "connector-test",
   baseApiUrl: "https://api.example.com",
-  token: "dummy",
+  accessToken: "dummy",
   testUrl: "https://api.example.com/health",
-  spriteLabels: ["session:test-123"],
-  allowedEndpoints: ["/health"],
+  accessPolicy: {
+    allowAll: false,
+    spriteLabels: ["session:test-123"],
+    allowedEndpoints: ["/health"],
+  },
 };
 
-describe("MintConnectorRequestSchema", () => {
-  it("accepts a same-origin HTTPS connector", () => {
-    expect(MintConnectorRequestSchema.safeParse(validRequest).success).toBe(true);
+describe("ConnectorProvisioningRequestSchema", () => {
+  it("returns the Sprites client request shape with defaults", () => {
+    expect(ConnectorProvisioningRequestSchema.parse(validRequest)).toEqual({
+      ...validRequest,
+      authHeaderPrefix: "Bearer",
+      description: "Provisioned by My Machines",
+    });
   });
 
   it("rejects a session connector without pinned endpoints", () => {
-    const { allowedEndpoints: _allowedEndpoints, ...withoutPins } = validRequest;
-    expect(MintConnectorRequestSchema.safeParse(withoutPins).success).toBe(false);
+    const { allowedEndpoints: _allowedEndpoints, ...accessPolicy } = validRequest.accessPolicy;
+    expect(ConnectorProvisioningRequestSchema.safeParse({
+      ...validRequest,
+      accessPolicy,
+    }).success).toBe(false);
   });
 
   it("rejects mixed session and environment labels without pinned endpoints", () => {
-    const { allowedEndpoints: _allowedEndpoints, ...withoutPins } = validRequest;
-    expect(MintConnectorRequestSchema.safeParse({
-      ...withoutPins,
-      spriteLabels: ["session:test-123", "env:environment-1"],
+    const { allowedEndpoints: _allowedEndpoints, ...accessPolicy } = validRequest.accessPolicy;
+    expect(ConnectorProvisioningRequestSchema.safeParse({
+      ...validRequest,
+      accessPolicy: {
+        ...accessPolicy,
+        spriteLabels: ["session:test-123", "env:environment-1"],
+      },
     }).success).toBe(false);
   });
 
   it("accepts environment labels without pinned endpoints", () => {
-    const { allowedEndpoints: _allowedEndpoints, ...withoutPins } = validRequest;
-    expect(MintConnectorRequestSchema.safeParse({
-      ...withoutPins,
-      spriteLabels: ["env:environment-1"],
+    const { allowedEndpoints: _allowedEndpoints, ...accessPolicy } = validRequest.accessPolicy;
+    expect(ConnectorProvisioningRequestSchema.safeParse({
+      ...validRequest,
+      accessPolicy: {
+        ...accessPolicy,
+        spriteLabels: ["env:environment-1"],
+      },
     }).success).toBe(true);
   });
 
@@ -42,21 +59,24 @@ describe("MintConnectorRequestSchema", () => {
     ["a short identifier", "session:short"],
     ["an empty identifier", "session:"],
   ])("rejects %s", (_description, label) => {
-    expect(MintConnectorRequestSchema.safeParse({
+    expect(ConnectorProvisioningRequestSchema.safeParse({
       ...validRequest,
-      spriteLabels: [label],
+      accessPolicy: {
+        ...validRequest.accessPolicy,
+        spriteLabels: [label],
+      },
     }).success).toBe(false);
   });
 
   it("rejects credentials embedded in connector URLs", () => {
-    expect(MintConnectorRequestSchema.safeParse({
+    expect(ConnectorProvisioningRequestSchema.safeParse({
       ...validRequest,
       baseApiUrl: "https://user:password@api.example.com",
     }).success).toBe(false);
   });
 
   it("rejects a test URL on another origin", () => {
-    expect(MintConnectorRequestSchema.safeParse({
+    expect(ConnectorProvisioningRequestSchema.safeParse({
       ...validRequest,
       testUrl: "https://other.example.com/health",
     }).success).toBe(false);
@@ -65,7 +85,7 @@ describe("MintConnectorRequestSchema", () => {
   it.each(["baseApiUrl", "testUrl"] as const)(
     "returns a failed parse for a malformed %s",
     (field) => {
-      expect(MintConnectorRequestSchema.safeParse({
+      expect(ConnectorProvisioningRequestSchema.safeParse({
         ...validRequest,
         [field]: "not-a-url",
       }).success).toBe(false);
@@ -87,7 +107,7 @@ describe("MintConnectorRequestSchema", () => {
     "https://[fd00::1]",
     "https://[fe80::1]",
   ])("rejects internal host %s", (internalUrl) => {
-    expect(MintConnectorRequestSchema.safeParse({
+    expect(ConnectorProvisioningRequestSchema.safeParse({
       ...validRequest,
       baseApiUrl: internalUrl,
       testUrl: `${internalUrl}/health`,

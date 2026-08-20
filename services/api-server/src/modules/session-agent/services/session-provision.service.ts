@@ -14,10 +14,10 @@ import { dedent } from "@repo/shared";
 import type { Env } from "@/shared/types";
 import {
   buildBootstrapNetworkPolicy,
-  WorkersSpriteClient,
   type SpriteLifecycleClient,
+  type SpriteResponse,
+  type WorkersSpriteClient,
 } from "@repo/sprites-client";
-import { createLogger } from "@/shared/logging";
 import { sha256 } from "@/shared/utils/crypto";
 import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
 import type { GitHubAppResult } from "@/shared/types/github";
@@ -80,6 +80,7 @@ export interface SessionProvisionServiceDeps {
   logger: Logger;
   env: Env;
   spriteLifecycleClient: SpriteLifecycleClient;
+  createSpriteClient: (spriteName: string) => WorkersSpriteClient;
 
   getServerState: () => ServerState;
   getClientState: () => ClientState;
@@ -89,6 +90,8 @@ export interface SessionProvisionServiceDeps {
   synthesizeStatus: () => SessionStatus;
   retireGitProxySecret: () => void;
   getSessionConnectorGatewayBase: () => string | null;
+  discardFreshSpriteSnapshot?: () => void;
+  onSpriteCreated?: (sprite: SpriteResponse) => void;
   ensureRuntimeMigration: (
     migrationId: RuntimeMigrationId,
     lease: RuntimeBoundaryLease,
@@ -115,6 +118,7 @@ export class SessionProvisionService {
   private readonly logger: Logger;
   private readonly env: Env;
   private readonly spriteLifecycleClient: SpriteLifecycleClient;
+  private readonly createSpriteClient: (spriteName: string) => WorkersSpriteClient;
   private readonly getServerState: () => ServerState;
   private readonly getClientState: () => ClientState;
   private readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
@@ -124,6 +128,8 @@ export class SessionProvisionService {
   private readonly retireGitProxySecret: () => void;
   private readonly getSessionConnectorGatewayBase:
     SessionProvisionServiceDeps["getSessionConnectorGatewayBase"];
+  private readonly discardFreshSpriteSnapshot: () => void;
+  private readonly onSpriteCreated: (sprite: SpriteResponse) => void;
   private readonly ensureRuntimeMigration: SessionProvisionServiceDeps["ensureRuntimeMigration"];
   private readonly githubTokenProvider: SessionProvisionServiceDeps["githubTokenProvider"];
   private readonly setupReporter: SessionProvisionServiceDeps["setupReporter"];
@@ -138,6 +144,7 @@ export class SessionProvisionService {
     this.logger = deps.logger.scope("session-provision-service");
     this.env = deps.env;
     this.spriteLifecycleClient = deps.spriteLifecycleClient;
+    this.createSpriteClient = deps.createSpriteClient;
     this.getServerState = deps.getServerState;
     this.getClientState = deps.getClientState;
     this.getEnvironmentSnapshot = deps.getEnvironmentSnapshot;
@@ -146,6 +153,8 @@ export class SessionProvisionService {
     this.synthesizeStatus = deps.synthesizeStatus;
     this.retireGitProxySecret = deps.retireGitProxySecret;
     this.getSessionConnectorGatewayBase = deps.getSessionConnectorGatewayBase;
+    this.discardFreshSpriteSnapshot = deps.discardFreshSpriteSnapshot ?? (() => {});
+    this.onSpriteCreated = deps.onSpriteCreated ?? (() => {});
     this.ensureRuntimeMigration = deps.ensureRuntimeMigration;
     this.githubTokenProvider = deps.githubTokenProvider;
     this.setupReporter = deps.setupReporter;
@@ -168,6 +177,7 @@ export class SessionProvisionService {
   }
 
   private async _provision(lease: RuntimeBoundaryLease): Promise<void> {
+    this.discardFreshSpriteSnapshot();
     this.spriteName = this.getServerState().spriteName;
     const setupRun = this.getClientState().sessionSetupRun;
     if (!setupRun) { return; }
@@ -266,41 +276,22 @@ export class SessionProvisionService {
         name: sessionId,
         labels,
       });
+      this.onSpriteCreated(spriteResponse);
       this.spriteName = spriteResponse.name;
       // For provisioning, allow network access to known-good domains.
-      const sprite = new WorkersSpriteClient(
-        this.spriteName!,
-        this.env.SPRITES_API_KEY,
-        this.env.SPRITES_API_URL,
-        createLogger("sprite-websocket.session.ts"),
-      );
+      const sprite = this.createSpriteClient(spriteResponse.name);
       const workerHostname = new URL(this.env.WORKER_URL).hostname;
       const networkPolicy = buildBootstrapNetworkPolicy({
         workerHostname,
         connectorGatewayHostname: this.connectorGatewayHostname(),
       });
       await sprite.setNetworkPolicy(networkPolicy);
-      this.updateServerState({
-        spriteName: this.spriteName,
-        spriteLabelsApplied: labels.every((label) =>
-          (spriteResponse.labels ?? []).includes(label),
-        ),
-      });
+      this.updateServerState({ spriteName: this.spriteName });
     }
     // Requires the Sprite name to already be in ServerState — the migration
     // host reads it from there to build its client.
     this.requireSpriteName();
-    const migration = await this.ensureRuntimeMigration(
-      STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
-      lease,
-    );
-    if (!migration.ok) {
-      throw new Error(migration.error.message);
-    }
-    if (migration.value.outcome === "deferred_active_turn") {
-      // this should never happen during setup.
-      throw new Error("Startup toolchain migration deferred during setup");
-    }
+    await this.ensureTargetedMigration(STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID, lease, "Startup toolchain");
   }
 
   private async ensureSessionConnectorTask(lease: RuntimeBoundaryLease): Promise<void> {
@@ -341,12 +332,7 @@ export class SessionProvisionService {
     }
 
     const environmentSnapshot = this.getEnvironmentSnapshot();
-    const sprite = new WorkersSpriteClient(
-      spriteName,
-      this.env.SPRITES_API_KEY,
-      this.env.SPRITES_API_URL,
-      createLogger("sprite-websocket.session.ts"),
-    );
+    const sprite = this.createSpriteClient(spriteName);
 
     this.setupOutputCollector?.beginRun();
     let result: SessionStartupScriptRunResult;
@@ -422,12 +408,7 @@ export class SessionProvisionService {
     const clientState = this.getClientState();
     const repoFullName = clientState.repoFullName!;
 
-    const sprite = new WorkersSpriteClient(
-      spriteName,
-      this.env.SPRITES_API_KEY,
-      this.env.SPRITES_API_URL,
-      createLogger("sprite-websocket.session.ts"),
-    );
+    const sprite = this.createSpriteClient(spriteName);
 
     const githubRemoteUrl = `https://github.com/${repoFullName}.git`;
 
@@ -513,12 +494,7 @@ export class SessionProvisionService {
     if (!this.getServerState().repoCloned) {
       throw new Error("Repository must be cloned before Git cutover");
     }
-    const sprite = new WorkersSpriteClient(
-      spriteName,
-      this.env.SPRITES_API_KEY,
-      this.env.SPRITES_API_URL,
-      createLogger("sprite-websocket.session.ts"),
-    );
+    const sprite = this.createSpriteClient(spriteName);
     const proxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
     const cloneUrl = `${proxyBaseUrl}/github.com/${repoFullName}.git`;
     const connectorGatewayBase = this.getSessionConnectorGatewayBase();
@@ -581,12 +557,7 @@ export class SessionProvisionService {
     if (!spriteName) {
       throw new Error("Sprite name is missing");
     }
-    const sprite = new WorkersSpriteClient(
-      spriteName,
-      this.env.SPRITES_API_KEY,
-      this.env.SPRITES_API_URL,
-      createLogger("sprite-websocket.session.ts"),
-    );
+    const sprite = this.createSpriteClient(spriteName);
     const desiredRules = contract.rules.map((rule) => ({ ...rule }));
     await sprite.setNetworkPolicy(desiredRules);
     this.updateServerState({ finalNetworkPolicyApplied: true });

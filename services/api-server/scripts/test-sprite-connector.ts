@@ -1,9 +1,9 @@
 import { HttpSpriteConnectorsClient } from "@repo/sprites-client";
 import { z } from "zod";
 import {
+  ConnectorProvisioningRequestSchema,
   deleteConnectorAndVerify,
   mintConnector,
-  MintConnectorRequestSchema,
 } from "../src/shared/integrations/sprite-connectors";
 
 const EnvironmentSchema = z.object({
@@ -34,15 +34,17 @@ async function main(): Promise<void> {
       .split(",")
       .map((endpoint) => endpoint.trim())
       .filter((endpoint) => endpoint.length > 0);
-  const request = MintConnectorRequestSchema.parse({
+  const request = ConnectorProvisioningRequestSchema.parse({
     name: `cloude-live-${Date.now()}`,
     baseApiUrl: environment.CONNECTOR_LIVE_TEST_BASE_API_URL,
-    token: environment.CONNECTOR_LIVE_TEST_TOKEN ?? `dummy-${crypto.randomUUID()}`,
+    accessToken: environment.CONNECTOR_LIVE_TEST_TOKEN ?? `dummy-${crypto.randomUUID()}`,
     testUrl: environment.CONNECTOR_LIVE_TEST_TEST_URL,
-    headerName: "Authorization",
-    headerPrefix: environment.CONNECTOR_LIVE_TEST_HEADER_PREFIX ?? "Bearer",
-    spriteLabels: [environment.CONNECTOR_LIVE_TEST_SPRITE_LABEL],
-    ...(allowedEndpoints === undefined ? {} : { allowedEndpoints }),
+    authHeaderPrefix: environment.CONNECTOR_LIVE_TEST_HEADER_PREFIX ?? "Bearer",
+    accessPolicy: {
+      allowAll: false,
+      spriteLabels: [environment.CONNECTOR_LIVE_TEST_SPRITE_LABEL],
+      ...(allowedEndpoints === undefined ? {} : { allowedEndpoints }),
+    },
   });
   const spritesClient = new HttpSpriteConnectorsClient({
     apiUrl: environment.SPRITES_API_URL ?? "https://api.sprites.dev",
@@ -53,7 +55,7 @@ async function main(): Promise<void> {
   if (!mintResult.ok) {
     const failedCleanup = mintResult.error.cleanup.attempted
       && !mintResult.error.cleanup.succeeded
-      ? `; orphan connector ${mintResult.error.cleanup.gatewayConnectionId}`
+      ? `; orphan connector ${mintResult.error.cleanup.gatewayConnectorId}`
       : "";
     throw new Error(
       `Connector mint failed: ${mintResult.error.code} at ${mintResult.error.stage}${failedCleanup}`,
@@ -61,7 +63,7 @@ async function main(): Promise<void> {
   }
 
   const cleanupResult = await deleteConnectorAndVerify(
-    mintResult.value.gatewayConnectionId,
+    mintResult.value.gatewayConnectorId,
     spritesClient,
   );
   if (!cleanupResult.ok) {
@@ -70,7 +72,7 @@ async function main(): Promise<void> {
 
   process.stdout.write(`${JSON.stringify({
     connectorName: mintResult.value.name,
-    gatewayConnectionId: mintResult.value.gatewayConnectionId,
+    gatewayConnectorId: mintResult.value.gatewayConnectorId,
     accessPolicy: mintResult.value.accessPolicy,
     durations: mintResult.value.durations,
     deleted: true,

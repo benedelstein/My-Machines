@@ -45,6 +45,24 @@ describe("SessionProvisionService session connector", () => {
     });
   });
 
+  it("hands the successful create response to the execution-local consumer", async () => {
+    const { service, discardFreshSpriteSnapshot, onSpriteCreated } = createService(
+      createServerState(),
+      createClientState(),
+    );
+
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
+
+    expect(onSpriteCreated).toHaveBeenCalledWith({
+      name: "sprite-1",
+      status: "running",
+      labels: ["session:session-1"],
+    });
+    expect(discardFreshSpriteSnapshot).toHaveBeenCalledOnce();
+    expect(discardFreshSpriteSnapshot.mock.invocationCallOrder[0])
+      .toBeLessThan(onSpriteCreated.mock.invocationCallOrder[0]!);
+  });
+
   it("mints the connector between toolchain and clone", async () => {
     const serverState = createServerState();
     const { service, ensureSessionConnector } = createService(

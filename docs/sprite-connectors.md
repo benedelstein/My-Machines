@@ -12,7 +12,8 @@ the architecture diagram, and what is implemented vs planned — see
 
 - `@repo/sprites-client` owns the REST request and response shapes.
 - `services/api-server/src/shared/integrations/sprite-connectors/` owns request
-  validation and the create, verify, reconcile, and delete sequence.
+  validation and shared deletion verification. `SessionConnectorService` owns
+  the stateless per-session create, verify, reconcile, and cleanup sequence.
 - The API server uses its existing `SPRITES_API_KEY`. There is no separate
   connector-provisioner service, public mint route, bearer, or service binding.
 
@@ -29,7 +30,7 @@ the architecture diagram, and what is implemented vs planned — see
 Successful responses do not need name reconciliation. A name lookup is used only
 when the create request has an uncertain outcome, such as a retryable transport
 failure or an invalid response that may have followed a successful mutation.
-If automatic deletion fails, the structured error retains the gateway connection
+If automatic deletion fails, the structured error retains the gateway connector
 id and cleanup cause so the caller can reconcile the orphan.
 
 Session-scoped connectors must specify `allowedEndpoints`; environment-scoped
@@ -37,27 +38,36 @@ connectors may authorize the full configured origin.
 
 ## Per-session connectors
 
-Each session mints one internal connector during provisioning, as the blocking
-`session_connector` setup task between `cloud_container` and `repository`:
+Each session's `session.connector-resource` runtime migration maintains one
+internal connector. New provisioning targets it as the blocking
+`session_connector` task between `cloud_container` and `repository`:
 
 - The Sprite is created with `session:<sessionId>` labels, plus
   `env:<environmentId>` when the session came from an environment. Labels are
   platform metadata that in-VM root cannot change, so they are the connector's
   access-policy scope. For sprites created before label support,
-  `SessionConnectorService` re-reads the Sprite and repairs missing labels
-  before minting; Fly enforces the label policy at the gateway.
+  `SessionConnectorService` repairs missing labels before connector work. The
+  first provisioning pass consumes the successful create response once; later
+  passes re-read the Sprite. The migration contract owns the complete label set;
+  reconciliation replaces stale labels and verifies the exact returned set.
 - The connector's base URL is `WORKER_URL`, its `test_url` is `WORKER_URL/health`
   (same origin, unauthenticated), and its injected credential is the Durable
   Object's existing `webhook_token`. The token is never handed to the Sprite.
 - `allowedEndpoints` pins the session's own paths only: the two webhook routes,
   the ephemeral Git token mint route, and `/health`. Git packfile traffic does not
   traverse the connector while the gateway rejects Git smart-HTTP `Accept` types.
-- Non-secret metadata lands in the D1 `session_connectors` table; the gateway
-  connection id is also checkpointed in `ServerState.sessionConnectorId`. If the
-  D1 write fails, the connector is deleted before the failure surfaces.
+- `ServerState.sessionConnectorId` and the active D1 `session_connectors` row
+  are locators only. Reconciliation reads each known id directly from Sprites,
+  verifies provider, base URL, test URL, and the full order-insensitive access
+  policy, and never enumerates connectors by name. It repairs policy in place;
+  structural mismatches are replaced and verified before old known ids are
+  deleted. The verified D1 row is written before ServerState is checkpointed.
+- Connector names are diagnostic random names, not correctness state. A create
+  error is not name-reconciled; a retry creates anew, so an ambiguous provider
+  response may leave an untracked orphan.
 - Teardown marks the row `pending_revocation`, deletes and verifies the
   connector, then removes the row. A failed delete keeps the row so the
-  connection id survives for reconciliation.
+  connector id survives for reconciliation.
 
 The gateway base a Sprite calls is
 `https://api.sprites.dev/v1/gateway/custom_api/<connectionId>`, built by
@@ -103,22 +113,17 @@ What this means per flow:
   `application/json` (alone or alongside SSE) works. Check what the Claude and
   Codex CLIs actually send before routing inference through the gateway.
 
-## Legacy sessions
+## Existing sessions
 
-Connector provisioning is unconditional for new sessions. Sessions provisioned
-before connectors existed keep their original credential paths for the rest of
-their life: a setup run that already finished is never reopened, so those
-sessions never mint a connector. Their webhook delivery stays Sprite-held
-(`DO_WEBHOOK_TOKEN`), logged as a warning (`"Session has no connector; using
-sprite-held webhook token"`) on every process spawn so the remaining legacy
-population is visible. It deliberately does not fail closed: the alternative is
-a session that cannot report agent output at all.
+Completed setup runs remain immutable. Readiness applies the same ordered
+runtime migration to sessions created before connector provisioning existed,
+then applies the dependent ephemeral-Git-token and network-policy migrations.
+Until a connector migration succeeds, the process manager retains the legacy
+Sprite-held webhook-token fallback so an older session can still report output.
 
 The initial clone always stays on the direct GitHub path with its short-lived
-read-only token. New sessions use rotating ephemeral Git tokens for both post-clone
-fetch and push; pre-connector sessions keep their original remotes and bearer.
-Removing the legacy webhook validation path is a follow-up,
-safe once no pre-connector sessions remain.
+read-only token. Post-clone fetch and push use rotating ephemeral Git tokens
+after the connector and Git cutover migrations complete.
 
 ## Live test
 

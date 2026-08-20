@@ -62,7 +62,6 @@ function makeServerState(): ServerState {
     startupScriptCompleted: true,
     finalNetworkPolicyApplied: true,
     sessionConnectorId: null,
-    spriteLabelsApplied: true,
     gitAuthMode: "ephemeral_token",
   };
 }

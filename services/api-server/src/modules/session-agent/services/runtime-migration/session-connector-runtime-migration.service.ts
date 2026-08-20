@@ -35,7 +35,7 @@ export const sessionConnectorRuntimeMigration = defineContractRuntimeMigration({
       provider: "custom_api",
       baseApiUrl: workerUrl,
       testUrl: `${workerUrl}/health`,
-      requiredSpriteLabels: buildSessionSpriteLabels(
+      spriteLabels: buildSessionSpriteLabels(
         serverState.sessionId,
         snapshot.sourceEnvironmentId,
       ),
@@ -46,18 +46,10 @@ export const sessionConnectorRuntimeMigration = defineContractRuntimeMigration({
     };
   },
 
-  apply: async ({ context, desired, revision }) => {
-    if (revision.kind !== "contract") {
-      return failure({
-        code: "MIGRATION_REVISION_KIND_CHANGED",
-        message: "Session connector migration revision kind changed",
-        migrationId: SESSION_CONNECTOR_RUNTIME_MIGRATION_ID,
-      });
-    }
+  apply: async ({ context, desired }) => {
     try {
       await context.dependencies.reconcileSessionConnector({
         contract: desired,
-        desiredRevision: revision.hash,
       });
       return success(undefined);
     } catch (error) {

@@ -2,8 +2,8 @@ import { z } from "zod";
 import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
-  CreateCustomApiConnectionRequest,
-  SpritesConnection,
+  CreateCustomApiConnectorRequest,
+  SpriteConnector,
   SpriteConnectorsClient,
   SpritesRestError,
 } from "./types";
@@ -16,7 +16,7 @@ const AccessPolicySchema = z.object({
   blocked_endpoints: z.array(z.string()).optional(),
 });
 
-const ConnectionSchema = z.object({
+const ConnectorSchema = z.object({
   id: z.string().min(1),
   provider: z.string().min(1),
   provider_account_name: z.string().optional(),
@@ -24,15 +24,15 @@ const ConnectionSchema = z.object({
   access_policy: AccessPolicySchema.optional(),
 });
 
-const ConnectionResponseSchema = z.object({
-  connection: ConnectionSchema,
+const ConnectorResponseSchema = z.object({
+  connection: ConnectorSchema,
 });
 
 // Sprites wraps single connections in `{ connection }`, and the collection in
 // the matching `{ connections }` envelope. A bare array would fail the parse as
 // `sprites_response_invalid` rather than being silently tolerated.
-const ConnectionsResponseSchema = z.object({
-  connections: z.array(ConnectionSchema),
+const ConnectorsResponseSchema = z.object({
+  connections: z.array(ConnectorSchema),
 });
 
 type Fetch = typeof fetch;
@@ -54,9 +54,9 @@ export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
     this.request = options.fetch ?? fetch.bind(globalThis);
   }
 
-  async createCustomApiConnection(
-    request: CreateCustomApiConnectionRequest,
-  ): Promise<Result<SpritesConnection, SpritesRestError>> {
+  async createCustomApiConnector(
+    request: CreateCustomApiConnectorRequest,
+  ): Promise<Result<SpriteConnector, SpritesRestError>> {
     const response = await this.fetch("/v1/oauth/connections/custom_api", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -75,33 +75,33 @@ export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
       return failure(response.error);
     }
 
-    const parsed = ConnectionResponseSchema.safeParse(response.value);
+    const parsed = ConnectorResponseSchema.safeParse(response.value);
     if (!parsed.success) {
       return failure(invalidResponse());
     }
 
-    return success(mapConnection(parsed.data.connection));
+    return success(mapConnector(parsed.data.connection));
   }
 
-  async listConnections(): Promise<Result<SpritesConnection[], SpritesRestError>> {
+  async listConnectors(): Promise<Result<SpriteConnector[], SpritesRestError>> {
     const response = await this.fetch("/v1/oauth/connections", { method: "GET" });
     if (!response.ok) {
       return failure(response.error);
     }
 
-    const parsed = ConnectionsResponseSchema.safeParse(response.value);
+    const parsed = ConnectorsResponseSchema.safeParse(response.value);
     if (!parsed.success) {
       return failure(invalidResponse());
     }
 
-    return success(parsed.data.connections.map(mapConnection));
+    return success(parsed.data.connections.map(mapConnector));
   }
 
   async updateAccessPolicy(
-    connectionId: string,
+    connectorId: string,
     policy: AccessPolicy,
-  ): Promise<Result<SpritesConnection, SpritesRestError>> {
-    const response = await this.fetch(connectionPath(connectionId), {
+  ): Promise<Result<SpriteConnector, SpritesRestError>> {
+    const response = await this.fetch(connectorPath(connectorId), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ access_policy: mapAccessPolicyRequest(policy) }),
@@ -110,18 +110,18 @@ export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
       return failure(response.error);
     }
 
-    const parsed = ConnectionResponseSchema.safeParse(response.value);
+    const parsed = ConnectorResponseSchema.safeParse(response.value);
     if (!parsed.success) {
       return failure(invalidResponse());
     }
 
-    return success(mapConnection(parsed.data.connection));
+    return success(mapConnector(parsed.data.connection));
   }
 
-  async getConnection(
-    connectionId: string,
-  ): Promise<Result<SpritesConnection | null, SpritesRestError>> {
-    const response = await this.fetch(connectionPath(connectionId), { method: "GET" }, true);
+  async getConnector(
+    connectorId: string,
+  ): Promise<Result<SpriteConnector | null, SpritesRestError>> {
+    const response = await this.fetch(connectorPath(connectorId), { method: "GET" }, true);
     if (!response.ok) {
       return failure(response.error);
     }
@@ -129,16 +129,16 @@ export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
       return success(null);
     }
 
-    const parsed = ConnectionResponseSchema.safeParse(response.value);
+    const parsed = ConnectorResponseSchema.safeParse(response.value);
     if (!parsed.success) {
       return failure(invalidResponse());
     }
 
-    return success(mapConnection(parsed.data.connection));
+    return success(mapConnector(parsed.data.connection));
   }
 
-  async deleteConnection(connectionId: string): Promise<Result<void, SpritesRestError>> {
-    const response = await this.fetch(connectionPath(connectionId), { method: "DELETE" }, true);
+  async deleteConnector(connectorId: string): Promise<Result<void, SpritesRestError>> {
+    const response = await this.fetch(connectorPath(connectorId), { method: "DELETE" }, true);
     if (!response.ok) {
       return failure(response.error);
     }
@@ -184,8 +184,8 @@ export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
   }
 }
 
-function connectionPath(connectionId: string): string {
-  return `/v1/oauth/connections/${encodeURIComponent(connectionId)}`;
+function connectorPath(connectorId: string): string {
+  return `/v1/oauth/connections/${encodeURIComponent(connectorId)}`;
 }
 
 function mapAccessPolicyRequest(policy: AccessPolicy): Record<string, unknown> {
@@ -198,29 +198,29 @@ function mapAccessPolicyRequest(policy: AccessPolicy): Record<string, unknown> {
   };
 }
 
-function mapConnection(connection: z.infer<typeof ConnectionSchema>): SpritesConnection {
+function mapConnector(connector: z.infer<typeof ConnectorSchema>): SpriteConnector {
   return {
-    id: connection.id,
-    provider: connection.provider,
-    ...(connection.provider_account_name === undefined
+    id: connector.id,
+    provider: connector.provider,
+    ...(connector.provider_account_name === undefined
       ? {}
-      : { providerAccountName: connection.provider_account_name }),
-    ...(connection.provider_info === undefined ? {} : { providerInfo: connection.provider_info }),
-    ...(connection.access_policy?.allow_all === undefined
+      : { providerAccountName: connector.provider_account_name }),
+    ...(connector.provider_info === undefined ? {} : { providerInfo: connector.provider_info }),
+    ...(connector.access_policy?.allow_all === undefined
       ? {}
       : {
         accessPolicy: {
-          allowAll: connection.access_policy.allow_all,
-          spriteLabels: connection.access_policy.sprite_labels ?? [],
-          ...(connection.access_policy.name_prefix === undefined
+          allowAll: connector.access_policy.allow_all,
+          spriteLabels: connector.access_policy.sprite_labels ?? [],
+          ...(connector.access_policy.name_prefix === undefined
             ? {}
-            : { namePrefix: connection.access_policy.name_prefix }),
-          ...(connection.access_policy.allowed_endpoints === undefined
+            : { namePrefix: connector.access_policy.name_prefix }),
+          ...(connector.access_policy.allowed_endpoints === undefined
             ? {}
-            : { allowedEndpoints: connection.access_policy.allowed_endpoints }),
-          ...(connection.access_policy.blocked_endpoints === undefined
+            : { allowedEndpoints: connector.access_policy.allowed_endpoints }),
+          ...(connector.access_policy.blocked_endpoints === undefined
             ? {}
-            : { blockedEndpoints: connection.access_policy.blocked_endpoints }),
+            : { blockedEndpoints: connector.access_policy.blocked_endpoints }),
         },
       }),
   };
@@ -259,13 +259,13 @@ function invalidResponse(): SpritesRestError {
  * the stored credential, and forwards `base_api_url + <path after the id>`.
  *
  * @param spritesApiUrl - The Sprites API origin, e.g. `https://api.sprites.dev`.
- * @param gatewayConnectionId - The connection id returned by connector creation.
+ * @param gatewayConnectorId - The connector id returned by connector creation.
  * @returns The gateway base URL, without a trailing slash.
  */
 export function buildConnectorGatewayUrl(
   spritesApiUrl: string,
-  gatewayConnectionId: string,
+  gatewayConnectorId: string,
 ): string {
   const base = spritesApiUrl.replace(/\/+$/, "");
-  return `${base}/v1/gateway/custom_api/${gatewayConnectionId}`;
+  return `${base}/v1/gateway/custom_api/${gatewayConnectorId}`;
 }

@@ -5,6 +5,7 @@ import type {
   SessionSetupRun,
   SessionSetupTask,
 } from "@repo/shared";
+import { WorkersSpriteClient } from "@repo/sprites-client";
 import type { Env } from "../../src/shared/types";
 import type { RuntimeBoundaryLease } from
   "../../src/modules/session-agent/types/runtime-boundary.types";
@@ -121,7 +122,6 @@ export function createServerState(overrides: Partial<ServerState> = {}): ServerS
     startupScriptCompleted: false,
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
-    spriteLabelsApplied: false,
     gitAuthMode: "legacy_secret",
     ...overrides,
   };
@@ -167,9 +167,15 @@ export function createService(
   const spriteLifecycleClient = {
     createSprite: vi.fn(async () => {
       mockState.events.push("createSprite");
-      return { name: "sprite-1", status: "running" };
+      return {
+        name: "sprite-1",
+        status: "running",
+        labels: ["session:session-1"],
+      };
     }),
   };
+  const discardFreshSpriteSnapshot = vi.fn();
+  const onSpriteCreated = vi.fn();
   const retireGitProxySecret = vi.fn();
   const ensureSessionConnector = vi.fn(async () => {
     mockState.events.push("mintConnector");
@@ -226,6 +232,13 @@ export function createService(
       ...envOverrides,
     } as Env,
     spriteLifecycleClient: spriteLifecycleClient as never,
+    createSpriteClient: (spriteName) =>
+      new WorkersSpriteClient(
+        spriteName,
+        "sprites-key",
+        "https://api.sprites.test",
+        createTestLogger(),
+      ),
     getServerState: () => serverState,
     getClientState: () => clientState,
     getEnvironmentSnapshot: () => environmentSnapshot,
@@ -235,6 +248,8 @@ export function createService(
     retireGitProxySecret,
     getSessionConnectorGatewayBase: () =>
       serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
+    discardFreshSpriteSnapshot,
+    onSpriteCreated,
     ensureRuntimeMigration,
     githubTokenProvider: {
       getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
@@ -251,6 +266,8 @@ export function createService(
     retireGitProxySecret,
     ensureSessionConnector,
     ensureRuntimeMigration,
+    discardFreshSpriteSnapshot,
+    onSpriteCreated,
   };
 }
 

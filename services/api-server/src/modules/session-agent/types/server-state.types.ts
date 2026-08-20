@@ -41,10 +41,8 @@ export const ServerStateSchema = z.object({
   startupScriptCompleted: z.boolean(),
   /** True after the selected final network policy has been applied. */
   finalNetworkPolicyApplied: z.boolean(),
-  /** Gateway connection id of the session's internal connector, once minted. */
+  /** Gateway connector id of the session's internal connector, once minted. */
   sessionConnectorId: z.string().nullable(),
-  /** True when sprite creation applied the session labels, skipping label repair. */
-  spriteLabelsApplied: z.boolean(),
   /** Authentication mode used by post-clone Git proxy requests. */
   gitAuthMode: z.enum(["legacy_secret", "ephemeral_token"]),
 });
@@ -68,7 +66,6 @@ export function defaultServerState(): ServerState {
     startupScriptCompleted: false,
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
-    spriteLabelsApplied: false,
     gitAuthMode: "legacy_secret",
   };
 }

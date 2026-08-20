@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  AccessPolicySchema,
+  CreateCustomApiConnectorRequestSchema,
+} from "@repo/sprites-client";
 import { isInternalHostname } from "./internal-hostname";
 
 function parseUrl(value: string): URL | undefined {
@@ -38,28 +42,28 @@ const httpsUrl = z.string().superRefine((value, context) => {
   }
 });
 
-const safeHeaderValue = z.string().max(128).refine((value) => !/[\r\n]/u.test(value), {
-  message: "Header values cannot contain newlines",
-});
-
 const spriteLabel = z.string().max(63).regex(
   /^(session|env):[A-Za-z0-9][A-Za-z0-9_-]{7,}$/u,
   "Labels must be session:<id> or env:<id> with an id of at least 8 characters",
 );
 
-const MintConnectorRequestBaseSchema = z.object({
-  name: z.string().min(1).max(100).refine((value) => !/[\r\n]/u.test(value)),
+const endpoint = z.string().min(1).max(256);
+
+const ConnectorProvisioningRequestBaseSchema = CreateCustomApiConnectorRequestSchema.extend({
   baseApiUrl: httpsUrl,
-  token: z.string().min(1).max(16_384),
   testUrl: httpsUrl,
-  headerName: z.literal("Authorization").default("Authorization"),
-  headerPrefix: safeHeaderValue.default("Bearer"),
-  spriteLabels: z.array(spriteLabel).min(1).max(16),
-  allowedEndpoints: z.array(z.string().min(1).max(256)).min(1).max(32).optional(),
+  description: z.string().max(1_024).default("Provisioned by My Machines"),
+  accessPolicy: AccessPolicySchema.extend({
+    allowAll: z.literal(false),
+    spriteLabels: z.array(spriteLabel).min(1).max(16),
+    namePrefix: z.never().optional(),
+    allowedEndpoints: z.array(endpoint).min(1).max(32).optional(),
+    blockedEndpoints: z.array(endpoint).max(32).optional(),
+  }).strict(),
 });
 
 function requireMatchingTestOrigin(
-  value: z.infer<typeof MintConnectorRequestBaseSchema>,
+  value: z.infer<typeof ConnectorProvisioningRequestBaseSchema>,
   context: z.RefinementCtx,
 ): void {
   const baseUrl = parseUrl(value.baseApiUrl);
@@ -74,23 +78,22 @@ function requireMatchingTestOrigin(
 }
 
 function requireSessionEndpointPins(
-  value: z.infer<typeof MintConnectorRequestBaseSchema>,
+  value: z.infer<typeof ConnectorProvisioningRequestBaseSchema>,
   context: z.RefinementCtx,
 ): void {
   // A connector carrying any session label is reachable by that session's
   // Sprite, even when the policy also contains environment labels.
-  const hasSessionLabel = value.spriteLabels.some((label) => label.startsWith("session:"));
-  if (hasSessionLabel && value.allowedEndpoints === undefined) {
+  const hasSessionLabel = value.accessPolicy.spriteLabels.some((label) =>
+    label.startsWith("session:"));
+  if (hasSessionLabel && value.accessPolicy.allowedEndpoints === undefined) {
     context.addIssue({
       code: "custom",
-      path: ["allowedEndpoints"],
+      path: ["accessPolicy", "allowedEndpoints"],
       message: "Session connectors must pin allowedEndpoints",
     });
   }
 }
 
-export const MintConnectorRequestSchema = MintConnectorRequestBaseSchema
+export const ConnectorProvisioningRequestSchema = ConnectorProvisioningRequestBaseSchema
   .superRefine(requireMatchingTestOrigin)
   .superRefine(requireSessionEndpointPins);
-
-export type MintConnectorRequest = z.infer<typeof MintConnectorRequestSchema>;

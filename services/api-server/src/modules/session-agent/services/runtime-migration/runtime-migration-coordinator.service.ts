@@ -184,7 +184,15 @@ export class RuntimeMigrationCoordinator<Id extends string = string> {
     return this.ensureDefinitions(this.definitions, dependencies);
   }
 
-  /** Ensures the registry prefix while the caller's lease proves mutex ownership. */
+  /** 
+   * Ensures the registry prefix while the caller's lease proves mutex ownership.
+   * Because migrations are ordered, the id you specify will only apply migrations up to and including that id.
+   * 
+   * @param migrationId - The id of the migration to ensure.
+   * @param dependencies - The dependencies to use for the migration.
+   * @param lease - The lease to use for the migration.
+   * @returns The result of the migration.
+   *  */
   async ensureMigration(
     migrationId: Id,
     dependencies: RuntimeMigrationDependencies,

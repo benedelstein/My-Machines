@@ -10,7 +10,6 @@ import { gitEphemeralTokenRuntimeMigration } from
 import { networkPolicyRuntimeMigration } from
   "./network-policy-runtime-migration.service";
 
-/** Phase 5 activates the ordered session-networking cohort; process stays disabled. */
 export const RUNTIME_MIGRATIONS = [
   startupToolchainRuntimeMigration,
   sessionConnectorRuntimeMigration,

@@ -6,7 +6,7 @@ export type SessionConnectorContract = {
   readonly provider: "custom_api";
   readonly baseApiUrl: string;
   readonly testUrl: string;
-  readonly requiredSpriteLabels: readonly string[];
+  readonly spriteLabels: readonly string[];
   readonly accessPolicy: {
     readonly allowedEndpoints: readonly string[];
     readonly blockedEndpoints: readonly string[];

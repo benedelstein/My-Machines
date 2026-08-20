@@ -1,4 +1,8 @@
-import { SpriteLifecycleClient, WorkersSpriteClient } from "@repo/sprites-client";
+import {
+  SpriteLifecycleClient,
+  WorkersSpriteClient,
+  type SpriteResponse,
+} from "@repo/sprites-client";
 import type {
   ClientState,
   Logger,
@@ -202,6 +206,14 @@ export function createSessionAgentDependencies(input: {
     apiKey: env.SPRITES_API_KEY,
     logger: createLogger("sprites.ts"),
   });
+  const createSpriteClient = (spriteName: string) =>
+    new WorkersSpriteClient(
+      spriteName,
+      env.SPRITES_API_KEY,
+      env.SPRITES_API_URL,
+      logger,
+    );
+  let freshSpriteSnapshot: SpriteResponse | null = null;
   /**
    * Capability surface every runtime migration draws on. Adding an adopter
    * does not change this — the definition builds its own context from here.
@@ -216,12 +228,7 @@ export function createSessionAgentDependencies(input: {
       if (!spriteName) {
         throw new Error("Sprite name is missing");
       }
-      return new WorkersSpriteClient(
-        spriteName,
-        env.SPRITES_API_KEY,
-        env.SPRITES_API_URL,
-        createLogger("sprite-websocket.session.ts"),
-      );
+      return createSpriteClient(spriteName);
     },
     getEnvironmentSnapshot: () => environmentSnapshotRepository.get(),
     reconcileSessionConnector: (migrationInput) =>
@@ -349,11 +356,17 @@ export function createSessionAgentDependencies(input: {
     getServerState: host.getServerState,
     updateServerState: host.updateServerState,
     ensureWebhookToken: () => processManager.ensureWebhookToken(),
+    takeFreshSpriteSnapshot: () => {
+      const snapshot = freshSpriteSnapshot;
+      freshSpriteSnapshot = null;
+      return snapshot;
+    },
   });
   const provisionService = new SessionProvisionService({
     logger,
     env,
     spriteLifecycleClient,
+    createSpriteClient,
     getServerState: host.getServerState,
     getClientState: host.getClientState,
     getEnvironmentSnapshot: () => environmentSnapshotRepository.get(),
@@ -362,6 +375,12 @@ export function createSessionAgentDependencies(input: {
     synthesizeStatus: host.synthesizeStatus,
     retireGitProxySecret: () => gitProxyService.retireGitProxySecret(),
     getSessionConnectorGatewayBase: () => sessionConnectorService.getGatewayBase(),
+    discardFreshSpriteSnapshot: () => {
+      freshSpriteSnapshot = null;
+    },
+    onSpriteCreated: (sprite) => {
+      freshSpriteSnapshot = sprite;
+    },
     ensureRuntimeMigration: (migrationId, lease) =>
       runtimeMigrationCoordinator.ensureMigration(migrationId, runtimeMigrationDependencies, lease),
     githubTokenProvider: githubAppService,

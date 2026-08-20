@@ -10,7 +10,11 @@ export type JsonValue =
 
 export type RuntimeMigrationRevision =
   | { readonly kind: "version"; readonly version: number }
-  | { readonly kind: "contract"; readonly hash: string };
+  | {
+    readonly kind: "contract";
+    /** The semantic hash of the desired state. */
+    readonly hash: string;
+  };
 
 export type RuntimeMigrationRevisionKind = RuntimeMigrationRevision["kind"];
 

@@ -23,7 +23,6 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
     startupScriptCompleted: true,
     finalNetworkPolicyApplied: true,
     sessionConnectorId: null,
-    spriteLabelsApplied: false,
     gitAuthMode: "legacy_secret",
     ...overrides,
   };

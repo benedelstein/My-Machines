@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { HttpSpriteConnectorsClient } from "../src/sprite-connectors.client";
+import { CreateCustomApiConnectorRequestSchema } from "../src/types";
 
 const connectionPayload = {
   id: "connection-1",
@@ -20,13 +21,38 @@ function client(fetchImplementation: typeof fetch): HttpSpriteConnectorsClient {
   });
 }
 
+describe("CreateCustomApiConnectorRequestSchema", () => {
+  it("parses the provider request shape and defaults the auth prefix", () => {
+    expect(CreateCustomApiConnectorRequestSchema.parse({
+      name: "connector-1",
+      baseApiUrl: "https://api.example.com",
+      accessToken: "secret",
+      testUrl: "https://api.example.com/health",
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: ["session:session-1"],
+      },
+    })).toEqual({
+      name: "connector-1",
+      baseApiUrl: "https://api.example.com",
+      accessToken: "secret",
+      testUrl: "https://api.example.com/health",
+      authHeaderPrefix: "Bearer",
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: ["session:session-1"],
+      },
+    });
+  });
+});
+
 describe("HttpSpriteConnectorsClient", () => {
   it("creates a custom API connector with its final access policy", async () => {
     const fetchSpy = vi.fn<typeof fetch>().mockResolvedValue(
       Response.json({ connection: connectionPayload }, { status: 201 }),
     );
 
-    const result = await client(fetchSpy).createCustomApiConnection({
+    const result = await client(fetchSpy).createCustomApiConnector({
       name: "cloude-session-abc123",
       baseApiUrl: "https://api.example.com",
       accessToken: "secret-token",
@@ -67,7 +93,7 @@ describe("HttpSpriteConnectorsClient", () => {
   it("maps the snake_case connection envelope to camelCase", async () => {
     const result = await client(async () => {
       return Response.json({ connections: [connectionPayload] });
-    }).listConnections();
+    }).listConnectors();
 
     expect(result).toEqual({
       ok: true,
@@ -87,7 +113,7 @@ describe("HttpSpriteConnectorsClient", () => {
   it("rejects a list response that is not the documented envelope", async () => {
     const result = await client(async () => {
       return Response.json([connectionPayload]);
-    }).listConnections();
+    }).listConnectors();
 
     expect(result).toEqual({
       ok: false,
@@ -100,7 +126,7 @@ describe("HttpSpriteConnectorsClient", () => {
       return Response.json({
         connections: [{ ...connectionPayload, access_policy: {} }],
       });
-    }).listConnections();
+    }).listConnectors();
 
     expect(result).toMatchObject({ ok: true });
     expect(result.ok && result.value[0]?.accessPolicy).toBeUndefined();
@@ -132,7 +158,7 @@ describe("HttpSpriteConnectorsClient", () => {
   it("reads a missing connection as null so callers can confirm deletion", async () => {
     const result = await client(async () => {
       return new Response(null, { status: 404 });
-    }).getConnection("connection-1");
+    }).getConnector("connection-1");
 
     expect(result).toEqual({ ok: true, value: null });
   });
@@ -140,7 +166,7 @@ describe("HttpSpriteConnectorsClient", () => {
   it("accepts an empty 204 delete response", async () => {
     const result = await client(async () => {
       return new Response(null, { status: 204 });
-    }).deleteConnection("connection-1");
+    }).deleteConnector("connection-1");
 
     expect(result).toEqual({ ok: true, value: undefined });
   });
@@ -154,7 +180,7 @@ describe("HttpSpriteConnectorsClient", () => {
   ])("maps HTTP %i to %s", async (status, code, retryable) => {
     const result = await client(async () => {
       return new Response(null, { status });
-    }).listConnections();
+    }).listConnectors();
 
     expect(result).toEqual({ ok: false, error: { code, retryable } });
   });
@@ -162,7 +188,7 @@ describe("HttpSpriteConnectorsClient", () => {
   it("treats a transport failure as retryable", async () => {
     const result = await client(async () => {
       throw new Error("network down");
-    }).listConnections();
+    }).listConnectors();
 
     expect(result).toEqual({
       ok: false,

@@ -82,7 +82,6 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
     startupScriptCompleted: true,
     finalNetworkPolicyApplied: true,
     sessionConnectorId: "connector-1",
-    spriteLabelsApplied: true,
     gitAuthMode: "ephemeral_token",
     ...overrides,
   };

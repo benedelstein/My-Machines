@@ -31,9 +31,9 @@ import {
   SpriteLifecycleClient,
 } from "@repo/sprites-client";
 import {
+  ConnectorProvisioningRequestSchema,
   deleteConnectorAndVerify,
   mintConnector,
-  MintConnectorRequestSchema,
 } from "../src/shared/integrations/sprite-connectors";
 
 const apiKey = process.env.SPRITES_API_KEY;
@@ -65,23 +65,26 @@ async function main(): Promise<void> {
   console.log("creating sprite", name);
   await lifecycle.createSprite({ name, labels: [label] });
 
-  let connectionId: string | null = null;
+  let connectorId: string | null = null;
   try {
-    const request = MintConnectorRequestSchema.parse({
+    const request = ConnectorProvisioningRequestSchema.parse({
       name: `probe-${name}`,
       baseApiUrl: "https://httpbin.org",
-      token: "dummy-not-a-secret",
+      accessToken: "dummy-not-a-secret",
       testUrl: "https://httpbin.org/headers",
-      spriteLabels: [label],
-      allowedEndpoints: ["/anything/*", "/headers", "/response-headers*"],
+      accessPolicy: {
+        allowAll: false,
+        spriteLabels: [label],
+        allowedEndpoints: ["/anything/*", "/headers", "/response-headers*"],
+      },
     });
     const minted = await mintConnector(request, { spritesClient: connectors });
     if (!minted.ok) {
       throw new Error(`mint failed: ${minted.error.code} at ${minted.error.stage}`);
     }
-    connectionId = minted.value.gatewayConnectionId;
-    const gateway = buildConnectorGatewayUrl(spritesApiUrl, connectionId);
-    console.log("minted", connectionId);
+    connectorId = minted.value.gatewayConnectorId;
+    const gateway = buildConnectorGatewayUrl(spritesApiUrl, connectorId);
+    console.log("minted", connectorId);
 
     const sprite = new SpritesClient(apiKey!).sprite(name);
     const run = async (title: string, command: string) => {
@@ -165,8 +168,8 @@ async function main(): Promise<void> {
       `curl -sS -o /dev/null -w "STATUS:%{http_code}\\n" -H "Accept: application/x-git-upload-pack-advertisement, */*" "${gateway}/anything/i"`,
     );
   } finally {
-    if (connectionId) {
-      const cleanup = await deleteConnectorAndVerify(connectionId, connectors);
+    if (connectorId) {
+      const cleanup = await deleteConnectorAndVerify(connectorId, connectors);
       console.log("connector deleted:", cleanup.ok);
     }
     await lifecycle.deleteSprite(name);

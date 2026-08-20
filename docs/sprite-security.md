@@ -41,8 +41,9 @@ hostname and can't be reconfigured.
 
 ## Implemented today
 
-- **Per-session connector (class A).** Minted as a blocking setup task; scoped
-  to the Sprite's `session:<sessionId>` label; injects the DO's `webhook_token`;
+- **Per-session connector (class A).** Maintained by an ordered runtime
+  migration and targeted as a blocking setup task for new sessions; scoped to
+  the Sprite's `session:<sessionId>` label; injects the DO's `webhook_token`;
   endpoint allowlist pins the two webhook routes, the ephemeral Git token mint
   route, and `/health`. Deleted (with reconciliation) at teardown. See
   `docs/sprite-connectors.md`.
@@ -95,8 +96,8 @@ hostname and can't be reconfigured.
 - An extracted, still-valid ephemeral Git token is replayable off-Sprite for at
   most its five-minute TTL. Connector identity prevents off-Sprite mint/refresh,
   not replay inside the TTL; teardown revokes immediately.
-- Sessions provisioned before connectors keep their legacy credential paths
-  (Sprite-held webhook token, `git_proxy_secret` bearer) until they drain.
+- An older session retains its legacy Sprite-held webhook-token fallback until
+  its connector runtime migration succeeds.
 
 ## Related docs
 

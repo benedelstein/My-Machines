@@ -3,6 +3,7 @@ import type { SessionSetupTask } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
 import type { RuntimeBoundaryLease } from
   "../../src/modules/session-agent/types/runtime-boundary.types";
+import { WorkersSpriteClient } from "@repo/sprites-client";
 import { SessionProvisionService } from "../../src/modules/session-agent/services/session-provision.service";
 import { createTestLogger } from "./test-logger";
 import {
@@ -405,6 +406,13 @@ describe("SessionProvisionService startup toolchain", () => {
           return { name: "sprite-1", status: "running" };
         }),
       } as never,
+      createSpriteClient: (spriteName) =>
+        new WorkersSpriteClient(
+          spriteName,
+          "sprites-key",
+          "https://api.sprites.test",
+          createTestLogger(),
+        ),
       getServerState: () => serverState,
       getClientState: () => createClientState(),
       getEnvironmentSnapshot: () => environmentSnapshot,
@@ -722,6 +730,13 @@ describe("SessionProvisionService startup toolchain", () => {
           return { name: "sprite-1", status: "running" };
         }),
       } as never,
+      createSpriteClient: (spriteName) =>
+        new WorkersSpriteClient(
+          spriteName,
+          "sprites-key",
+          "https://api.sprites.test",
+          createTestLogger(),
+        ),
       getServerState: () => serverState,
       getClientState: () => createClientState(),
       getEnvironmentSnapshot: () => createEnvironmentSnapshot({

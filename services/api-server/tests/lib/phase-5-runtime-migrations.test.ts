@@ -9,6 +9,8 @@ import { gitEphemeralTokenRuntimeMigration } from
 import { networkPolicyRuntimeMigration } from
   "../../src/modules/session-agent/services/runtime-migration/network-policy-runtime-migration.service";
 import { createMigrationDependencies } from "./runtime-migration-test-support";
+import { hashRuntimeMigrationContract } from
+  "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
 
 describe("Phase 5 runtime migrations", () => {
   it("pins the exact four-entry registry without the reusable process adopter", () => {
@@ -24,10 +26,7 @@ describe("Phase 5 runtime migrations", () => {
 
   it("builds connector desired state without allocated identity or webhook credentials", async () => {
     const dependencies = createMigrationDependencies({
-      serverState: {
-        sessionConnectorId: "allocated-connector-id",
-        spriteLabelsApplied: true,
-      },
+      serverState: { sessionConnectorId: "allocated-connector-id" },
     });
     const prepared = await sessionConnectorRuntimeMigration.prepare(dependencies);
 
@@ -38,14 +37,59 @@ describe("Phase 5 runtime migrations", () => {
     expect(prepared.value.revision.kind).toBe("contract");
     expect(await prepared.value.apply(3)).toEqual({ ok: true, value: undefined });
     expect(dependencies.reconcileSessionConnector).toHaveBeenCalledWith({
-      contract: expect.objectContaining({
+      contract: {
+        contractSchema: 1,
         provider: "custom_api",
         baseApiUrl: "https://worker.test",
-        requiredSpriteLabels: ["session:session-1"],
-      }),
-      desiredRevision: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        testUrl: "https://worker.test/health",
+        spriteLabels: ["session:session-1"],
+        accessPolicy: {
+          allowedEndpoints: [
+            "/internal/session/session-1/chunks",
+            "/internal/session/session-1/events",
+            "/internal/session/session-1/git-token",
+            "/health",
+          ],
+          blockedEndpoints: [],
+        },
+      },
     });
     const reconcileInput = vi.mocked(dependencies.reconcileSessionConnector).mock.calls[0]?.[0];
+    expect(prepared.value.revision).toEqual({
+      kind: "contract",
+      hash: await hashRuntimeMigrationContract(
+        "session.connector-resource",
+        reconcileInput!.contract,
+      ),
+    });
+    const contract = reconcileInput!.contract;
+    const variants = [
+      { ...contract, provider: "other_provider" },
+      { ...contract, baseApiUrl: "https://different-worker.test" },
+      { ...contract, testUrl: "https://worker.test/different-health" },
+      { ...contract, spriteLabels: [...contract.spriteLabels, "env:changed"] },
+      {
+        ...contract,
+        accessPolicy: {
+          ...contract.accessPolicy,
+          allowedEndpoints: [...contract.accessPolicy.allowedEndpoints, "/changed"],
+        },
+      },
+      {
+        ...contract,
+        accessPolicy: {
+          ...contract.accessPolicy,
+          blockedEndpoints: ["/changed"],
+        },
+      },
+    ];
+    const originalHash = prepared.value.revision.kind === "contract"
+      ? prepared.value.revision.hash
+      : "";
+    for (const variant of variants) {
+      await expect(hashRuntimeMigrationContract("session.connector-resource", variant))
+        .resolves.not.toBe(originalHash);
+    }
     expect(JSON.stringify(reconcileInput?.contract)).not.toContain("allocated-connector-id");
     expect(JSON.stringify(reconcileInput?.contract)).not.toContain("webhook-token");
   });

@@ -3,18 +3,16 @@ import {
   buildConnectorGatewayUrl,
   HttpSpriteConnectorsClient,
   type AccessPolicy,
-  type CreateCustomApiConnectionRequest,
-  type SpritesConnection,
+  type SpriteConnector,
   type SpriteConnectorsClient,
   type SpriteLifecycleClient,
+  type SpriteResponse,
 } from "@repo/sprites-client";
 import type { Env } from "@/shared/types";
-import { deleteConnectorAndVerify, MintConnectorRequestSchema } from
+import { ConnectorProvisioningRequestSchema, deleteConnectorAndVerify } from
   "@/shared/integrations/sprite-connectors";
-import type {
-  SessionConnectorAttemptRecord,
-  SessionConnectorsRepository,
-} from "../repositories/session-connectors.repository";
+import type { SessionConnectorsRepository } from
+  "../repositories/session-connectors.repository";
 import type { SessionConnectorContract } from
   "../types/runtime-migration-adopters.types";
 import type { ServerState } from
@@ -48,6 +46,7 @@ export interface SessionConnectorServiceDeps {
   getServerState: () => ServerState;
   updateServerState: (partial: Partial<ServerState>) => void;
   ensureWebhookToken: () => string;
+  takeFreshSpriteSnapshot?: () => SpriteResponse | null;
   /** Test seam; defaults to an HTTP client against SPRITES_API_URL. */
   spritesClient?: SpriteConnectorsClient;
 }
@@ -66,6 +65,7 @@ export class SessionConnectorService {
   private readonly getServerState: () => ServerState;
   private readonly updateServerState: SessionConnectorServiceDeps["updateServerState"];
   private readonly ensureWebhookToken: () => string;
+  private readonly takeFreshSpriteSnapshot: () => SpriteResponse | null;
   private readonly spritesClient: SpriteConnectorsClient;
 
   constructor(deps: SessionConnectorServiceDeps) {
@@ -76,6 +76,7 @@ export class SessionConnectorService {
     this.getServerState = deps.getServerState;
     this.updateServerState = deps.updateServerState;
     this.ensureWebhookToken = deps.ensureWebhookToken;
+    this.takeFreshSpriteSnapshot = deps.takeFreshSpriteSnapshot ?? (() => null);
     this.spritesClient =
       deps.spritesClient ??
       new HttpSpriteConnectorsClient({
@@ -87,7 +88,6 @@ export class SessionConnectorService {
   /** Reconciles connector identity, policy, mirrors, and Sprite labels idempotently. */
   async reconcile(input: {
     contract: SessionConnectorContract;
-    desiredRevision: string;
   }): Promise<void> {
     const serverState = this.getServerState();
     const sessionId = serverState.sessionId;
@@ -96,213 +96,138 @@ export class SessionConnectorService {
       throw new Error("Session connector prerequisites are missing");
     }
 
-    await this.ensureSpriteLabels(spriteName, sessionId, input.contract.requiredSpriteLabels);
+    await this.ensureSpriteLabels(spriteName, sessionId, input.contract.spriteLabels);
     const record = await this.repository.get(sessionId);
-    let connectorAttempt = await this.repository.getAttempt(sessionId);
     const desiredPolicy = buildAccessPolicy(sessionId, input.contract);
-
-    if (connectorAttempt && connectorAttempt.desiredRevision !== input.desiredRevision) {
-      await this.deleteAttemptConnector(connectorAttempt);
-      await this.repository.deleteAttempt(sessionId);
-      connectorAttempt = null;
-    }
-
-    const candidateIds = [...new Set([
+    const knownIds = [...new Set([
       serverState.sessionConnectorId,
-      record?.gatewayConnectionId,
-      connectorAttempt?.gatewayConnectionId,
+      record?.status === "active" ? record.gatewayConnectorId : null,
     ].filter((value): value is string => Boolean(value)))];
-    for (const connectionId of candidateIds) {
-      const connection = await this.getConnection(connectionId);
-      if (!connection || !connectorBaseMatches(connection, input.contract.baseApiUrl)) {
-        continue;
+    const compatibleConnectors: SpriteConnector[] = [];
+    for (const connectorId of knownIds) {
+      const connector = await this.getConnector(connectorId);
+      // if the structure doesn't match, we need to create a new connector.
+      if (connector && connectorStructureMatches(connector, input.contract)) {
+        compatibleConnectors.push(connector);
       }
-      const trustedByRecord = record?.gatewayConnectionId === connectionId
-        && (record.desiredRevision === null || record.desiredRevision === input.desiredRevision);
-      const trustedByAttempt = connectorAttempt?.desiredRevision === input.desiredRevision
-        && (connectorAttempt.gatewayConnectionId === connectionId
-          || connectorAttempt.connectorName === connection.providerAccountName);
-      if (!trustedByRecord && !trustedByAttempt) {
-        continue;
-      }
-      const verified = await this.ensurePolicy(connection, desiredPolicy);
-      await this.checkpointVerifiedConnector({
-        sessionId,
-        connection: verified,
-        desiredPolicy,
-        desiredRevision: input.desiredRevision,
-        attemptIdentity: connectorAttempt?.attemptIdentity ?? record?.attemptIdentity ?? null,
-      });
-      await this.cleanupPreviousConnector(connectorAttempt, verified.id);
-      await this.repository.deleteAttempt(sessionId);
-      return;
     }
 
-    if (!connectorAttempt) {
-      const attemptIdentity = crypto.randomUUID();
-      const connectorName = buildAttemptConnectorName(
-        sessionId,
-        input.desiredRevision,
-        attemptIdentity,
-      );
-      await this.repository.beginAttempt({
-        sessionId,
-        desiredRevision: input.desiredRevision,
-        attemptIdentity,
-        connectorName,
-        previousGatewayConnectionId:
-          serverState.sessionConnectorId ?? record?.gatewayConnectionId ?? null,
-      });
-      connectorAttempt = {
-        sessionId,
-        desiredRevision: input.desiredRevision,
-        attemptIdentity,
-        connectorName,
-        gatewayConnectionId: null,
-        previousGatewayConnectionId:
-          serverState.sessionConnectorId ?? record?.gatewayConnectionId ?? null,
-      };
-    }
+    const preferred = compatibleConnectors.find((connector) =>
+      connector.id === serverState.sessionConnectorId)
+      ?? compatibleConnectors[0];
+    const verified = preferred
+      ? await this.ensurePolicy(preferred, input.contract, desiredPolicy)
+      : await this.createAndVerifyConnector(sessionId, input.contract, desiredPolicy);
 
-    const webhookToken = this.ensureWebhookToken();
-    const request = MintConnectorRequestSchema.parse({
-      name: connectorAttempt.connectorName,
-      baseApiUrl: input.contract.baseApiUrl,
-      token: webhookToken,
-      testUrl: input.contract.testUrl,
-      spriteLabels: desiredPolicy.spriteLabels,
-      allowedEndpoints: desiredPolicy.allowedEndpoints,
-    });
-    const connection = await this.createOrDiscoverConnector(
-      connectorAttempt.connectorName,
-      toCreateRequest(request, desiredPolicy),
-    );
-    await this.repository.setAttemptConnectionId(sessionId, connection.id);
-    const verified = await this.verifyConnection(connection.id, input.contract, desiredPolicy);
+    await this.cleanupOtherKnownConnectors(knownIds, verified.id);
     await this.checkpointVerifiedConnector({
       sessionId,
-      connection: verified,
+      connector: verified,
       desiredPolicy,
-      desiredRevision: input.desiredRevision,
-      attemptIdentity: connectorAttempt.attemptIdentity,
     });
-    await this.cleanupPreviousConnector(connectorAttempt, verified.id);
-    await this.repository.deleteAttempt(sessionId);
   }
 
-  private async createOrDiscoverConnector(
-    connectorName: string,
-    request: CreateCustomApiConnectionRequest,
-  ): Promise<SpritesConnection> {
-    const existing = await this.findConnectionByName(connectorName);
-    if (existing) {
-      return existing;
+  private async createAndVerifyConnector(
+    sessionId: string,
+    contract: SessionConnectorContract,
+    desiredPolicy: AccessPolicy,
+  ): Promise<SpriteConnector> {
+    const request = ConnectorProvisioningRequestSchema.parse({
+      name: buildConnectorName(sessionId),
+      baseApiUrl: contract.baseApiUrl,
+      accessToken: this.ensureWebhookToken(),
+      testUrl: contract.testUrl,
+      authHeaderPrefix: "Bearer",
+      accessPolicy: desiredPolicy,
+    });
+    const created = await this.spritesClient.createCustomApiConnector(request);
+    if (!created.ok) {
+      throw new Error(`Session connector create failed: ${created.error.code}`);
     }
-
-    const created = await this.spritesClient.createCustomApiConnection(request);
-    if (created.ok) {
-      return created.value;
+    try {
+      // Create responses may omit policy or provider details; read back the
+      // complete connector before checkpointing security-sensitive state.
+      return await this.verifyConnector(created.value.id, contract, desiredPolicy);
+    } catch (error) {
+      const cleanup = await deleteConnectorAndVerify(created.value.id, this.spritesClient);
+      if (!cleanup.ok) {
+        throw new Error(
+          `Unverified session connector cleanup failed: ${cleanup.error.cause}`,
+          { cause: error },
+        );
+      }
+      throw error;
     }
-
-    const discovered = await this.findConnectionByName(connectorName);
-    if (discovered) {
-      return discovered;
-    }
-    throw new Error(`Session connector create failed: ${created.error.code}`);
   }
 
-  private async findConnectionByName(name: string): Promise<SpritesConnection | null> {
-    const listed = await this.spritesClient.listConnections();
-    if (!listed.ok) {
-      throw new Error(`Session connector list failed: ${listed.error.code}`);
-    }
-    return listed.value.find((connection) => {
-      return connection.provider === "custom_api" && connection.providerAccountName === name;
-    }) ?? null;
-  }
-
-  private async getConnection(connectionId: string): Promise<SpritesConnection | null> {
-    const result = await this.spritesClient.getConnection(connectionId);
+  private async getConnector(connectorId: string): Promise<SpriteConnector | null> {
+    const result = await this.spritesClient.getConnector(connectorId);
     if (!result.ok) {
       throw new Error(`Session connector read failed: ${result.error.code}`);
     }
     return result.value;
   }
 
-  private async verifyConnection(
-    connectionId: string,
+  private async verifyConnector(
+    connectorId: string,
     contract: SessionConnectorContract,
     policy: AccessPolicy,
-  ): Promise<SpritesConnection> {
-    const connection = await this.getConnection(connectionId);
-    if (!connection || !connectorBaseMatches(connection, contract.baseApiUrl)) {
-      throw new Error("Session connector base URL verification failed");
+  ): Promise<SpriteConnector> {
+    const connector = await this.getConnector(connectorId);
+    if (!connector
+      || !connectorStructureMatches(connector, contract)
+      || !policiesMatch(connector.accessPolicy, policy)) {
+      throw new Error("Session connector create verification failed");
     }
-    return this.ensurePolicy(connection, policy);
+    return connector;
   }
 
   private async ensurePolicy(
-    connection: SpritesConnection,
+    connector: SpriteConnector,
+    contract: SessionConnectorContract,
     desiredPolicy: AccessPolicy,
-  ): Promise<SpritesConnection> {
-    if (!policiesMatch(connection.accessPolicy, desiredPolicy)) {
-      const updated = await this.spritesClient.updateAccessPolicy(connection.id, desiredPolicy);
-      if (!updated.ok) {
-        throw new Error(`Session connector policy update failed: ${updated.error.code}`);
-      }
+  ): Promise<SpriteConnector> {
+    if (policiesMatch(connector.accessPolicy, desiredPolicy)) {
+      return connector;
     }
-    const readback = await this.getConnection(connection.id);
-    if (!readback || !policiesMatch(readback.accessPolicy, desiredPolicy)) {
-      throw new Error("Session connector policy readback did not match");
+    const updated = await this.spritesClient.updateAccessPolicy(connector.id, desiredPolicy);
+    if (!updated.ok) {
+      throw new Error(`Session connector policy update failed: ${updated.error.code}`);
     }
-    return readback;
+    if (updated.value.id !== connector.id
+      || !connectorStructureMatches(updated.value, contract)
+      || !policiesMatch(updated.value.accessPolicy, desiredPolicy)) {
+      throw new Error("Session connector policy update response did not match desired state");
+    }
+    return updated.value;
   }
 
   private async checkpointVerifiedConnector(input: {
     sessionId: string;
-    connection: SpritesConnection;
+    connector: SpriteConnector;
     desiredPolicy: AccessPolicy;
-    desiredRevision: string;
-    attemptIdentity: string | null;
   }): Promise<void> {
     await this.repository.upsertActive({
       sessionId: input.sessionId,
-      gatewayConnectionId: input.connection.id,
-      connectorName: input.connection.providerAccountName ?? `session-${input.sessionId}`,
+      gatewayConnectorId: input.connector.id,
+      connectorName: input.connector.providerAccountName ?? `session-${input.sessionId}`,
       policySummary: input.desiredPolicy,
-      desiredRevision: input.desiredRevision,
-      attemptIdentity: input.attemptIdentity,
     });
-    this.updateServerState({
-      sessionConnectorId: input.connection.id,
-      spriteLabelsApplied: true,
-    });
+    this.updateServerState({ sessionConnectorId: input.connector.id });
   }
 
-  private async cleanupPreviousConnector(
-    attempt: SessionConnectorAttemptRecord | null,
-    activeConnectionId: string,
+  private async cleanupOtherKnownConnectors(
+    knownIds: readonly string[],
+    selectedConnectorId: string,
   ): Promise<void> {
-    const previousConnectionId = attempt?.previousGatewayConnectionId;
-    if (!previousConnectionId || previousConnectionId === activeConnectionId) {
-      return;
-    }
-    const cleanup = await deleteConnectorAndVerify(previousConnectionId, this.spritesClient);
-    if (!cleanup.ok) {
-      throw new Error(`Previous session connector cleanup failed: ${cleanup.error.cause}`);
-    }
-  }
-
-  private async deleteAttemptConnector(attempt: SessionConnectorAttemptRecord): Promise<void> {
-    const connection = attempt.gatewayConnectionId
-      ? await this.getConnection(attempt.gatewayConnectionId)
-      : await this.findConnectionByName(attempt.connectorName);
-    if (!connection) {
-      return;
-    }
-    const cleanup = await deleteConnectorAndVerify(connection.id, this.spritesClient);
-    if (!cleanup.ok) {
-      throw new Error(`Abandoned session connector cleanup failed: ${cleanup.error.cause}`);
+    for (const connectorId of knownIds) {
+      if (connectorId === selectedConnectorId) {
+        continue;
+      }
+      const cleanup = await deleteConnectorAndVerify(connectorId, this.spritesClient);
+      if (!cleanup.ok) {
+        throw new Error(`Previous session connector cleanup failed: ${cleanup.error.cause}`);
+      }
     }
   }
 
@@ -321,7 +246,7 @@ export class SessionConnectorService {
   /**
    * Deletes the session's connector at teardown. Never throws: teardown must
    * continue to Sprite deletion, so failures are logged and the D1 record is
-   * kept in pending_revocation with the gateway connection id for later
+   * kept in pending_revocation with the gateway connector id for later
    * reconciliation.
    */
   async deleteForTeardown(): Promise<void> {
@@ -331,23 +256,23 @@ export class SessionConnectorService {
       return;
     }
 
-    let gatewayConnectionId = serverState.sessionConnectorId;
+    let gatewayConnectorId = serverState.sessionConnectorId;
     try {
       const record = await this.repository.get(sessionId);
-      gatewayConnectionId = record?.gatewayConnectionId ?? gatewayConnectionId;
-      if (!gatewayConnectionId) {
+      gatewayConnectorId = record?.gatewayConnectorId ?? gatewayConnectorId;
+      if (!gatewayConnectorId) {
         return;
       }
       await this.repository.markPendingRevocation(sessionId);
       const cleanup = await deleteConnectorAndVerify(
-        gatewayConnectionId,
+        gatewayConnectorId,
         this.spritesClient,
       );
       if (!cleanup.ok) {
         this.logger.error("Session connector teardown delete failed", {
           fields: {
             sessionId,
-            gatewayConnectionId,
+            gatewayConnectorId,
             cause: cleanup.error.cause,
             retryable: cleanup.error.retryable,
           },
@@ -356,11 +281,11 @@ export class SessionConnectorService {
       }
       await this.repository.delete(sessionId);
       this.logger.info("Session connector deleted", {
-        fields: { sessionId, gatewayConnectionId },
+        fields: { sessionId, gatewayConnectorId },
       });
     } catch (error) {
       this.logger.error("Session connector teardown errored", {
-        fields: { sessionId, gatewayConnectionId },
+        fields: { sessionId, gatewayConnectorId },
         error,
       });
     }
@@ -368,8 +293,7 @@ export class SessionConnectorService {
 
   /**
    * Ensures the Sprite carries the session (and environment) labels before the
-   * connector is minted, repairing Sprites created before label support. Skips
-   * the read-back entirely when creation already applied the labels. Fly
+   * connector is minted, repairing Sprites created before label support. Fly
    * enforces the label policy at the gateway, so a missing label costs the
    * Sprite connector access rather than granting any.
    */
@@ -378,31 +302,35 @@ export class SessionConnectorService {
     sessionId: string,
     desired: readonly string[],
   ): Promise<void> {
-    if (this.getServerState().spriteLabelsApplied) {
+    // if we have a fresh sprite snapshot returned from provision (during setup), we can use it from memory.
+    // otherwise, fetch from API
+    const freshSprite = this.takeFreshSpriteSnapshot();
+    const existing = freshSprite?.name === spriteName && Array.isArray(freshSprite.labels)
+      ? freshSprite.labels
+      : (await this.spriteLifecycleClient.getSprite(spriteName)).labels;
+    if (!existing) {
+      this.logger.error("Sprite labels were omitted from the read response", { fields: { spriteName } });
+      throw new Error("Sprite labels were omitted from the read response");
+    }
+    if (arraysEqual(existing, desired)) {
       return;
     }
-    const sprite = await this.spriteLifecycleClient.getSprite(spriteName);
-    const existing = sprite.labels ?? [];
-    if (desired.every((label) => existing.includes(label))) {
-      return;
-    }
+    this.logger.info("Sprite labels are outdated, updating", { fields: { spriteName, desired: desired.join(", "), existing: existing.join(", ") } });
 
-    const merged = [...new Set([...existing, ...desired])];
+    // overwrite all labels
     const updated = await this.spriteLifecycleClient.updateSpriteLabels(
       spriteName,
-      merged,
+      [...desired],
     );
-    const missing = desired.filter((label) => !updated.includes(label));
-    if (missing.length > 0) {
-      this.logger.warn("Sprite labels missing after update", {
-        fields: { sessionId, spriteName, missing, reported: updated },
+    if (!arraysEqual(updated, desired)) {
+      this.logger.warn("Sprite labels differ after update", {
+        fields: { sessionId, spriteName, desired: [...desired], reported: updated },
       });
       throw new Error(
-        `Sprite label update did not persist required labels: ${missing.join(", ")}`,
+        "Sprite label update did not persist the desired label set",
       );
     }
   }
-
 }
 
 function buildAccessPolicy(
@@ -417,20 +345,22 @@ function buildAccessPolicy(
   };
 }
 
-function buildAttemptConnectorName(
-  sessionId: string,
-  desiredRevision: string,
-  attemptIdentity: string,
-): string {
-  return `session-${sessionId}-${desiredRevision.slice(0, 10)}-${attemptIdentity.slice(0, 8)}`
+function buildConnectorName(sessionId: string): string {
+  return `session-${sessionId}-${crypto.randomUUID().slice(0, 8)}`
     .slice(0, 100);
 }
 
-function connectorBaseMatches(connection: SpritesConnection, baseApiUrl: string): boolean {
-  const reportedBaseUrl = connection.providerInfo?.base_api_url;
-  return connection.provider === "custom_api"
+function connectorStructureMatches(
+  connector: SpriteConnector,
+  contract: SessionConnectorContract,
+): boolean {
+  const reportedBaseUrl = connector.providerInfo?.base_api_url;
+  const reportedTestUrl = connector.providerInfo?.test_url;
+  return connector.provider === contract.provider
     && typeof reportedBaseUrl === "string"
-    && normalizeUrl(reportedBaseUrl) === normalizeUrl(baseApiUrl);
+    && normalizeUrl(reportedBaseUrl) === normalizeUrl(contract.baseApiUrl)
+    && typeof reportedTestUrl === "string"
+    && reportedTestUrl === contract.testUrl;
 }
 
 function normalizeUrl(value: string): string {
@@ -450,19 +380,4 @@ function arraysEqual(left: readonly string[], right: readonly string[]): boolean
   const sortedRight = [...right].sort();
   return sortedLeft.length === sortedRight.length
     && sortedLeft.every((value, index) => value === sortedRight[index]);
-}
-
-function toCreateRequest(
-  request: ReturnType<typeof MintConnectorRequestSchema.parse>,
-  accessPolicy: AccessPolicy,
-): CreateCustomApiConnectionRequest {
-  return {
-    name: request.name,
-    baseApiUrl: request.baseApiUrl,
-    accessToken: request.token,
-    testUrl: request.testUrl,
-    authHeaderPrefix: request.headerPrefix,
-    description: "Provisioned by My Machines",
-    accessPolicy,
-  };
 }

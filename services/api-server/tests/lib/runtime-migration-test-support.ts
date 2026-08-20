@@ -29,7 +29,6 @@ export function createMigrationDependencies(args: {
     repoCloned: true,
     sessionConnectorId: null,
     sessionId: "session-1",
-    spriteLabelsApplied: false,
     spriteName: "sprite-1",
     startupToolchain: null,
     ...args.serverState,
