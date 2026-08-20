@@ -46,6 +46,7 @@ export interface SpritesClientConfig {
 /**
  * SpriteLifecycleClient - Wraps @fly/sprites for sprite lifecycle management
  * Uses HTTP-based operations (create/delete/get) which work in Workers
+ * other operations dont work in workers so we have our own implementation.
  */
 export class SpriteLifecycleClient {
   private spritesClient: SpritesClient;
