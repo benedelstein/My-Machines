@@ -318,13 +318,12 @@ export class SessionConnectorService {
     this.logger.info("Sprite labels are outdated, updating", { fields: { spriteName, desired: desired.join(", "), existing: existing.join(", ") } });
 
     // overwrite all labels
-    const updated = await this.spriteLifecycleClient.updateSpriteLabels(
-      spriteName,
-      [...desired],
-    );
-    if (!arraysEqual(updated, desired)) {
+    const updated = await this.spriteLifecycleClient.updateSprite(spriteName, {
+      labels: [...desired],
+    });
+    if (!updated.labels || !arraysEqual(updated.labels, desired)) {
       this.logger.warn("Sprite labels differ after update", {
-        fields: { sessionId, spriteName, desired: [...desired], reported: updated },
+        fields: { sessionId, spriteName, desired: [...desired], reported: updated.labels ?? null },
       });
       throw new Error(
         "Sprite label update did not persist the desired label set",

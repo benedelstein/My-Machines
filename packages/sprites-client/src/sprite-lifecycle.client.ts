@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Session} from "@fly/sprites";
+import type { Session, Sprite } from "@fly/sprites";
 import { SpritesClient } from "@fly/sprites";
 import type { Logger } from "@repo/shared";
 
@@ -10,11 +10,18 @@ import type { Logger } from "@repo/shared";
 export const SpriteStatus = z.enum(["cold", "warm", "running"]);
 export type SpriteStatus = z.infer<typeof SpriteStatus>;
 
+export const SpriteUrlSettings = z.object({
+  auth: z.enum(["public", "sprite"]),
+  privateAccess: z.enum(["admins", "org_users"]).optional(),
+});
+export type SpriteUrlSettings = z.infer<typeof SpriteUrlSettings>;
+
 export const SpriteResponse = z.object({
   id: z.string().optional(),
   name: z.string(),
   status: z.enum(["cold", "warm", "running"]).optional(),
   url: z.string().optional(),
+  urlSettings: SpriteUrlSettings.optional(),
   labels: z.array(z.string()).optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
@@ -36,6 +43,16 @@ export const CreateSpriteRequest = z.object({
 });
 export type CreateSpriteRequest = z.infer<typeof CreateSpriteRequest>;
 
+export const UpdateSpriteRequest = z
+  .object({
+    urlSettings: SpriteUrlSettings.optional(),
+    labels: z.array(z.string()).optional(),
+  })
+  .refine(
+    (request) => request.urlSettings !== undefined || request.labels !== undefined,
+    { message: "urlSettings or labels is required" },
+  );
+export type UpdateSpriteRequest = z.infer<typeof UpdateSpriteRequest>;
 
 export interface SpritesClientConfig {
   apiKey: string;
@@ -80,40 +97,32 @@ export class SpriteLifecycleClient {
         durationMs: Date.now() - startedAt,
       },
     });
-    return SpriteResponse.parse({
-      id: sprite.id,
-      name: sprite.name,
-      status: sprite.status,
-      labels: sprite.labels,
-      createdAt: sprite.createdAt?.toISOString(),
-      updatedAt: sprite.updatedAt?.toISOString(),
-    });
+    return toSpriteResponse(sprite);
   }
 
   async getSprite(name: string): Promise<SpriteResponse> {
     const sprite = await this.spritesClient.getSprite(name);
-    return SpriteResponse.parse({
-      id: sprite.id,
-      name: sprite.name,
-      status: sprite.status,
-      url: "",
-      labels: sprite.labels,
-      createdAt: sprite.createdAt?.toISOString(),
-      updatedAt: sprite.updatedAt?.toISOString(),
-    });
+    return toSpriteResponse(sprite);
   }
 
   /**
-   * Replaces the sprite's full label set and returns the updated labels.
-   * Labels are platform metadata that in-VM code cannot modify, so they are
-   * safe to use as connector access-policy scopes.
+   * Partially updates a Sprite's mutable settings.
+   *
+   * @param name - The Sprite name.
+   * @param request - Mutable fields to update. Omitted top-level fields remain unchanged.
+   * @returns The updated Sprite returned by the provider.
    */
-  async updateSpriteLabels(name: string, labels: string[]): Promise<string[]> {
-    const sprite = await this.spritesClient.updateSprite(name, { labels });
-    this.logger.info("Updated sprite labels", {
-      fields: { spriteName: name, labels: sprite.labels ?? null },
+  async updateSprite(name: string, request: UpdateSpriteRequest): Promise<SpriteResponse> {
+    const parsedRequest = UpdateSpriteRequest.parse(request);
+    const sprite = await this.spritesClient.updateSprite(name, parsedRequest);
+    this.logger.info("Updated sprite", {
+      fields: {
+        spriteName: name,
+        updatedLabels: parsedRequest.labels !== undefined,
+        updatedUrlSettings: parsedRequest.urlSettings !== undefined,
+      },
     });
-    return sprite.labels ?? [];
+    return toSpriteResponse(sprite);
   }
 
   async deleteSprite(name: string): Promise<void> {
@@ -124,4 +133,17 @@ export class SpriteLifecycleClient {
     const sessions = await this.spritesClient.sprite(name).listSessions();
     return sessions;
   }
+}
+
+function toSpriteResponse(sprite: Sprite): SpriteResponse {
+  return SpriteResponse.parse({
+    id: sprite.id,
+    name: sprite.name,
+    status: sprite.status,
+    url: sprite.url,
+    urlSettings: sprite.urlSettings,
+    labels: sprite.labels,
+    createdAt: sprite.createdAt?.toISOString(),
+    updatedAt: sprite.updatedAt?.toISOString(),
+  });
 }

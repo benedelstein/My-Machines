@@ -205,13 +205,16 @@ function createService(args: {
       spritesClient.operations.push(`state:${partial.sessionConnectorId}`);
     }
   });
-  const updateSpriteLabels = vi.fn(async (_name: string, labels: string[]) => labels);
+  const updateSprite = vi.fn(async (_name: string, request: { labels?: string[] }) => ({
+    name: "sprite-1",
+    labels: request.labels,
+  }));
   const spriteLifecycleClient = {
     getSprite: vi.fn(async () => ({
       name: "sprite-1",
       labels: args.spriteLabels ?? ["session:session-1"],
     })),
-    updateSpriteLabels,
+    updateSprite,
   };
   const ensureWebhookToken = vi.fn(() => "webhook-token-value");
   let freshSpriteSnapshot = args.freshSpriteSnapshot ?? null;
@@ -394,18 +397,17 @@ describe("SessionConnectorService.reconcile", () => {
     await reconcileConnector(fixture.service, contract);
 
     expect(fixture.spriteLifecycleClient.getSprite).not.toHaveBeenCalled();
-    expect(fixture.spriteLifecycleClient.updateSpriteLabels).toHaveBeenCalledWith(
-      "sprite-1",
-      ["session:session-1", "env:environment-1"],
-    );
+    expect(fixture.spriteLifecycleClient.updateSprite).toHaveBeenCalledWith("sprite-1", {
+      labels: ["session:session-1", "env:environment-1"],
+    });
   });
 
   it("fails before connector reads when the updated label set is not exact", async () => {
     const fixture = createService({ spriteLabels: ["unrelated"] });
-    fixture.spriteLifecycleClient.updateSpriteLabels.mockResolvedValue([
-      "session:session-1",
-      "unrelated",
-    ]);
+    fixture.spriteLifecycleClient.updateSprite.mockResolvedValue({
+      name: "sprite-1",
+      labels: ["session:session-1", "unrelated"],
+    });
 
     await expect(reconcileConnector(fixture.service)).rejects.toThrow(
       "Sprite label update did not persist the desired label set",
