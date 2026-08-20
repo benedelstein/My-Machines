@@ -15,6 +15,8 @@ import {
   SessionProvisionService,
   type SessionSetupTaskReporter,
 } from "../../src/modules/session-agent/services/session-provision.service";
+import { SessionGitRepoService } from
+  "../../src/modules/session-agent/services/session-git-repo.service";
 import type {
   SessionSetupOutputCollector,
 } from "../../src/modules/session-agent/services/session-setup-output.service";
@@ -181,7 +183,29 @@ export function createService(
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
   });
-  const serviceReference: { current: SessionProvisionService | null } = { current: null };
+  const createSpriteClient = (spriteName: string) =>
+    new WorkersSpriteClient(
+      spriteName,
+      "sprites-key",
+      "https://api.sprites.test",
+      createTestLogger(),
+    );
+  const gitRepoService = new SessionGitRepoService({
+    logger: createTestLogger(),
+    env: { WORKER_URL: "https://worker.test" },
+    createSpriteClient,
+    getServerState: () => serverState,
+    getClientState: () => clientState,
+    updateRepoCloned: (repoCloned) => updateServerState({ repoCloned }),
+    updateGitAuthMode: (gitAuthMode) => updateServerState({ gitAuthMode }),
+    updatePartialState,
+    retireGitProxySecret,
+    getSessionConnectorGatewayBase: () =>
+      serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
+    githubTokenProvider: {
+      getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
+    },
+  });
   const ensureRuntimeMigration = vi.fn(async (migrationId: string) => {
     switch (migrationId) {
       case "sprite.startup-toolchain": {
@@ -208,17 +232,11 @@ export function createService(
         if (!serverState.sessionConnectorId) {
           await ensureSessionConnector();
         }
-        await serviceReference.current?.reconcileGitEphemeralTokenCutover();
+        await gitRepoService.reconcileEphemeralTokenCutover();
         break;
       case "sprite.network-policy":
-        await serviceReference.current?.reconcileNetworkPolicy({
-          contractSchema: 1,
-          providerId: clientState.agentSettings.provider,
-          requestedNetwork: environmentSnapshot.network,
-          workerHostname: "worker.test",
-          connectorGatewayHostname: "api.sprites.test",
-          rules: [{ domain: "final", action: "allow" }],
-        });
+        await mockState.setNetworkPolicy([{ domain: "final", action: "allow" }]);
+        updateServerState({ finalNetworkPolicyApplied: true });
         break;
     }
     return { ok: true as const, value: { outcome: "applied" as const } };
@@ -232,32 +250,20 @@ export function createService(
       ...envOverrides,
     } as Env,
     spriteLifecycleClient: spriteLifecycleClient as never,
-    createSpriteClient: (spriteName) =>
-      new WorkersSpriteClient(
-        spriteName,
-        "sprites-key",
-        "https://api.sprites.test",
-        createTestLogger(),
-      ),
+    createSpriteClient,
     getServerState: () => serverState,
     getClientState: () => clientState,
     getEnvironmentSnapshot: () => environmentSnapshot,
     updateServerState,
     updatePartialState,
     synthesizeStatus: () => "preparing",
-    retireGitProxySecret,
-    getSessionConnectorGatewayBase: () =>
-      serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
+    gitRepoService,
     discardFreshSpriteSnapshot,
     onSpriteCreated,
     ensureRuntimeMigration,
-    githubTokenProvider: {
-      getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
-    },
     setupReporter,
     setupOutputCollector,
   });
-  serviceReference.current = service;
 
   return {
     service,

@@ -10,7 +10,6 @@ import type {
   SessionSetupRun,
   SessionSetupTask,
 } from "@repo/shared";
-import { dedent } from "@repo/shared";
 import type { Env } from "@/shared/types";
 import {
   buildBootstrapNetworkPolicy,
@@ -18,15 +17,9 @@ import {
   type SpriteResponse,
   type WorkersSpriteClient,
 } from "@repo/sprites-client";
-import { sha256 } from "@/shared/utils/crypto";
-import { sanitizeGitBranchName, shellQuote } from "@/shared/utils/git-branch";
-import type { GitHubAppResult } from "@/shared/types/github";
-import EPHEMERAL_GIT_CREDENTIAL_HELPER from "@repo/vm-agent/dist/git-credential-helper.bundle.js";
 import type { ServerState } from
   "../types/server-state.types";
 import type { RuntimeBoundaryLease } from "../types/runtime-boundary.types";
-import type { SpriteNetworkPolicyContract } from
-  "../types/runtime-migration-adopters.types";
 import type { RuntimeMigrationCoordinatorResult } from "../types/runtime-migration.types";
 import type { RuntimeMigrationId } from
   "./runtime-migration/runtime-migration-registry.service";
@@ -44,6 +37,7 @@ import {
   SessionStartupScriptService,
   type SessionStartupScriptRunResult,
 } from "./session-startup-script.service";
+import type { SessionGitRepoService } from "./session-git-repo.service";
 import type {
   SessionSetupOutputCollector,
   SetupOutputFinishResult,
@@ -88,28 +82,21 @@ export interface SessionProvisionServiceDeps {
   updateServerState: (partial: Partial<ServerState>) => void;
   updatePartialState: (partial: ProvisionClientStateUpdate) => void;
   synthesizeStatus: () => SessionStatus;
-  retireGitProxySecret: () => void;
-  getSessionConnectorGatewayBase: () => string | null;
+  gitRepoService: Pick<SessionGitRepoService, "ensureCloned">;
   discardFreshSpriteSnapshot?: () => void;
   onSpriteCreated?: (sprite: SpriteResponse) => void;
   ensureRuntimeMigration: (
     migrationId: RuntimeMigrationId,
     lease: RuntimeBoundaryLease,
   ) => Promise<RuntimeMigrationCoordinatorResult>;
-  githubTokenProvider: {
-    getReadOnlyTokenForRepo(
-      repoFullName: string,
-    ): Promise<GitHubAppResult<string>>;
-  };
   setupReporter?: SessionSetupTaskReporter;
   setupOutputCollector?: SessionSetupOutputCollector;
 }
 
 /**
- * Owns session VM provisioning for a SessionAgentDO: creating the sprite,
- * applying the network policy, cloning the repository, and configuring
- * git remotes. Each step is idempotent — skipped if the corresponding
- * checkpoint is already recorded in ServerState.
+ * Owns session VM provisioning for a SessionAgentDO: creating the sprite and
+ * coordinating repository setup, startup scripts, and runtime migrations.
+ * Each step is idempotent through its corresponding ServerState checkpoint.
  *
  * The SessionAgentDO owns this instance. All interaction is through the
  * injected deps so the provisioner has no reference to the DO class.
@@ -125,13 +112,10 @@ export class SessionProvisionService {
   private readonly updateServerState: SessionProvisionServiceDeps["updateServerState"];
   private readonly updatePartialState: SessionProvisionServiceDeps["updatePartialState"];
   private readonly synthesizeStatus: () => SessionStatus;
-  private readonly retireGitProxySecret: () => void;
-  private readonly getSessionConnectorGatewayBase:
-    SessionProvisionServiceDeps["getSessionConnectorGatewayBase"];
+  private readonly gitRepoService: SessionProvisionServiceDeps["gitRepoService"];
   private readonly discardFreshSpriteSnapshot: () => void;
   private readonly onSpriteCreated: (sprite: SpriteResponse) => void;
   private readonly ensureRuntimeMigration: SessionProvisionServiceDeps["ensureRuntimeMigration"];
-  private readonly githubTokenProvider: SessionProvisionServiceDeps["githubTokenProvider"];
   private readonly setupReporter: SessionProvisionServiceDeps["setupReporter"];
   private readonly setupOutputCollector: SessionProvisionServiceDeps["setupOutputCollector"];
   private readonly startupScriptService: SessionStartupScriptService;
@@ -151,12 +135,10 @@ export class SessionProvisionService {
     this.updateServerState = deps.updateServerState;
     this.updatePartialState = deps.updatePartialState;
     this.synthesizeStatus = deps.synthesizeStatus;
-    this.retireGitProxySecret = deps.retireGitProxySecret;
-    this.getSessionConnectorGatewayBase = deps.getSessionConnectorGatewayBase;
+    this.gitRepoService = deps.gitRepoService;
     this.discardFreshSpriteSnapshot = deps.discardFreshSpriteSnapshot ?? (() => {});
     this.onSpriteCreated = deps.onSpriteCreated ?? (() => {});
     this.ensureRuntimeMigration = deps.ensureRuntimeMigration;
-    this.githubTokenProvider = deps.githubTokenProvider;
     this.setupReporter = deps.setupReporter;
     this.setupOutputCollector = deps.setupOutputCollector;
     this.startupScriptService = new SessionStartupScriptService(this.logger);
@@ -311,10 +293,7 @@ export class SessionProvisionService {
     spriteName: string,
     lease: RuntimeBoundaryLease,
   ): Promise<void> {
-    if (!this.getServerState().repoCloned) {
-      await this.cloneRepo(spriteName);
-      this.updateServerState({ repoCloned: true });
-    }
+    await this.gitRepoService.ensureCloned(spriteName);
     await this.ensureTargetedMigration(
       GIT_EPHEMERAL_TOKEN_RUNTIME_MIGRATION_ID,
       lease,
@@ -398,169 +377,6 @@ export class SessionProvisionService {
       throw new Error("Sprite name is missing");
     }
     return spriteName;
-  }
-
-  /**
-   * Clones the repository onto the sprite and configures git remotes.
-   * Assumes the sprite is already created and the network policy is set.
-   */
-  private async cloneRepo(spriteName: string): Promise<void> {
-    const clientState = this.getClientState();
-    const repoFullName = clientState.repoFullName!;
-
-    const sprite = this.createSpriteClient(spriteName);
-
-    const githubRemoteUrl = `https://github.com/${repoFullName}.git`;
-
-    // Check if the repo is already cloned (sprite may be persistent)
-    const isCloned = await sprite.execWs(
-      `test -d ${WORKSPACE_DIR}/.git && echo 'exists' || echo 'empty'`,
-      {},
-    );
-    if (isCloned.stdout.includes("exists")) {
-      this.logger.info("Repo already cloned on sprite", {
-        fields: { repoFullName, spriteName },
-      });
-    } else {
-      this.logger.info("Cloning repo on sprite", {
-        fields: { repoFullName, spriteName },
-      });
-      await sprite.execWs(`mkdir -p ${WORKSPACE_DIR}`, {});
-
-      // Fetch a read-only token scoped to contents:read for the initial clone
-      const cloneTokenResult =
-        await this.githubTokenProvider.getReadOnlyTokenForRepo(repoFullName);
-      if (!cloneTokenResult.ok) {
-        throw new Error(cloneTokenResult.error.message);
-      }
-      const cloneToken = cloneTokenResult.value;
-      const basicAuth = btoa(`x-access-token:${cloneToken}`);
-
-      const cloneStart = Date.now();
-      const baseBranch = sanitizeGitBranchName(clientState.baseBranch);
-      const branchFlag = baseBranch ? `--branch ${shellQuote(baseBranch)} ` : "";
-      const cloneCommand = [
-        `git -c http.extraHeader="Authorization: Basic ${basicAuth}" clone`,
-        "--single-branch",
-        `${branchFlag}${shellQuote(githubRemoteUrl)}`,
-        shellQuote(WORKSPACE_DIR),
-      ].join(" ");
-      const cloneResult = await sprite.execWs(cloneCommand, {});
-      this.logger.info("Clone completed", {
-        fields: {
-          durationSeconds: Number(
-            ((Date.now() - cloneStart) / 1000).toFixed(1),
-          ),
-          exitCode: cloneResult.exitCode,
-          stderr: cloneResult.stderr.slice(0, 500),
-        },
-      });
-      if (cloneResult.exitCode !== 0) {
-        throw new Error(
-          `Clone failed (exit ${cloneResult.exitCode}): ${cloneResult.stderr}`,
-        );
-      }
-    }
-
-    // Detect the base branch (whatever branch the clone checked out)
-    const branchResult = await sprite.execWs(
-      `cd ${WORKSPACE_DIR} && git rev-parse --abbrev-ref HEAD`,
-      {},
-    );
-    const actualBaseBranch = sanitizeGitBranchName(branchResult.stdout) ?? "main";
-    const configuredBaseBranch = sanitizeGitBranchName(clientState.baseBranch);
-    if (configuredBaseBranch && actualBaseBranch !== configuredBaseBranch) {
-      this.logger.warn("Base branch does not match actual base branch", {
-        fields: {
-          configuredBaseBranch,
-          actualBaseBranch,
-        },
-      });
-    }
-    if (actualBaseBranch !== configuredBaseBranch) {
-      this.updatePartialState({ baseBranch: actualBaseBranch });
-    }
-
-  }
-
-  /** Reconciles and locally verifies the historical ephemeral-token Git cutover. */
-  async reconcileGitEphemeralTokenCutover(): Promise<void> {
-    const spriteName = this.getServerState().spriteName;
-    const sessionId = this.getServerState().sessionId;
-    const repoFullName = this.getClientState().repoFullName;
-    if (!spriteName || !sessionId || !repoFullName) {
-      throw new Error("Git cutover prerequisites are missing");
-    }
-    if (!this.getServerState().repoCloned) {
-      throw new Error("Repository must be cloned before Git cutover");
-    }
-    const sprite = this.createSpriteClient(spriteName);
-    const proxyBaseUrl = `${this.env.WORKER_URL}/git-proxy/${sessionId}`;
-    const cloneUrl = `${proxyBaseUrl}/github.com/${repoFullName}.git`;
-    const connectorGatewayBase = this.getSessionConnectorGatewayBase();
-    if (!connectorGatewayBase) {
-      throw new Error("Session connector gateway base is missing");
-    }
-    const helperPath = `/home/sprite/.local/bin/mm-git-credential-${sessionId}`;
-    const mintUrl =
-      `${connectorGatewayBase}/internal/session/${sessionId}/git-token`;
-    // The leading ! makes Git run the quoted helper command through the shell.
-    // Without it, Git treats the leading quote as part of a helper name.
-    const helperCommand = `!${[helperPath, cloneUrl, mintUrl]
-      .map(shellQuote)
-      .join(" ")}`;
-    const helperHash = await sha256(EPHEMERAL_GIT_CREDENTIAL_HELPER);
-    await sprite.writeFile(
-      helperPath,
-      EPHEMERAL_GIT_CREDENTIAL_HELPER,
-      { mode: "0700" },
-    );
-    const gitTokenSetupResult = await sprite.execWs(
-      dedent`
-      set -e
-      cd ${WORKSPACE_DIR}
-      git remote set-url origin ${shellQuote(cloneUrl)}
-      git remote set-url --push origin ${shellQuote(cloneUrl)}
-      git config user.email "agent@mymachines.dev"
-      git config user.name "My Machines"
-      git config --unset-all http.extraHeader || true
-      git config --unset-all "http.${proxyBaseUrl}/.extraHeader" || true
-      git config --unset-all credential.helper || true
-      git config credential.helper ""
-      git config --add ${shellQuote(`credential.${cloneUrl}.helper`)} ${shellQuote(helperCommand)}
-      git config ${shellQuote(`credential.${cloneUrl}.username`)} x-ephemeral-git-token
-      git config credential.useHttpPath true
-      git config ${shellQuote(`http.${proxyBaseUrl}/.proactiveAuth`)} basic
-      test "$(git remote get-url origin)" = ${shellQuote(cloneUrl)}
-      test "$(git remote get-url --push origin)" = ${shellQuote(cloneUrl)}
-      test "$(git config --get ${shellQuote(`credential.${cloneUrl}.helper`)})" = ${shellQuote(helperCommand)}
-      test "$(git config --get ${shellQuote(`credential.${cloneUrl}.username`)})" = x-ephemeral-git-token
-      test "$(git config --get credential.useHttpPath)" = true
-      test "$(git config --get ${shellQuote(`http.${proxyBaseUrl}/.proactiveAuth`)})" = basic
-      test "$(sha256sum ${shellQuote(helperPath)} | cut -d ' ' -f 1)" = ${shellQuote(helperHash)}
-    `,
-      {},
-    );
-    if (gitTokenSetupResult.exitCode !== 0) {
-      throw new Error(
-        `Ephemeral git token setup failed (exit ${gitTokenSetupResult.exitCode}): `
-        + gitTokenSetupResult.stderr,
-      );
-    }
-    this.retireGitProxySecret();
-    this.updateServerState({ gitAuthMode: "ephemeral_token" });
-  }
-
-  /** Applies the exact policy prepared by the runtime migration. */
-  async reconcileNetworkPolicy(contract: SpriteNetworkPolicyContract): Promise<void> {
-    const spriteName = this.getServerState().spriteName;
-    if (!spriteName) {
-      throw new Error("Sprite name is missing");
-    }
-    const sprite = this.createSpriteClient(spriteName);
-    const desiredRules = contract.rules.map((rule) => ({ ...rule }));
-    await sprite.setNetworkPolicy(desiredRules);
-    this.updateServerState({ finalNetworkPolicyApplied: true });
   }
 
   private async ensureTargetedMigration(

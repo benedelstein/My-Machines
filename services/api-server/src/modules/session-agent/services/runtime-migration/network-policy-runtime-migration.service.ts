@@ -38,7 +38,10 @@ export const networkPolicyRuntimeMigration = defineContractRuntimeMigration({
 
   apply: async ({ context, desired }) => {
     try {
-      await context.dependencies.reconcileNetworkPolicy(desired);
+      const sprite = context.dependencies.createSpriteClient();
+      const desiredRules = desired.rules.map((rule) => ({ ...rule }));
+      await sprite.setNetworkPolicy(desiredRules);
+      context.dependencies.updateServerState({ finalNetworkPolicyApplied: true });
       return success(undefined);
     } catch (error) {
       logRuntimeMigrationApplyFailure(

@@ -58,7 +58,6 @@ export function createMigrationDependencies(args: {
     },
     reconcileSessionConnector: vi.fn(async () => {}),
     reconcileGitEphemeralTokenCutover: vi.fn(async () => {}),
-    reconcileNetworkPolicy: vi.fn(async () => {}),
     env: {
       CODEX_MIN_VERSION: args.codexMinVersion,
       SPRITES_API_URL: "https://api.sprites.test",

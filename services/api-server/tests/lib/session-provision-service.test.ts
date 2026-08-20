@@ -5,6 +5,10 @@ import type { RuntimeBoundaryLease } from
   "../../src/modules/session-agent/types/runtime-boundary.types";
 import { WorkersSpriteClient } from "@repo/sprites-client";
 import { SessionProvisionService } from "../../src/modules/session-agent/services/session-provision.service";
+import {
+  SessionGitRepoService,
+  type SessionGitRepoServiceDeps,
+} from "../../src/modules/session-agent/services/session-git-repo.service";
 import { createTestLogger } from "./test-logger";
 import {
   completeTask,
@@ -29,6 +33,35 @@ vi.mock("@/modules/session-agent/services/runtime-migration/startup-toolchain/st
   const mocks = await import("./session-provision-mocks");
   return { ensureSpriteStartupToolchain: mocks.mockState.ensureSpriteStartupToolchain };
 });
+
+function createGitRepoService(
+  serverState: ReturnType<typeof createServerState>,
+  clientState: ReturnType<typeof createClientState>,
+  updatePartialState: SessionGitRepoServiceDeps["updatePartialState"],
+): SessionGitRepoService {
+  return new SessionGitRepoService({
+    logger: createTestLogger(),
+    env: { WORKER_URL: "https://worker.test" },
+    createSpriteClient: (spriteName) =>
+      new WorkersSpriteClient(
+        spriteName,
+        "sprites-key",
+        "https://api.sprites.test",
+        createTestLogger(),
+      ),
+    getServerState: () => serverState,
+    getClientState: () => clientState,
+    updateRepoCloned: (repoCloned) => Object.assign(serverState, { repoCloned }),
+    updateGitAuthMode: (gitAuthMode) => Object.assign(serverState, { gitAuthMode }),
+    updatePartialState,
+    retireGitProxySecret: vi.fn(),
+    getSessionConnectorGatewayBase: () => "https://gateway.test/conn-1",
+    githubTokenProvider: {
+      getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
+    },
+  });
+}
+
 describe("SessionProvisionService startup toolchain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -80,30 +113,6 @@ describe("SessionProvisionService startup toolchain", () => {
       "sprite.startup-toolchain",
       lease,
     );
-  });
-
-  it("accepts a successful no-content network-policy apply without readback", async () => {
-    const serverState = createServerState({ spriteName: "sprite-1" });
-    const { service, updateServerState } = createService(
-      serverState,
-      createClientState(),
-    );
-    mockState.setNetworkPolicy.mockResolvedValueOnce(undefined);
-
-    await service.reconcileNetworkPolicy({
-      contractSchema: 1,
-      providerId: "openai-codex",
-      requestedNetwork: { mode: "default" },
-      workerHostname: "worker.test",
-      connectorGatewayHostname: "api.sprites.test",
-      rules: [
-        { domain: "api.github.com", action: "allow" },
-        { domain: "*", action: "deny" },
-      ],
-    });
-
-    expect(mockState.setNetworkPolicy).toHaveBeenCalledOnce();
-    expect(updateServerState).toHaveBeenCalledWith({ finalNetworkPolicyApplied: true });
   });
 
   it("rechecks targeted ensure after migration success precedes task completion", async () => {
@@ -393,6 +402,13 @@ describe("SessionProvisionService startup toolchain", () => {
       resolvedAt: "2026-05-29T00:00:00.000Z",
       schemaVersion: 1 as const,
     };
+    const clientState = createClientState();
+    const updatePartialState = vi.fn();
+    const gitRepoService = createGitRepoService(
+      serverState,
+      clientState,
+      updatePartialState,
+    );
     const serviceWithScript = new SessionProvisionService({
       logger: createTestLogger(),
       env: {
@@ -414,13 +430,12 @@ describe("SessionProvisionService startup toolchain", () => {
           createTestLogger(),
         ),
       getServerState: () => serverState,
-      getClientState: () => createClientState(),
+      getClientState: () => clientState,
       getEnvironmentSnapshot: () => environmentSnapshot,
       updateServerState: (partial) => Object.assign(serverState, partial),
-      updatePartialState: vi.fn(),
+      updatePartialState,
       synthesizeStatus: () => "preparing",
-      retireGitProxySecret: vi.fn(),
-      getSessionConnectorGatewayBase: () => "https://gateway.test/conn-1",
+      gitRepoService,
       ensureRuntimeMigration: async (migrationId) => {
         if (migrationId === "sprite.startup-toolchain") {
           const result = await mockState.ensureSpriteStartupToolchain({});
@@ -439,9 +454,6 @@ describe("SessionProvisionService startup toolchain", () => {
           Object.assign(serverState, { finalNetworkPolicyApplied: true });
         }
         return { ok: true, value: { outcome: "applied" } } as const;
-      },
-      githubTokenProvider: {
-        getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },
     });
 
@@ -694,6 +706,12 @@ describe("SessionProvisionService startup toolchain", () => {
   it("records startup script failure and continues provisioning", async () => {
     const serverState = createServerState();
     const updatePartialState = vi.fn();
+    const clientState = createClientState();
+    const gitRepoService = createGitRepoService(
+      serverState,
+      clientState,
+      updatePartialState,
+    );
     mockState.execWs.mockImplementation(async (command: string) => {
       if (command.includes("timeout")) {
         mockState.events.push("startupScript");
@@ -738,15 +756,14 @@ describe("SessionProvisionService startup toolchain", () => {
           createTestLogger(),
         ),
       getServerState: () => serverState,
-      getClientState: () => createClientState(),
+      getClientState: () => clientState,
       getEnvironmentSnapshot: () => createEnvironmentSnapshot({
         startupScript: "pnpm install",
       }),
       updateServerState: (partial) => Object.assign(serverState, partial),
       updatePartialState,
       synthesizeStatus: () => "ready",
-      retireGitProxySecret: vi.fn(),
-      getSessionConnectorGatewayBase: () => "https://gateway.test/conn-1",
+      gitRepoService,
       ensureRuntimeMigration: async (migrationId) => {
         if (migrationId === "sprite.startup-toolchain") {
           const result = await mockState.ensureSpriteStartupToolchain({});
@@ -765,9 +782,6 @@ describe("SessionProvisionService startup toolchain", () => {
           Object.assign(serverState, { finalNetworkPolicyApplied: true });
         }
         return { ok: true, value: { outcome: "applied" } } as const;
-      },
-      githubTokenProvider: {
-        getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
       },
     });
 

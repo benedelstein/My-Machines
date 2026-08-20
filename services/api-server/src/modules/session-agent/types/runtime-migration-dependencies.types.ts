@@ -4,10 +4,7 @@ import type {
   SessionEnvironmentSnapshot,
 } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
-import type {
-  SessionConnectorContract,
-  SpriteNetworkPolicyContract,
-} from "./runtime-migration-adopters.types";
+import type { SessionConnectorContract } from "./runtime-migration-adopters.types";
 import type { ServerState } from "./server-state.types";
 
 /**
@@ -60,9 +57,6 @@ export interface RuntimeMigrationDependencies {
     readonly contract: SessionConnectorContract;
   }) => Promise<void>;
   readonly reconcileGitEphemeralTokenCutover: () => Promise<void>;
-  readonly reconcileNetworkPolicy: (
-    contract: SpriteNetworkPolicyContract,
-  ) => Promise<void>;
   readonly env: RuntimeMigrationEnv;
   readonly logger: Logger;
   // add other dependencies as needed

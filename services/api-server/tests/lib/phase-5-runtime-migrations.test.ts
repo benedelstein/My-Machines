@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SpritesError } from "@repo/sprites-client";
+import { SpritesError, type WorkersSpriteClient } from "@repo/sprites-client";
 import { RUNTIME_MIGRATIONS } from
   "../../src/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
 import { sessionConnectorRuntimeMigration } from
@@ -111,7 +111,9 @@ describe("Phase 5 runtime migrations", () => {
 
   it("derives network policy from the persisted snapshot and deployment inputs", async () => {
     const defaultDependencies = createMigrationDependencies();
+    const setNetworkPolicy = vi.fn(async () => {});
     const lockedDependencies = createMigrationDependencies({
+      sprite: { setNetworkPolicy } as unknown as WorkersSpriteClient,
       environmentSnapshot: {
         ...defaultDependencies.getEnvironmentSnapshot(),
         network: { mode: "locked" },
@@ -126,13 +128,13 @@ describe("Phase 5 runtime migrations", () => {
     }
     expect(defaultPrepared.value.revision).not.toEqual(lockedPrepared.value.revision);
     expect(await lockedPrepared.value.apply(1)).toEqual({ ok: true, value: undefined });
-    expect(lockedDependencies.reconcileNetworkPolicy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requestedNetwork: { mode: "locked" },
-        workerHostname: "worker.test",
-        connectorGatewayHostname: "api.sprites.test",
-      }),
-    );
+    expect(setNetworkPolicy).toHaveBeenCalledOnce();
+    expect(setNetworkPolicy).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ domain: "worker.test", action: "allow" }),
+      expect.objectContaining({ domain: "*", action: "deny" }),
+    ]));
+    expect(lockedDependencies.updateServerState)
+      .toHaveBeenCalledWith({ finalNetworkPolicyApplied: true });
   });
 
   it("turns adopter exceptions into secret-safe migration failures", async () => {

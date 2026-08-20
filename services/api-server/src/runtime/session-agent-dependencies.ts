@@ -57,6 +57,8 @@ import { RUNTIME_MIGRATIONS, type RuntimeMigrationId } from
   "@/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
 import { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
+import { SessionGitRepoService } from
+  "@/modules/session-agent/services/session-git-repo.service";
 import { SessionQueryService } from "@/modules/session-agent/services/session-query.service";
 import { SessionSetupOutputService } from
   "@/modules/session-agent/services/session-setup-output.service";
@@ -213,7 +215,21 @@ export function createSessionAgentDependencies(input: {
       env.SPRITES_API_URL,
       logger,
     );
+  const githubAppService = new GitHubAppService(env, logger);
   let freshSpriteSnapshot: SpriteResponse | null = null;
+  const gitRepoService = new SessionGitRepoService({
+    logger,
+    env,
+    createSpriteClient,
+    getServerState: host.getServerState,
+    getClientState: host.getClientState,
+    updateRepoCloned: (repoCloned) => host.updateServerState({ repoCloned }),
+    updateGitAuthMode: (gitAuthMode) => host.updateServerState({ gitAuthMode }),
+    updatePartialState: host.updatePartialState,
+    retireGitProxySecret: () => gitProxyService.retireGitProxySecret(),
+    getSessionConnectorGatewayBase: () => sessionConnectorService.getGatewayBase(),
+    githubTokenProvider: githubAppService,
+  });
   /**
    * Capability surface every runtime migration draws on. Adding an adopter
    * does not change this — the definition builds its own context from here.
@@ -234,9 +250,7 @@ export function createSessionAgentDependencies(input: {
     reconcileSessionConnector: (migrationInput) =>
       sessionConnectorService.reconcile(migrationInput),
     reconcileGitEphemeralTokenCutover: () =>
-      provisionService.reconcileGitEphemeralTokenCutover(),
-    reconcileNetworkPolicy: (contract) =>
-      provisionService.reconcileNetworkPolicy(contract),
+      gitRepoService.reconcileEphemeralTokenCutover(),
     env: {
       CODEX_MIN_VERSION: env.CODEX_MIN_VERSION,
       SPRITES_API_URL: env.SPRITES_API_URL,
@@ -245,7 +259,6 @@ export function createSessionAgentDependencies(input: {
     logger,
   };
   const attachmentService = new SessionAgentAttachmentProvider(env.DB);
-  const githubAppService = new GitHubAppService(env, logger);
   const notificationPublisher = new NotificationPublisher(env);
   const turnNotificationService = new SessionTurnNotificationService({
     notificationPublisher,
@@ -373,8 +386,7 @@ export function createSessionAgentDependencies(input: {
     updateServerState: host.updateServerState,
     updatePartialState: host.updatePartialState,
     synthesizeStatus: host.synthesizeStatus,
-    retireGitProxySecret: () => gitProxyService.retireGitProxySecret(),
-    getSessionConnectorGatewayBase: () => sessionConnectorService.getGatewayBase(),
+    gitRepoService,
     discardFreshSpriteSnapshot: () => {
       freshSpriteSnapshot = null;
     },
@@ -383,7 +395,6 @@ export function createSessionAgentDependencies(input: {
     },
     ensureRuntimeMigration: (migrationId, lease) =>
       runtimeMigrationCoordinator.ensureMigration(migrationId, runtimeMigrationDependencies, lease),
-    githubTokenProvider: githubAppService,
     setupReporter: {
       startTask: (taskId) => setupRunService.startTask(taskId),
       completeTask: (taskId, output) => setupRunService.completeTask(taskId, output),
