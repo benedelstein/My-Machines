@@ -10,8 +10,9 @@ import {
 
 /**
  * Internal webhook routes called by the vm-agent process running on the
- * sprite. Each route authenticates with a per-session bearer token, then
- * forwards into the owning DO.
+ * sprite. Connector-backed sessions receive a gateway-injected bearer
+ * credential; legacy sessions send the Sprite-held bearer token directly.
+ * Each route forwards the credential into the owning DO for validation.
  *
  * Traffic shape:
  *   POST /internal/session/:sessionId/chunks

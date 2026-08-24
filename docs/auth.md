@@ -210,7 +210,7 @@ never an authentication gate.
   installation credential.
 - **Preview-origin allowlist**: `PREVIEW_ORIGIN_ALLOWLIST_REGEX` pins the Vercel
   project name *and* team slug as literals (e.g.
-  `^https://cloude-code-[a-z0-9][a-z0-9-]*-benedelsteins-projects\.vercel\.app$`).
+  `^https://my-machines-[a-z0-9][a-z0-9-]*-benedelsteins-projects\.vercel\.app$`).
   Vercel team slugs are globally unique. The prod origin (`WEB_ORIGIN`) is
   exempt. Validated both on write and on read.
 - **Allowlist**: only GitHub logins in `ALLOWED_GITHUB_LOGINS` can authenticate.
