@@ -1,12 +1,17 @@
 import type { NetworkAccessConfig, ProviderId } from "@repo/shared";
 
+/** Exact deployment-owned labels for the session's Sprite. */
+export type SessionSpriteLabelsContract = {
+  readonly contractSchema: 1;
+  readonly labels: readonly string[];
+};
+
 /** Functional connector state; allocated identity and credentials are excluded. */
 export type SessionConnectorContract = {
   readonly contractSchema: 1;
   readonly provider: "custom_api";
   readonly baseApiUrl: string;
   readonly testUrl: string;
-  readonly spriteLabels: readonly string[];
   readonly accessPolicy: {
     readonly allowedEndpoints: readonly string[];
     readonly blockedEndpoints: readonly string[];

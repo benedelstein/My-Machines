@@ -54,11 +54,13 @@ import { SessionProviderConnectionService } from
 import { RuntimeMigrationCoordinator } from
   "@/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
 import { RUNTIME_MIGRATIONS, type RuntimeMigrationId } from
-  "@/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-registry";
 import { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import { SessionGitRepoService } from
   "@/modules/session-agent/services/session-git-repo.service";
+import { SessionSpriteLabelsService } from
+  "@/modules/session-agent/services/session-sprite-labels.service";
 import { SessionQueryService } from "@/modules/session-agent/services/session-query.service";
 import { SessionSetupOutputService } from
   "@/modules/session-agent/services/session-setup-output.service";
@@ -217,6 +219,19 @@ export function createSessionAgentDependencies(input: {
     );
   const githubAppService = new GitHubAppService(env, logger);
   let freshSpriteSnapshot: SpriteResponse | null = null;
+  const sessionSpriteLabelsService = new SessionSpriteLabelsService({
+    logger,
+    spriteLifecycleClient,
+    getSpriteIdentity: () => {
+      const { sessionId, spriteName } = host.getServerState();
+      return { sessionId, spriteName };
+    },
+    takeFreshSpriteSnapshot: () => {
+      const snapshot = freshSpriteSnapshot;
+      freshSpriteSnapshot = null;
+      return snapshot;
+    },
+  });
   const gitRepoService = new SessionGitRepoService({
     logger,
     env,
@@ -247,6 +262,8 @@ export function createSessionAgentDependencies(input: {
       return createSpriteClient(spriteName);
     },
     getEnvironmentSnapshot: () => environmentSnapshotRepository.get(),
+    reconcileSessionSpriteLabels: (contract) =>
+      sessionSpriteLabelsService.reconcile(contract),
     reconcileSessionConnector: (migrationInput) =>
       sessionConnectorService.reconcile(migrationInput),
     reconcileGitEphemeralTokenCutover: () =>
@@ -364,16 +381,10 @@ export function createSessionAgentDependencies(input: {
   const sessionConnectorService: SessionConnectorService = new SessionConnectorService({
     logger,
     env,
-    spriteLifecycleClient,
     repository: new SessionConnectorsRepository(env.DB),
     getServerState: host.getServerState,
     updateServerState: host.updateServerState,
     ensureWebhookToken: () => processManager.ensureWebhookToken(),
-    takeFreshSpriteSnapshot: () => {
-      const snapshot = freshSpriteSnapshot;
-      freshSpriteSnapshot = null;
-      return snapshot;
-    },
   });
   const provisionService = new SessionProvisionService({
     logger,

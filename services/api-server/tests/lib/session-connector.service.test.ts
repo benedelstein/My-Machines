@@ -1,10 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { failure, success, type Result, type SessionEnvironmentSnapshot } from "@repo/shared";
+import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
   CreateCustomApiConnectorRequest,
   SpriteConnectorsClient,
-  SpriteResponse,
   SpriteConnector,
   SpritesRestError,
 } from "@repo/sprites-client";
@@ -17,10 +16,8 @@ import type { SessionConnectorContract } from
   "../../src/modules/session-agent/types/runtime-migration-adopters.types";
 import type { ServerState } from
   "../../src/modules/session-agent/types/server-state.types";
-import {
-  buildSessionSpriteLabels,
-  SessionConnectorService,
-} from "../../src/modules/session-agent/services/session-connector.service";
+import { SessionConnectorService } from
+  "../../src/modules/session-agent/services/session-connector.service";
 import { createTestLogger } from "./test-logger";
 
 class FakeSpritesClient implements SpriteConnectorsClient {
@@ -136,22 +133,6 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
   };
 }
 
-function createEnvironmentSnapshot(
-  overrides: Partial<SessionEnvironmentSnapshot> = {},
-): SessionEnvironmentSnapshot {
-  return {
-    sourceEnvironmentId: null,
-    sourceEnvironmentName: null,
-    repoId: 1,
-    network: { mode: "default" },
-    plainEnvVars: {},
-    startupScript: null,
-    resolvedAt: "2026-05-29T00:00:00.000Z",
-    schemaVersion: 1,
-    ...overrides,
-  };
-}
-
 function createFakeRepository(operations: string[]) {
   const rows = new Map<string, SessionConnectorRecord>();
   const repository = {
@@ -193,8 +174,6 @@ function createFakeRepository(operations: string[]) {
 
 function createService(args: {
   serverState?: ServerState;
-  spriteLabels?: string[];
-  freshSpriteSnapshot?: SpriteResponse | null;
 } = {}) {
   const serverState = args.serverState ?? createServerState();
   const spritesClient = new FakeSpritesClient();
@@ -205,24 +184,7 @@ function createService(args: {
       spritesClient.operations.push(`state:${partial.sessionConnectorId}`);
     }
   });
-  const updateSprite = vi.fn(async (_name: string, request: { labels?: string[] }) => ({
-    name: "sprite-1",
-    labels: request.labels,
-  }));
-  const spriteLifecycleClient = {
-    getSprite: vi.fn(async () => ({
-      name: "sprite-1",
-      labels: args.spriteLabels ?? ["session:session-1"],
-    })),
-    updateSprite,
-  };
   const ensureWebhookToken = vi.fn(() => "webhook-token-value");
-  let freshSpriteSnapshot = args.freshSpriteSnapshot ?? null;
-  const takeFreshSpriteSnapshot = vi.fn(() => {
-    const snapshot = freshSpriteSnapshot;
-    freshSpriteSnapshot = null;
-    return snapshot;
-  });
 
   const service = new SessionConnectorService({
     logger: createTestLogger(),
@@ -231,12 +193,10 @@ function createService(args: {
       SPRITES_API_URL: "https://api.sprites.test",
       WORKER_URL: "https://worker.test",
     } as Env,
-    spriteLifecycleClient: spriteLifecycleClient as never,
     repository: repository as unknown as SessionConnectorsRepository,
     getServerState: () => serverState,
     updateServerState,
     ensureWebhookToken,
-    takeFreshSpriteSnapshot,
     spritesClient,
   });
 
@@ -245,25 +205,17 @@ function createService(args: {
     serverState,
     spritesClient,
     repository,
-    spriteLifecycleClient,
     updateServerState,
     ensureWebhookToken,
-    takeFreshSpriteSnapshot,
   };
 }
 
-function createConnectorContract(
-  snapshot: SessionEnvironmentSnapshot = createEnvironmentSnapshot(),
-): SessionConnectorContract {
+function createConnectorContract(): SessionConnectorContract {
   return {
     contractSchema: 1,
     provider: "custom_api",
     baseApiUrl: "https://worker.test",
     testUrl: "https://worker.test/health",
-    spriteLabels: buildSessionSpriteLabels(
-      "session-1",
-      snapshot.sourceEnvironmentId,
-    ),
     accessPolicy: {
       allowedEndpoints: [
         "/internal/session/session-1/chunks",
@@ -322,16 +274,6 @@ async function recordConnector(
   repository.upsertActive.mockClear();
 }
 
-describe("buildSessionSpriteLabels", () => {
-  it("includes the environment label only when an environment exists", () => {
-    expect(buildSessionSpriteLabels("session-1", null)).toEqual(["session:session-1"]);
-    expect(buildSessionSpriteLabels("session-1", "environment-1")).toEqual([
-      "session:session-1",
-      "env:environment-1",
-    ]);
-  });
-});
-
 describe("SessionConnectorService.reconcile", () => {
   it("creates, verifies, and checkpoints a connector without enumerating providers", async () => {
     const { service, serverState, spritesClient, repository } = createService();
@@ -352,69 +294,6 @@ describe("SessionConnectorService.reconcile", () => {
       status: "active",
     });
     expect(spritesClient.listCalls).toBe(0);
-  });
-
-  it("uses a matching fresh Sprite snapshot once and avoids the immediate read", async () => {
-    const fixture = createService({
-      freshSpriteSnapshot: {
-        name: "sprite-1",
-        labels: ["session:session-1"],
-      },
-    });
-
-    await reconcileConnector(fixture.service);
-    expect(fixture.spriteLifecycleClient.getSprite).not.toHaveBeenCalled();
-
-    await reconcileConnector(fixture.service);
-    expect(fixture.spriteLifecycleClient.getSprite).toHaveBeenCalledOnce();
-    expect(fixture.takeFreshSpriteSnapshot).toHaveBeenCalledTimes(2);
-  });
-
-  it.each([
-    ["missing", null],
-    ["name mismatch", { name: "different-sprite", labels: ["session:session-1"] }],
-    ["labels omitted", { name: "sprite-1" }],
-  ])("falls back to GET when the fresh snapshot is %s", async (_label, snapshot) => {
-    const fixture = createService({ freshSpriteSnapshot: snapshot });
-
-    await reconcileConnector(fixture.service);
-
-    expect(fixture.spriteLifecycleClient.getSprite).toHaveBeenCalledOnce();
-    expect(fixture.spritesClient.listCalls).toBe(0);
-  });
-
-  it("replaces stale labels with the exact desired label set", async () => {
-    const contract = createConnectorContract(createEnvironmentSnapshot({
-      sourceEnvironmentId: "environment-1",
-    }));
-    const fixture = createService({
-      freshSpriteSnapshot: {
-        name: "sprite-1",
-        labels: ["session:stale-session", "env:stale-environment", "unrelated"],
-      },
-    });
-
-    await reconcileConnector(fixture.service, contract);
-
-    expect(fixture.spriteLifecycleClient.getSprite).not.toHaveBeenCalled();
-    expect(fixture.spriteLifecycleClient.updateSprite).toHaveBeenCalledWith("sprite-1", {
-      labels: ["session:session-1", "env:environment-1"],
-    });
-  });
-
-  it("fails before connector reads when the updated label set is not exact", async () => {
-    const fixture = createService({ spriteLabels: ["unrelated"] });
-    fixture.spriteLifecycleClient.updateSprite.mockResolvedValue({
-      name: "sprite-1",
-      labels: ["session:session-1", "unrelated"],
-    });
-
-    await expect(reconcileConnector(fixture.service)).rejects.toThrow(
-      "Sprite label update did not persist the desired label set",
-    );
-
-    expect(fixture.spritesClient.getIds).toHaveLength(0);
-    expect(fixture.spritesClient.createdRequests).toHaveLength(0);
   });
 
   it("reuses a structurally compatible connector strictly by ServerState ID", async () => {

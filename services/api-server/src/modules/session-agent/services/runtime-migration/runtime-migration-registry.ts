@@ -3,6 +3,8 @@ import type { RuntimeMigrationDefinition } from
 import { assertRuntimeMigrationRegistry } from "./runtime-migration-definition.service";
 import { startupToolchainRuntimeMigration } from
   "./startup-toolchain-runtime-migration.service";
+import { sessionSpriteLabelsRuntimeMigration } from
+  "./session-sprite-labels-runtime-migration.service";
 import { sessionConnectorRuntimeMigration } from
   "./session-connector-runtime-migration.service";
 import { gitEphemeralTokenRuntimeMigration } from
@@ -12,6 +14,7 @@ import { networkPolicyRuntimeMigration } from
 
 export const RUNTIME_MIGRATIONS = [
   startupToolchainRuntimeMigration,
+  sessionSpriteLabelsRuntimeMigration,
   sessionConnectorRuntimeMigration,
   gitEphemeralTokenRuntimeMigration,
   networkPolicyRuntimeMigration,

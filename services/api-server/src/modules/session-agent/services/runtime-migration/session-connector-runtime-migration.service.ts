@@ -1,7 +1,6 @@
 import { failure, success } from "@repo/shared";
 import type { SessionConnectorContract } from
   "@/modules/session-agent/types/runtime-migration-adopters.types";
-import { buildSessionSpriteLabels } from "../session-connector.service";
 import { logRuntimeMigrationApplyFailure } from
   "./runtime-migration-apply-failure.service";
 import { defineContractRuntimeMigration } from "./runtime-migration-definition.service";
@@ -22,10 +21,9 @@ export const sessionConnectorRuntimeMigration = defineContractRuntimeMigration({
   buildContext: (dependencies) => ({
     dependencies,
     serverState: dependencies.getServerState(),
-    snapshot: dependencies.getEnvironmentSnapshot(),
   }),
 
-  buildContract: ({ dependencies, serverState, snapshot }): SessionConnectorContract => {
+  buildContract: ({ dependencies, serverState }): SessionConnectorContract => {
     if (!serverState.sessionId) {
       throw new Error("Session id is missing");
     }
@@ -35,10 +33,6 @@ export const sessionConnectorRuntimeMigration = defineContractRuntimeMigration({
       provider: "custom_api",
       baseApiUrl: workerUrl,
       testUrl: `${workerUrl}/health`,
-      spriteLabels: buildSessionSpriteLabels(
-        serverState.sessionId,
-        snapshot.sourceEnvironmentId,
-      ),
       accessPolicy: {
         allowedEndpoints: connectorEndpoints(serverState.sessionId),
         blockedEndpoints: [],

@@ -68,7 +68,7 @@ import type { SessionProviderConnectionService } from
 import type { RuntimeMigrationCoordinator } from
   "@/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
 import type { RuntimeMigrationId } from
-  "@/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
+  "@/modules/session-agent/services/runtime-migration/runtime-migration-registry";
 import type { SessionProvisionService } from
   "@/modules/session-agent/services/session-provision.service";
 import type { SessionQueryService } from

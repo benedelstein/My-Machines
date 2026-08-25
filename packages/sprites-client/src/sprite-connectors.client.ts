@@ -102,7 +102,7 @@ export class HttpSpriteConnectorsClient implements SpriteConnectorsClient {
     policy: AccessPolicy,
   ): Promise<Result<SpriteConnector, SpritesRestError>> {
     const response = await this.fetch(connectorPath(connectorId), {
-      method: "PUT",
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ access_policy: mapAccessPolicyRequest(policy) }),
     });

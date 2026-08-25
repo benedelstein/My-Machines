@@ -4,7 +4,10 @@ import type {
   SessionEnvironmentSnapshot,
 } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
-import type { SessionConnectorContract } from "./runtime-migration-adopters.types";
+import type {
+  SessionConnectorContract,
+  SessionSpriteLabelsContract,
+} from "./runtime-migration-adopters.types";
 import type { ServerState } from "./server-state.types";
 
 /**
@@ -53,6 +56,9 @@ export interface RuntimeMigrationDependencies {
   /** Client for the session's current Sprite. Throws before provisioning. */
   readonly createSpriteClient: () => WorkersSpriteClient;
   readonly getEnvironmentSnapshot: () => SessionEnvironmentSnapshot;
+  readonly reconcileSessionSpriteLabels: (
+    contract: SessionSpriteLabelsContract,
+  ) => Promise<void>;
   readonly reconcileSessionConnector: (input: {
     readonly contract: SessionConnectorContract;
   }) => Promise<void>;

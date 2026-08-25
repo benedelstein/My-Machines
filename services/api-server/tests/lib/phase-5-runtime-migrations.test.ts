@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { SpritesError, type WorkersSpriteClient } from "@repo/sprites-client";
 import { RUNTIME_MIGRATIONS } from
-  "../../src/modules/session-agent/services/runtime-migration/runtime-migration-registry.service";
+  "../../src/modules/session-agent/services/runtime-migration/runtime-migration-registry";
 import { sessionConnectorRuntimeMigration } from
   "../../src/modules/session-agent/services/runtime-migration/session-connector-runtime-migration.service";
+import { sessionSpriteLabelsRuntimeMigration } from
+  "../../src/modules/session-agent/services/runtime-migration/session-sprite-labels-runtime-migration.service";
 import { gitEphemeralTokenRuntimeMigration } from
   "../../src/modules/session-agent/services/runtime-migration/git-ephemeral-token-runtime-migration.service";
 import { networkPolicyRuntimeMigration } from
@@ -13,15 +15,47 @@ import { hashRuntimeMigrationContract } from
   "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
 
 describe("Phase 5 runtime migrations", () => {
-  it("pins the exact four-entry registry without the reusable process adopter", () => {
+  it("pins the exact five-entry registry without the reusable process adopter", () => {
     expect(RUNTIME_MIGRATIONS.map((migration) => migration.id)).toEqual([
       "sprite.startup-toolchain",
+      "sprite.session-labels",
       "session.connector-resource",
       "sprite.git-ephemeral-token-cutover",
       "sprite.network-policy",
     ]);
     expect(RUNTIME_MIGRATIONS.some((migration) => migration.id === "agent.reusable-process"))
       .toBe(false);
+  });
+
+  it("derives and reconciles the exact Sprite label contract independently", async () => {
+    const dependencies = createMigrationDependencies({
+      environmentSnapshot: {
+        ...createMigrationDependencies().getEnvironmentSnapshot(),
+        sourceEnvironmentId: "environment-1",
+      },
+    });
+    const prepared = await sessionSpriteLabelsRuntimeMigration.prepare(dependencies);
+
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) {
+      return;
+    }
+    expect(await prepared.value.apply(2)).toEqual({ ok: true, value: undefined });
+    expect(dependencies.reconcileSessionSpriteLabels).toHaveBeenCalledWith({
+      contractSchema: 1,
+      labels: ["session:session-1", "env:environment-1"],
+    });
+    const contract = vi.mocked(dependencies.reconcileSessionSpriteLabels).mock.calls[0]?.[0];
+    expect(prepared.value.revision).toEqual({
+      kind: "contract",
+      hash: await hashRuntimeMigrationContract("sprite.session-labels", contract!),
+    });
+    await expect(hashRuntimeMigrationContract("sprite.session-labels", {
+      ...contract!,
+      labels: ["session:session-1"],
+    })).resolves.not.toBe(
+      prepared.value.revision.kind === "contract" ? prepared.value.revision.hash : "",
+    );
   });
 
   it("builds connector desired state without allocated identity or webhook credentials", async () => {
@@ -42,7 +76,6 @@ describe("Phase 5 runtime migrations", () => {
         provider: "custom_api",
         baseApiUrl: "https://worker.test",
         testUrl: "https://worker.test/health",
-        spriteLabels: ["session:session-1"],
         accessPolicy: {
           allowedEndpoints: [
             "/internal/session/session-1/chunks",
@@ -67,7 +100,6 @@ describe("Phase 5 runtime migrations", () => {
       { ...contract, provider: "other_provider" },
       { ...contract, baseApiUrl: "https://different-worker.test" },
       { ...contract, testUrl: "https://worker.test/different-health" },
-      { ...contract, spriteLabels: [...contract.spriteLabels, "env:changed"] },
       {
         ...contract,
         accessPolicy: {

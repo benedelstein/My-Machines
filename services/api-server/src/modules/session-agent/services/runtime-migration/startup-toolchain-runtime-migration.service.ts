@@ -2,6 +2,7 @@ import { failure, success, type Logger } from "@repo/shared";
 import type { WorkersSpriteClient } from "@repo/sprites-client";
 import type { StartupToolchainCheckpoint } from
   "@/modules/session-agent/types/startup-toolchain.types";
+import { memoizeOnce } from "@/shared/utils/memoize-once";
 import {
   ensurePreparedSpriteStartupToolchain,
   prepareStartupToolchain,
@@ -21,18 +22,6 @@ export interface StartupToolchainMigrationContext {
   readonly updateCheckpoint: (checkpoint: StartupToolchainCheckpoint) => void;
 }
 
-function once<T>(build: () => T): () => T {
-  let value: T;
-  let built = false;
-  return () => {
-    if (!built) {
-      value = build();
-      built = true;
-    }
-    return value;
-  };
-}
-
 export const startupToolchainRuntimeMigration = defineContractRuntimeMigration({
   id: STARTUP_TOOLCHAIN_RUNTIME_MIGRATION_ID,
   description: "Keep the provider runtime toolchain current",
@@ -40,7 +29,7 @@ export const startupToolchainRuntimeMigration = defineContractRuntimeMigration({
   buildContext: (dependencies): StartupToolchainMigrationContext => {
     const logger = dependencies.logger.scope("startup-toolchain-runtime-migration");
     return {
-      getPrepared: once(() => prepareStartupToolchain({
+      getPrepared: memoizeOnce(() => prepareStartupToolchain({
         providerId: dependencies.getClientState().agentSettings.provider,
         codexMinVersion: dependencies.env.CODEX_MIN_VERSION,
         logger,

@@ -5,7 +5,7 @@ import type {
   RuntimeMigrationDependencies,
 } from "@/modules/session-agent/types/runtime-migration.types";
 import type { RuntimeMigrationCoordinator } from "./runtime-migration-coordinator.service";
-import type { RuntimeMigrationId } from "./runtime-migration-registry.service";
+import type { RuntimeMigrationId } from "./runtime-migration-registry";
 import type { SessionProvisionService } from "../session-provision.service";
 
 type Assert<Condition extends true> = Condition;

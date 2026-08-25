@@ -52,16 +52,17 @@ task group 8. The production registry contains only `sprite.startup-toolchain`.
 ## Phase 5 — Connector, Git, and Network Adopters
 
 Scope: Phase 5 setup call sites from task group 7 and task group 10. The
-production registry is toolchain, connector, Git cutover, then network policy.
+production registry is toolchain, Sprite labels, connector, Git cutover, then
+network policy.
 
-- [x] P5.1 Append `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and `sprite.network-policy` without reordering `sprite.startup-toolchain`.
+- [x] P5.1 Append `sprite.session-labels`, `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and `sprite.network-policy` without reordering `sprite.startup-toolchain`.
 - [x] P5.2 Add targeted setup ensures only at each complete postcondition and retain all legacy cleanup material required for rollback.
 - [x] P5.3 Prove the production registry does not contain `agent.reusable-process` and no contract-driven process termination occurs.
 - [ ] P5.4 Canary connector disagreement, uncertain create, existing-clone Git repair, policy update, active-turn deferral, and late-waking legacy sessions.
   - [x] On 2026-08-14, use a late-waking completed local session to verify active-turn deferral occurs before attempt writes or provider calls.
   - [x] After clearing the active turn, verify connector ID disagreement repairs ServerState from the existing external connector and restores `/health`.
   - [x] Verify the same pass repairs an existing clone's `credential.useHttpPath`, replaces a drifted two-rule network policy, and records each adopter once in registry order.
-  - [x] Restart `pnpm dev:local` and verify all four migrations are `current`, with unchanged attempt counts and timestamps and no repeated provider mutations.
+  - [x] Restart `pnpm dev:local` and verify all active migrations are `current`, with unchanged attempt counts and timestamps and no repeated provider mutations.
   - [ ] Run the exact uncertain-create response-loss canary cohort; automated coverage exists, but this local run did not inject a lost provider response.
 - [ ] P5.5 Complete the legacy end-to-end cohort and an observation window before Phase 6.
 
@@ -221,7 +222,7 @@ marked against that decision.
 - [ ] 9.4a Document the known reuse gap with a code TODO: a reused process keeps its spawn-time credentials; a follow-up change delivers refreshed credentials on each dispatch to an existing process (for example as a per-turn NDJSON credential payload applied before the turn).
 - [ ] 9.4b Reject an obviously active second chat before expensive preparation, then retain the authoritative mutex-held active check for race safety.
 - [ ] 9.5 Exclude the legacy bearer webhook token and connector-held webhook credential from the initial process contract; document that rotation alone does not restart a reusable process.
-- [ ] 9.6 In Phase 6 append `agent.reusable-process` as the last migration after the unchanged four-entry Phase 5 registry prefix.
+- [ ] 9.6 In Phase 6 append `agent.reusable-process` as the last migration after the unchanged five-entry Phase 5 registry prefix.
 - [ ] 9.7 Use the runtime migration repository as the sole process-contract checkpoint; do not add `agentProcessContractHash` to ServerState.
 - [ ] 9.8 Clear process ID and run ID together while preserving provider `agentSessionId`.
 - [ ] 9.9 Change process termination to return `confirmed_killed`, `already_gone`, or typed `failed`.
@@ -240,8 +241,10 @@ marked against that decision.
 ## 10. Connector, Git, and Network Migrations — Phase 5
 
 - [x] 10.1 Extend `@repo/sprites-client` with the official connector access-policy update operation and parsed response types if not already present.
-- [x] 10.2 Build `SessionConnectorContract` from provider, base/test URLs, required labels, and allowed/blocked endpoints; exclude the webhook token, which `apply` ensures exists locally before minting and which is not rotated today.
+- [x] 10.2 Build `SessionConnectorContract` from provider, base/test URLs, and allowed/blocked endpoints; exclude the webhook token, which `apply` ensures exists locally before minting and which is not rotated today.
+- [x] 10.2a Build `SessionSpriteLabelsContract` from the session id and persisted environment snapshot, and reconcile its exact label set through a dedicated service before connector reconciliation.
 - [x] 10.3 Exclude allocated connector ID and incidental connector name from the desired contract.
+- [x] 10.3a Register `sprite.session-labels` as an awaited contract migration immediately before `session.connector-resource`.
 - [x] 10.4 Register `session.connector-resource` as an awaited contract migration.
 - [x] 10.5 Extract an idempotent connector reconciler that treats external state as authoritative, ServerState ID as a hint, D1 as a mirror, and writes ServerState last.
 - [x] 10.6 Update and read back policy-only changes, including newly allowed internal endpoints.
@@ -257,11 +260,12 @@ marked against that decision.
 - [x] 10.15 Treat a successful provider policy mutation response as the apply postcondition; do not add policy readback or endpoint reachability to readiness.
 - [x] 10.16 Preserve the current behavior that source environment edits do not mutate existing session snapshots.
 - [ ] 10.17 Add tests showing an intentional future snapshot-row update would change the network and process contracts without coordinator redesign.
-- [x] 10.18 Add the Phase 5 registry order: toolchain, connector, Git cutover, network policy; explicitly keep reusable process unregistered until Phase 6.
+- [x] 10.18 Add the Phase 5 registry order: toolchain, Sprite labels, connector, Git cutover, network policy; explicitly keep reusable process unregistered until Phase 6.
 - [ ] 10.19 Add an end-to-end Phase 5 legacy-session test with terminal setup, existing clone, connector creation/reuse, label repair, Git cutover, network policy, and next-turn gateway webhook delivery. Keep old-process termination in the Phase 6 process-adopter validation.
 - [x] 10.20 Add connector tests for endpoint addition, policy correction, base URL change, missing checkpointed connector, abandoned create, D1 disagreement, and no secret leakage.
+- [x] 10.20a Add focused label-service tests for fresh-snapshot reuse, authoritative fallback, no-op, exact replacement, omitted labels, and failed update verification.
 - [ ] 10.21 Define but do not prematurely enable a later versioned cleanup migration for obsolete Sprite-held Git/webhook delivery material; retain the connector-injected server-held webhook credential.
-- [x] 10.22 Assert the Phase 5 production registry exactly matches its four-entry snapshot and cannot perform contract-driven process termination.
+- [x] 10.22 Assert the Phase 5 production registry exactly matches its five-entry snapshot and cannot perform contract-driven process termination.
 
 ## 11. Extensibility and Regression Scenarios — Engine Fixtures in Phase 3, Adopter Regressions Thereafter
 
@@ -285,7 +289,7 @@ marked against that decision.
 - [ ] 12.5 Add an operator-visible query surface for pending/failed runtime migration records without exposing secret inputs; do not keep an unused repository-wide list API as a placeholder.
 - [x] 12.6 Document forward-only local/version rules, contract rollback semantics, compensating migrations, contract retirement, and preparation/cutover/cleanup windows.
 - [ ] 12.7 Run separate canary cohorts: Phase 3 empty registry; Phase 4 new/completed/incomplete setup and toolchain adoption; Phase 5 stale rows, active turns, and connector disagreement; Phase 6 idle persistent processes.
-- [ ] 12.8 Measure each adopter backlog separately: toolchain checks in Phase 4, connector/Git/network changes in Phase 5, and idle process terminations in Phase 6.
+- [ ] 12.8 Measure each adopter backlog separately: toolchain checks in Phase 4, label/connector/Git/network changes in Phase 5, and idle process terminations in Phase 6.
 - [ ] 12.9 Keep legacy ServerState toolchain compatibility until canaries prove migration-record adoption, then remove it through the planned local migration.
 
 ## 13. Validation — Required Before Every Phase Advances

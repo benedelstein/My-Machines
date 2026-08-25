@@ -56,6 +56,7 @@ export function createMigrationDependencies(args: {
       resolvedAt: "2026-05-29T00:00:00.000Z",
       schemaVersion: 1,
     },
+    reconcileSessionSpriteLabels: vi.fn(async () => {}),
     reconcileSessionConnector: vi.fn(async () => {}),
     reconcileGitEphemeralTokenCutover: vi.fn(async () => {}),
     env: {

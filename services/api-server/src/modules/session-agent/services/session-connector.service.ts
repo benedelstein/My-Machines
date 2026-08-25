@@ -5,8 +5,6 @@ import {
   type AccessPolicy,
   type SpriteConnector,
   type SpriteConnectorsClient,
-  type SpriteLifecycleClient,
-  type SpriteResponse,
 } from "@repo/sprites-client";
 import type { Env } from "@/shared/types";
 import { ConnectorProvisioningRequestSchema, deleteConnectorAndVerify } from
@@ -18,35 +16,13 @@ import type { SessionConnectorContract } from
 import type { ServerState } from
   "../types/server-state.types";
 
-/**
- * Builds the Sprite labels a session's VM must carry: the unique session
- * label the internal connector's access policy binds to, plus the source
- * environment label when the session was created from an environment.
- *
- * @param sessionId - The session id (also the Sprite name).
- * @param sourceEnvironmentId - The session's source environment id, if any.
- * @returns The full label set for the session's Sprite.
- */
-export function buildSessionSpriteLabels(
-  sessionId: string,
-  sourceEnvironmentId: string | null,
-): string[] {
-  const labels = [`session:${sessionId}`];
-  if (sourceEnvironmentId) {
-    labels.push(`env:${sourceEnvironmentId}`);
-  }
-  return labels;
-}
-
 export interface SessionConnectorServiceDeps {
   logger: Logger;
   env: Env;
-  spriteLifecycleClient: SpriteLifecycleClient;
   repository: SessionConnectorsRepository;
   getServerState: () => ServerState;
   updateServerState: (partial: Partial<ServerState>) => void;
   ensureWebhookToken: () => string;
-  takeFreshSpriteSnapshot?: () => SpriteResponse | null;
   /** Test seam; defaults to an HTTP client against SPRITES_API_URL. */
   spritesClient?: SpriteConnectorsClient;
 }
@@ -60,23 +36,19 @@ export interface SessionConnectorServiceDeps {
 export class SessionConnectorService {
   private readonly logger: Logger;
   private readonly env: Env;
-  private readonly spriteLifecycleClient: SpriteLifecycleClient;
   private readonly repository: SessionConnectorsRepository;
   private readonly getServerState: () => ServerState;
   private readonly updateServerState: SessionConnectorServiceDeps["updateServerState"];
   private readonly ensureWebhookToken: () => string;
-  private readonly takeFreshSpriteSnapshot: () => SpriteResponse | null;
   private readonly spritesClient: SpriteConnectorsClient;
 
   constructor(deps: SessionConnectorServiceDeps) {
     this.logger = deps.logger.scope("session-connector-service");
     this.env = deps.env;
-    this.spriteLifecycleClient = deps.spriteLifecycleClient;
     this.repository = deps.repository;
     this.getServerState = deps.getServerState;
     this.updateServerState = deps.updateServerState;
     this.ensureWebhookToken = deps.ensureWebhookToken;
-    this.takeFreshSpriteSnapshot = deps.takeFreshSpriteSnapshot ?? (() => null);
     this.spritesClient =
       deps.spritesClient ??
       new HttpSpriteConnectorsClient({
@@ -85,18 +57,16 @@ export class SessionConnectorService {
       });
   }
 
-  /** Reconciles connector identity, policy, mirrors, and Sprite labels idempotently. */
+  /** Reconciles connector identity, policy, and mirrors idempotently. */
   async reconcile(input: {
     contract: SessionConnectorContract;
   }): Promise<void> {
     const serverState = this.getServerState();
     const sessionId = serverState.sessionId;
-    const spriteName = serverState.spriteName;
-    if (!sessionId || !spriteName) {
+    if (!sessionId || !serverState.spriteName) {
       throw new Error("Session connector prerequisites are missing");
     }
 
-    await this.ensureSpriteLabels(spriteName, sessionId, input.contract.spriteLabels);
     const record = await this.repository.get(sessionId);
     const desiredPolicy = buildAccessPolicy(sessionId, input.contract);
     const knownIds = [...new Set([
@@ -291,45 +261,6 @@ export class SessionConnectorService {
     }
   }
 
-  /**
-   * Ensures the Sprite carries the session (and environment) labels before the
-   * connector is minted, repairing Sprites created before label support. Fly
-   * enforces the label policy at the gateway, so a missing label costs the
-   * Sprite connector access rather than granting any.
-   */
-  private async ensureSpriteLabels(
-    spriteName: string,
-    sessionId: string,
-    desired: readonly string[],
-  ): Promise<void> {
-    // if we have a fresh sprite snapshot returned from provision (during setup), we can use it from memory.
-    // otherwise, fetch from API
-    const freshSprite = this.takeFreshSpriteSnapshot();
-    const existing = freshSprite?.name === spriteName && Array.isArray(freshSprite.labels)
-      ? freshSprite.labels
-      : (await this.spriteLifecycleClient.getSprite(spriteName)).labels;
-    if (!existing) {
-      this.logger.error("Sprite labels were omitted from the read response", { fields: { spriteName } });
-      throw new Error("Sprite labels were omitted from the read response");
-    }
-    if (arraysEqual(existing, desired)) {
-      return;
-    }
-    this.logger.info("Sprite labels are outdated, updating", { fields: { spriteName, desired: desired.join(", "), existing: existing.join(", ") } });
-
-    // overwrite all labels
-    const updated = await this.spriteLifecycleClient.updateSprite(spriteName, {
-      labels: [...desired],
-    });
-    if (!updated.labels || !arraysEqual(updated.labels, desired)) {
-      this.logger.warn("Sprite labels differ after update", {
-        fields: { sessionId, spriteName, desired: [...desired], reported: updated.labels ?? null },
-      });
-      throw new Error(
-        "Sprite label update did not persist the desired label set",
-      );
-    }
-  }
 }
 
 function buildAccessPolicy(

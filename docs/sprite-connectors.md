@@ -38,18 +38,21 @@ connectors may authorize the full configured origin.
 
 ## Per-session connectors
 
-Each session's `session.connector-resource` runtime migration maintains one
-internal connector. New provisioning targets it as the blocking
-`session_connector` task between `cloud_container` and `repository`:
+Each session's `sprite.session-labels` migration owns the Sprite label set, and
+the later `session.connector-resource` migration maintains one internal
+connector. New provisioning targets the connector as the blocking
+`session_connector` task between `cloud_container` and `repository`; the
+coordinator runs the label migration first because it is earlier in the registry:
 
 - The Sprite is created with `session:<sessionId>` labels, plus
   `env:<environmentId>` when the session came from an environment. Labels are
   platform metadata that in-VM root cannot change, so they are the connector's
   access-policy scope. For sprites created before label support,
-  `SessionConnectorService` repairs missing labels before connector work. The
-  first provisioning pass consumes the successful create response once; later
-  passes re-read the Sprite. The migration contract owns the complete label set;
-  reconciliation replaces stale labels and verifies the exact returned set.
+  `SessionSpriteLabelsService` repairs missing labels independently of connector
+  work. The first provisioning pass consumes the successful create response
+  once; later passes re-read the Sprite. Its migration contract owns the complete
+  label set; reconciliation replaces stale labels and verifies the exact returned
+  set.
 - The connector's base URL is `WORKER_URL`, its `test_url` is `WORKER_URL/health`
   (same origin, unauthenticated), and its injected credential is the Durable
   Object's existing `webhook_token`. The token is never handed to the Sprite.
