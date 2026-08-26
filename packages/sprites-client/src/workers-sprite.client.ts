@@ -12,7 +12,7 @@ export interface NetworkPolicyRule {
   action: "allow" | "deny";
 }
 
-export interface SpriteUrlSettings {
+export interface SpriteUrlAuthSettings {
   auth: "public" | "sprite";
 }
 
@@ -213,7 +213,7 @@ export class WorkersSpriteClient {
    * "public" makes the URL accessible without authentication.
    * "default" requires the Sprites API token (the default).
    */
-  async setUrlAuth(auth: SpriteUrlSettings["auth"]): Promise<void> {
+  async setUrlAuth(auth: SpriteUrlAuthSettings["auth"]): Promise<void> {
     const url = `${this.baseUrl}/v1/sprites/${this.name}`;
     const response = await fetch(url, {
       method: "PUT",

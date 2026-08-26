@@ -253,6 +253,7 @@ const DEFAULT_NETWORK_ALLOW_RULES: NetworkPolicyRule[] = [
   allow("*.modelcontextprotocol.io"),
 ];
 
+/** Bump when the deployment-owned default allowlist changes semantically. */
 export const DEFAULT_NETWORK_POLICY: NetworkPolicyRule[] = appendDenyAll(
   DEFAULT_NETWORK_ALLOW_RULES,
 );

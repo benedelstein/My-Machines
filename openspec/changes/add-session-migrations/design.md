@@ -99,7 +99,7 @@ flowchart LR
     P2["Phase 2<br/>Mutex + readiness/turn claim<br/>zero runtime migrations"]
     P3["Phase 3<br/>Migration repository + coordinator<br/>empty registry"]
     P4["Phase 4<br/>Startup toolchain"]
-    P5["Phase 5<br/>Connector + Git + network"]
+    P5["Phase 5<br/>Sprite labels + connector + Git + network"]
     P6["Phase 6<br/>Reusable process"]
 
     P1 --> P2 --> P3 --> P4 --> P5 --> P6
@@ -111,8 +111,8 @@ flowchart LR
 | 2. Runtime boundary | FIFO mutex, branded lease, `_ensureReady(lease)`, readiness-to-turn claim serialization, pending-claim split | nonexistent | all runtime migration types, tables, definitions, and external migration effects | concurrency/crash tests pass and production shows no dispatch regression |
 | 3. Inert engine | revision API, canonical hashing, `RuntimeMigrationRepository`, coordinator, logs/metrics, readiness call into engine | exactly `[]` | every adopter and every setup `ensureMigration` call | empty-registry tests prove zero migration records and zero Sprite/connector/process calls |
 | 4. Toolchain adopter | immutable setup integration, targeted ensure, legacy checkpoint adoption, startup-toolchain contract | `[sprite.startup-toolchain]` | connector, Git, network, process definitions | new and legacy canaries adopt/reconcile without setup-history mutation |
-| 5. Session networking adopters | connector resource, Git cutover, network-policy reconciliation | toolchain, connector, Git, network | reusable-process definition and destructive legacy cleanup | connector/Git/network canaries and legacy end-to-end cohort pass |
-| 6. Reusable-process adopter | process launch contract and fail-closed idle termination on desired revision change | toolchain, connector, Git, network, process | later cleanup migrations | process restart/reuse metrics and rollback exercise pass |
+| 5. Session networking adopters | Sprite labels, connector resource, Git cutover, network-policy reconciliation | toolchain, labels, connector, Git, network | reusable-process definition and destructive legacy cleanup | label/connector/Git/network canaries and legacy end-to-end cohort pass |
+| 6. Reusable-process adopter | process launch contract and fail-closed idle termination on desired revision change | toolchain, labels, connector, Git, network, process | later cleanup migrations | process restart/reuse metrics and rollback exercise pass |
 
 ### Phase 1: local migration foundation
 
@@ -222,13 +222,14 @@ The first adopter is intentionally Sprite-local and idempotent. It exercises
 both fresh setup and completed-session readiness without connector replacement,
 Git cutover, network-policy changes, or process termination.
 
-### Phase 5: append connector, Git, and network as one ordered cohort
+### Phase 5: append labels, connector, Git, and network as one ordered cohort
 
 Phase 5 extends the proven registry without reordering prior definitions:
 
 ```ts
 export const RUNTIME_MIGRATIONS = [
   startupToolchainMigration,
+  sessionSpriteLabelsMigration,
   sessionConnectorResourceMigration,
   gitEphemeralTokenCutoverMigration,
   networkPolicyMigration,
@@ -407,6 +408,13 @@ const migrations = [
     description: "Keep common and provider toolchain checks current",
     buildContract: buildStartupToolchainContract,
     apply: reconcileStartupToolchain,
+  }),
+
+  defineContractRuntimeMigration({
+    id: "sprite.session-labels",
+    description: "Keep the session Sprite label set current",
+    buildContract: buildSessionSpriteLabelsContract,
+    apply: reconcileSessionSpriteLabels,
   }),
 
   defineContractRuntimeMigration({
@@ -1587,14 +1595,25 @@ contract-input change and rollout plan.
 The network-policy contract uses the session's persisted environment snapshot:
 
 ```ts
-buildContract: (context) => ({
-  contractSchema: 1,
-  providerId: context.clientState.agentSettings.provider,
-  requestedNetwork: context.environmentSnapshot.network,
-  workerHostname: new URL(context.env.WORKER_URL).hostname,
-  connectorGatewayHostname: new URL(context.env.SPRITES_API_URL).hostname,
-  defaultAllowlistRevision: CURRENT_DEFAULT_ALLOWLIST_REVISION,
-});
+buildContract: (context) => {
+  const providerId = context.clientState.agentSettings.provider;
+  const network = context.environmentSnapshot.network;
+  const workerHostname = new URL(context.env.WORKER_URL).hostname;
+  const connectorGatewayHostname = new URL(context.env.SPRITES_API_URL).hostname;
+  return {
+    contractSchema: 1,
+    providerId,
+    requestedNetwork: network,
+    workerHostname,
+    connectorGatewayHostname,
+    rules: buildFinalNetworkPolicy({
+      workerHostname,
+      providerId,
+      network,
+      connectorGatewayHostname,
+    }),
+  };
+};
 ```
 
 This change does not begin reading the mutable source environment row on every
@@ -1606,10 +1625,31 @@ inside the Durable Object, the next readiness pass naturally builds a different
 network contract and reconciles it. No runtime migration framework change is
 needed.
 
-Network verification uses the provider's policy readback or the normalized
-response from setting the policy. It does not ping allowed URLs.
+The successful provider mutation response is the network-policy apply
+postcondition, including the provider's observed `204 No Content` response. The
+readiness path does not read the policy back or ping allowed URLs.
 
-### 14. Model connector desired state independently from allocated identity
+### 14. Model Sprite labels independently from connector identity
+
+Sprite labels are provider-owned desired state, not part of the connector
+resource. Their contract is derived from durable session identity and the
+persisted environment snapshot:
+
+```ts
+interface SessionSpriteLabelsContract {
+  contractSchema: 1;
+  labels: string[];
+}
+```
+
+Fresh Sprite creation supplies the exact desired labels immediately. The
+`sprite.session-labels` migration then reads from the one-shot create response
+when available, otherwise performs an authoritative Sprite GET. It replaces the
+complete label array only when the set differs and verifies the update response
+before the later connector migration may run. The connector access policy
+independently retains its required `session:<id>` selector.
+
+### 15. Model connector desired state independently from allocated identity
 
 The connector ID is observed external identity, not desired configuration. Do
 not put it in the contract merely because one currently exists.
@@ -1620,7 +1660,6 @@ interface SessionConnectorContract {
   provider: "custom_api";
   baseApiUrl: string;
   testUrl: string;
-  requiredSpriteLabels: string[];
   accessPolicy: {
     allowedEndpoints: string[];
     blockedEndpoints: string[];
@@ -1679,7 +1718,7 @@ connector holding an unverifiable credential.
 Adding a new internal endpoint changes `allowedEndpoints`, therefore changes the
 contract hash and updates every waking session's connector policy.
 
-### 15. Use a versioned migration for the historical Git cutover
+### 16. Use a versioned migration for the historical Git cutover
 
 Git transport is intentionally not a permanent coordinator category. The
 current connector adoption needs one arbitrary, idempotent transition for
@@ -1709,7 +1748,7 @@ migration shown in decision 6. No contract schema redesign is necessary.
 Versioned Git verification inspects local configuration and file contents. It
 does not ping the Git proxy or gateway.
 
-### 16. Let migrations span setup tasks without mirroring setup structure
+### 17. Let migrations span setup tasks without mirroring setup structure
 
 A runtime migration ID is not required to correspond one-to-one with a setup
 task. Setup and migration history answer different questions:
@@ -1741,8 +1780,8 @@ low-level reconcilers without marking that migration.
 Example:
 
 ```text
-cloud_container       create Sprite + ensure startup toolchain contract
-session_connector     ensure connector resource contract
+cloud_container       create labeled Sprite + ensure startup toolchain contract
+session_connector     ensure label + connector resource contracts
 repository            clone + ensure Git cutover version
 setup_script          run snapshotted user script
 network_policy        ensure network policy contract
@@ -1787,7 +1826,7 @@ same `ensureMigration` repeats safely. If it crashes after the migration-record 
 but before task completion, the task retries, observes the migration record, and
 completes. Nothing is pre-stamped at session creation.
 
-### 17. Keep stored setup runs immutable
+### 18. Keep stored setup runs immutable
 
 Replace `Object.keys(SETUP_TASK_DEFINITIONS)` with one canonical ordered
 definition array used only when constructing a new run.
@@ -1819,28 +1858,31 @@ finish, that existing executor must reconcile the prerequisite internally
 without changing the public task array. After setup reaches terminal success,
 the normal runtime registry verifies current state.
 
-### 18. Legacy connector adoption uses both revision strategies
+### 19. Legacy connector adoption uses both revision strategies
 
 Phase 5 registry order for the connector rollout:
 
 1. `sprite.startup-toolchain` contract;
-2. `session.connector-resource` contract;
-3. `sprite.git-ephemeral-token-cutover` version 1;
-4. `sprite.network-policy` contract.
+2. `sprite.session-labels` contract;
+3. `session.connector-resource` contract;
+4. `sprite.git-ephemeral-token-cutover` version 1;
+5. `sprite.network-policy` contract.
 
 Phase 6 preserves that exact prefix and appends
-`agent.reusable-process` contract as entry 5.
+`agent.reusable-process` contract as entry 6.
 
 For an existing completed session:
 
 ```mermaid
 flowchart TD
-    A["Terminal historical setup"] --> B["Ensure connector contract"]
-    B --> C["Repair labels and resolve/create connector"]
-    C --> D["Ensure versioned Git cutover"]
-    D --> E["Rewrite existing clone config/helper"]
-    E --> F["Ensure network-policy contract"]
-    F --> P5["Phase 5 complete; observe cohort"]
+    A["Terminal historical setup"] --> B["Ensure Sprite-label contract"]
+    B --> C["Repair exact labels"]
+    C --> D["Ensure connector contract"]
+    D --> E["Resolve or create connector"]
+    E --> F["Ensure versioned Git cutover"]
+    F --> H1["Rewrite existing clone config/helper"]
+    H1 --> H2["Ensure network-policy contract"]
+    H2 --> P5["Phase 5 complete; observe cohort"]
     P5 --> G["Phase 6: ensure reusable-process contract"]
     G --> H{"Existing process and no applied process revision?"}
     H -- "Yes" --> I["Treat contract as unknown; terminate idle process"]
@@ -1859,7 +1901,7 @@ The webhook token itself remains needed when a connector injects it. Cleanup
 removes Sprite-held delivery and obsolete Git secrets, not the connector's
 server-held webhook credential.
 
-### 19. Future local Sprite service fits without redesign
+### 20. Future local Sprite service fits without redesign
 
 If a future architecture replaces stdin with a local service:
 
@@ -1889,7 +1931,7 @@ The reusable agent-process contract changes at the same deployment if the
 process must communicate through the new service. Registry order ensures the
 service is current before an old process is terminated and a new one starts.
 
-### 20. Rollout and rollback are forward-compatible but not magical
+### 21. Rollout and rollback are forward-compatible but not magical
 
 Local migrations are append-only and require additive/dual-read rollout before
 destructive removal.
@@ -1915,7 +1957,7 @@ If a faulty contract was applied, fix its desired contract/apply logic; every
 waking session sees the new hash. Do not mutate a completed historical meaning
 in a way that makes retries non-idempotent.
 
-### 21. Failure policy and observability
+### 22. Failure policy and observability
 
 Every expected failure is a tagged `Result` error. The coordinator converts
 integration exceptions at service boundaries and records only:

@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionSetupTask } from "@repo/shared";
 import type { Env } from "../../src/shared/types";
+import type { RuntimeBoundaryLease } from
+  "../../src/modules/session-agent/types/runtime-boundary.types";
+import { WorkersSpriteClient } from "@repo/sprites-client";
 import { SessionProvisionService } from "../../src/modules/session-agent/services/session-provision.service";
+import {
+  SessionGitRepoService,
+  type SessionGitRepoServiceDeps,
+} from "../../src/modules/session-agent/services/session-git-repo.service";
 import { createTestLogger } from "./test-logger";
 import {
   completeTask,
@@ -13,6 +20,7 @@ import {
   failTask,
   mockState,
   resetProvisionMocks,
+  TEST_RUNTIME_BOUNDARY_LEASE,
 } from "./session-provision-test-support";
 
 vi.mock("@repo/sprites-client", async (importOriginal) => {
@@ -21,10 +29,39 @@ vi.mock("@repo/sprites-client", async (importOriginal) => {
   return mocks.mockSpriteClientModule(actual);
 });
 
-vi.mock("@/shared/integrations/sprite-startup-toolchain", async () => {
+vi.mock("@/modules/session-agent/services/runtime-migration/startup-toolchain/startup-toolchain.service", async () => {
   const mocks = await import("./session-provision-mocks");
   return { ensureSpriteStartupToolchain: mocks.mockState.ensureSpriteStartupToolchain };
 });
+
+function createGitRepoService(
+  serverState: ReturnType<typeof createServerState>,
+  clientState: ReturnType<typeof createClientState>,
+  updatePartialState: SessionGitRepoServiceDeps["updatePartialState"],
+): SessionGitRepoService {
+  return new SessionGitRepoService({
+    logger: createTestLogger(),
+    env: { WORKER_URL: "https://worker.test" },
+    createSpriteClient: (spriteName) =>
+      new WorkersSpriteClient(
+        spriteName,
+        "sprites-key",
+        "https://api.sprites.test",
+        createTestLogger(),
+      ),
+    getServerState: () => serverState,
+    getClientState: () => clientState,
+    updateRepoCloned: (repoCloned) => Object.assign(serverState, { repoCloned }),
+    updateGitAuthMode: (gitAuthMode) => Object.assign(serverState, { gitAuthMode }),
+    updatePartialState,
+    retireGitProxySecret: vi.fn(),
+    getSessionConnectorGatewayBase: () => "https://gateway.test/conn-1",
+    githubTokenProvider: {
+      getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
+    },
+  });
+}
+
 describe("SessionProvisionService startup toolchain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -38,7 +75,7 @@ describe("SessionProvisionService startup toolchain", () => {
       createClientState(),
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(mockState.events).toEqual([
       "createSprite",
@@ -63,6 +100,54 @@ describe("SessionProvisionService startup toolchain", () => {
     );
   });
 
+  it("passes the existing runtime-boundary lease to targeted ensure", async () => {
+    const lease = {} as RuntimeBoundaryLease;
+    const { service, ensureRuntimeMigration } = createService(
+      createServerState(),
+      createClientState(),
+    );
+
+    await service.ensureProvisioned(lease);
+
+    expect(ensureRuntimeMigration).toHaveBeenCalledWith(
+      "sprite.startup-toolchain",
+      lease,
+    );
+  });
+
+  it("rechecks targeted ensure after migration success precedes task completion", async () => {
+    const effect = vi.fn();
+    const setupReporter = createSetupReporter();
+    vi.mocked(setupReporter.completeTask)
+      .mockImplementationOnce(() => {
+        throw new Error("simulated Worker stop before task completion");
+      });
+    const { service, ensureRuntimeMigration } = createService(
+      createServerState(),
+      createClientState(),
+      {},
+      createEnvironmentSnapshot(),
+      setupReporter,
+    );
+    let migrationCurrent = false;
+    ensureRuntimeMigration.mockImplementation(async () => {
+      if (!migrationCurrent) {
+        migrationCurrent = true;
+        effect();
+        return { ok: true, value: { outcome: "applied" } } as const;
+      }
+      return { ok: true, value: { outcome: "current" } } as const;
+    });
+
+    await expect(service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE)).rejects.toThrow(
+      "simulated Worker stop before task completion",
+    );
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
+
+    expect(ensureRuntimeMigration).toHaveBeenCalledTimes(5);
+    expect(effect).toHaveBeenCalledOnce();
+  });
+
   it("passes CODEX_MIN_VERSION to startup toolchain checks", async () => {
     const serverState = createServerState();
     const { service } = createService(
@@ -71,7 +156,7 @@ describe("SessionProvisionService startup toolchain", () => {
       { CODEX_MIN_VERSION: "0.140.0" },
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(mockState.ensureSpriteStartupToolchain).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -98,7 +183,7 @@ describe("SessionProvisionService startup toolchain", () => {
     const serverState = createServerState();
     const { service } = createService(serverState, createClientState());
 
-    await expect(service.ensureProvisioned()).rejects.toThrow(
+    await expect(service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE)).rejects.toThrow(
       "Codex CLI repair script failed.",
     );
     expect(mockState.events).toEqual([
@@ -132,7 +217,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await expect(service.ensureProvisioned()).rejects.toThrow(
+    await expect(service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE)).rejects.toThrow(
       "Codex CLI repair script failed.",
     );
     expect(setupReporter.failTask).toHaveBeenCalledWith(
@@ -166,7 +251,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.startTask).toHaveBeenNthCalledWith(1, "cloud_container");
     expect(mockState.ensureSpriteStartupToolchain).toHaveBeenCalledOnce();
@@ -214,7 +299,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.startTask).toHaveBeenCalledWith(taskId);
     expect(setupReporter.completeTask).toHaveBeenCalledWith(taskId);
@@ -241,7 +326,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await expect(service.ensureProvisioned()).rejects.toThrow("Policy failed");
+    await expect(service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE)).rejects.toThrow("Policy failed");
     expect(setupReporter.failTask).toHaveBeenCalledWith("network_policy", "Policy failed");
   });
 
@@ -275,7 +360,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.failTask).toHaveBeenCalledWith("repository", "Clone failed");
     expect(serverState.repoCloned).toBe(false);
@@ -317,6 +402,13 @@ describe("SessionProvisionService startup toolchain", () => {
       resolvedAt: "2026-05-29T00:00:00.000Z",
       schemaVersion: 1 as const,
     };
+    const clientState = createClientState();
+    const updatePartialState = vi.fn();
+    const gitRepoService = createGitRepoService(
+      serverState,
+      clientState,
+      updatePartialState,
+    );
     const serviceWithScript = new SessionProvisionService({
       logger: createTestLogger(),
       env: {
@@ -330,26 +422,48 @@ describe("SessionProvisionService startup toolchain", () => {
           return { name: "sprite-1", status: "running" };
         }),
       } as never,
+      createSpriteClient: (spriteName) =>
+        new WorkersSpriteClient(
+          spriteName,
+          "sprites-key",
+          "https://api.sprites.test",
+          createTestLogger(),
+        ),
       getServerState: () => serverState,
-      getClientState: () => createClientState(),
+      getClientState: () => clientState,
       getEnvironmentSnapshot: () => environmentSnapshot,
       updateServerState: (partial) => Object.assign(serverState, partial),
-      updatePartialState: vi.fn(),
+      updatePartialState,
       synthesizeStatus: () => "preparing",
-      retireGitProxySecret: vi.fn(),
-      ensureSessionConnector: vi.fn(async () => {}),
-      getSessionConnectorGatewayBase: () => "https://gateway.test/conn-1",
-      githubTokenProvider: {
-        getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
+      gitRepoService,
+      ensureRuntimeMigration: async (migrationId) => {
+        if (migrationId === "sprite.startup-toolchain") {
+          const result = await mockState.ensureSpriteStartupToolchain({});
+          if (!result.ok) {
+            return {
+              ok: false,
+              error: { code: "APPLY_FAILED", message: result.error.message },
+            } as const;
+          }
+          Object.assign(serverState, { startupToolchain: result.value });
+        } else if (migrationId === "session.connector-resource") {
+          mockState.events.push("mintConnector");
+          Object.assign(serverState, { sessionConnectorId: "conn-1" });
+        } else if (migrationId === "sprite.network-policy") {
+          await mockState.setNetworkPolicy([{ domain: "final", action: "allow" }]);
+          Object.assign(serverState, { finalNetworkPolicyApplied: true });
+        }
+        return { ok: true, value: { outcome: "applied" } } as const;
       },
     });
 
-    await serviceWithScript.ensureProvisioned();
+    await serviceWithScript.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(mockState.events).toEqual([
       "createSprite",
       "setNetworkPolicy",
       "startupToolchain",
+      "mintConnector",
       "cloneCheck",
       "cloneRepo",
       "startupScript",
@@ -377,7 +491,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.startTask).toHaveBeenNthCalledWith(1, "cloud_container");
     expect(setupReporter.startTask).toHaveBeenNthCalledWith(2, "session_connector");
@@ -430,7 +544,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupOutputCollector,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(events).toEqual(["beginRun", "append", "append", "finish"]);
     expect(setupOutputCollector.append).toHaveBeenNthCalledWith(1, "stdout", "setup ok\n");
@@ -474,7 +588,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupOutputCollector,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(events).toEqual(["beginRun", "append", "finish"]);
     expect(setupReporter.failTask).toHaveBeenCalledExactlyOnceWith(
@@ -504,7 +618,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.startTask).toHaveBeenCalledWith("cloud_container");
     expect(setupReporter.completeTask).toHaveBeenCalledWith("cloud_container");
@@ -533,7 +647,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.startTask).not.toHaveBeenCalledWith("cloud_container");
     expect(setupReporter.completeTask).not.toHaveBeenCalledWith("cloud_container");
@@ -555,7 +669,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.startTask).toHaveBeenCalledWith("setup_script");
     expect(setupReporter.skipTask).toHaveBeenCalledWith("setup_script", {
@@ -580,7 +694,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.skipTask).toHaveBeenCalledWith("setup_script", {
       kind: "no_script",
@@ -592,6 +706,12 @@ describe("SessionProvisionService startup toolchain", () => {
   it("records startup script failure and continues provisioning", async () => {
     const serverState = createServerState();
     const updatePartialState = vi.fn();
+    const clientState = createClientState();
+    const gitRepoService = createGitRepoService(
+      serverState,
+      clientState,
+      updatePartialState,
+    );
     mockState.execWs.mockImplementation(async (command: string) => {
       if (command.includes("timeout")) {
         mockState.events.push("startupScript");
@@ -628,28 +748,50 @@ describe("SessionProvisionService startup toolchain", () => {
           return { name: "sprite-1", status: "running" };
         }),
       } as never,
+      createSpriteClient: (spriteName) =>
+        new WorkersSpriteClient(
+          spriteName,
+          "sprites-key",
+          "https://api.sprites.test",
+          createTestLogger(),
+        ),
       getServerState: () => serverState,
-      getClientState: () => createClientState(),
+      getClientState: () => clientState,
       getEnvironmentSnapshot: () => createEnvironmentSnapshot({
         startupScript: "pnpm install",
       }),
       updateServerState: (partial) => Object.assign(serverState, partial),
       updatePartialState,
       synthesizeStatus: () => "ready",
-      retireGitProxySecret: vi.fn(),
-      ensureSessionConnector: vi.fn(async () => {}),
-      getSessionConnectorGatewayBase: () => "https://gateway.test/conn-1",
-      githubTokenProvider: {
-        getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
+      gitRepoService,
+      ensureRuntimeMigration: async (migrationId) => {
+        if (migrationId === "sprite.startup-toolchain") {
+          const result = await mockState.ensureSpriteStartupToolchain({});
+          if (!result.ok) {
+            return {
+              ok: false,
+              error: { code: "APPLY_FAILED", message: result.error.message },
+            } as const;
+          }
+          Object.assign(serverState, { startupToolchain: result.value });
+        } else if (migrationId === "session.connector-resource") {
+          mockState.events.push("mintConnector");
+          Object.assign(serverState, { sessionConnectorId: "conn-1" });
+        } else if (migrationId === "sprite.network-policy") {
+          await mockState.setNetworkPolicy([{ domain: "final", action: "allow" }]);
+          Object.assign(serverState, { finalNetworkPolicyApplied: true });
+        }
+        return { ok: true, value: { outcome: "applied" } } as const;
       },
     });
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(mockState.events).toEqual([
       "createSprite",
       "setNetworkPolicy",
       "startupToolchain",
+      "mintConnector",
       "cloneCheck",
       "cloneRepo",
       "startupScript",
@@ -685,7 +827,7 @@ describe("SessionProvisionService startup toolchain", () => {
       setupReporter,
     );
 
-    await service.ensureProvisioned();
+    await service.ensureProvisioned(TEST_RUNTIME_BOUNDARY_LEASE);
 
     expect(setupReporter.failTask).toHaveBeenCalledWith(
       "setup_script",

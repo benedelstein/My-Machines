@@ -5,7 +5,7 @@ export type SessionConnectorStatus = "active" | "pending_revocation";
 /** Non-secret metadata for a session's internal Sprites connector (D1). */
 export interface SessionConnectorRecord {
   sessionId: string;
-  gatewayConnectionId: string;
+  gatewayConnectorId: string;
   connectorName: string;
   policySummary: AccessPolicy | null;
   status: SessionConnectorStatus;
@@ -42,7 +42,7 @@ export class SessionConnectorsRepository {
   /** Records a verified connector as the session's active connector. */
   async upsertActive(params: {
     sessionId: string;
-    gatewayConnectionId: string;
+    gatewayConnectorId: string;
     connectorName: string;
     policySummary: AccessPolicy;
   }): Promise<void> {
@@ -60,7 +60,7 @@ export class SessionConnectorsRepository {
       )
       .bind(
         params.sessionId,
-        params.gatewayConnectionId,
+        params.gatewayConnectorId,
         params.connectorName,
         JSON.stringify(params.policySummary),
       )
@@ -69,7 +69,7 @@ export class SessionConnectorsRepository {
 
   /**
    * Marks the connector as pending external revocation so the gateway
-   * connection id is never lost when teardown partially fails.
+   * connector id is never lost when teardown partially fails.
    */
   async markPendingRevocation(sessionId: string): Promise<void> {
     await this.database
@@ -94,7 +94,7 @@ export class SessionConnectorsRepository {
 function rowToRecord(row: SessionConnectorRow): SessionConnectorRecord {
   return {
     sessionId: row.session_id,
-    gatewayConnectionId: row.gateway_connection_id,
+    gatewayConnectorId: row.gateway_connection_id,
     connectorName: row.connector_name,
     policySummary: parsePolicySummary(row.policy_summary_json),
     status: parseStatus(row.status),

@@ -9,7 +9,8 @@ import {
 } from "@repo/shared";
 import type { UIMessage } from "ai";
 import type { MessageRepository } from "@/modules/session-agent/repositories/message.repository";
-import type { ServerState } from "@/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "@/modules/session-agent/types/server-state.types";
 import type { SessionSummaryService } from "@/modules/session-agent/services/session-summary.service";
 import type {
   CreatedPullRequestResult,

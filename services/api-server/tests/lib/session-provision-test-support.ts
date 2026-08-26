@@ -5,12 +5,18 @@ import type {
   SessionSetupRun,
   SessionSetupTask,
 } from "@repo/shared";
+import { WorkersSpriteClient } from "@repo/sprites-client";
 import type { Env } from "../../src/shared/types";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { RuntimeBoundaryLease } from
+  "../../src/modules/session-agent/types/runtime-boundary.types";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import {
   SessionProvisionService,
   type SessionSetupTaskReporter,
 } from "../../src/modules/session-agent/services/session-provision.service";
+import { SessionGitRepoService } from
+  "../../src/modules/session-agent/services/session-git-repo.service";
 import type {
   SessionSetupOutputCollector,
 } from "../../src/modules/session-agent/services/session-setup-output.service";
@@ -19,6 +25,8 @@ import { createTestLogger } from "./test-logger";
 
 export { mockState, resetProvisionMocks } from "./session-provision-mocks";
 export { createTestLogger } from "./test-logger";
+
+export const TEST_RUNTIME_BOUNDARY_LEASE = {} as RuntimeBoundaryLease;
 
 export function createClientState(args: {
   prepareTask?: (task: SessionSetupTask) => SessionSetupTask;
@@ -116,7 +124,6 @@ export function createServerState(overrides: Partial<ServerState> = {}): ServerS
     startupScriptCompleted: false,
     finalNetworkPolicyApplied: false,
     sessionConnectorId: null,
-    spriteLabelsApplied: false,
     gitAuthMode: "legacy_secret",
     ...overrides,
   };
@@ -162,13 +169,77 @@ export function createService(
   const spriteLifecycleClient = {
     createSprite: vi.fn(async () => {
       mockState.events.push("createSprite");
-      return { name: "sprite-1", status: "running" };
+      return {
+        name: "sprite-1",
+        status: "running",
+        labels: ["session:session-1"],
+      };
     }),
   };
+  const discardFreshSpriteSnapshot = vi.fn();
+  const onSpriteCreated = vi.fn();
   const retireGitProxySecret = vi.fn();
   const ensureSessionConnector = vi.fn(async () => {
     mockState.events.push("mintConnector");
     serverState.sessionConnectorId = "conn-1";
+  });
+  const createSpriteClient = (spriteName: string) =>
+    new WorkersSpriteClient(
+      spriteName,
+      "sprites-key",
+      "https://api.sprites.test",
+      createTestLogger(),
+    );
+  const gitRepoService = new SessionGitRepoService({
+    logger: createTestLogger(),
+    env: { WORKER_URL: "https://worker.test" },
+    createSpriteClient,
+    getServerState: () => serverState,
+    getClientState: () => clientState,
+    updateRepoCloned: (repoCloned) => updateServerState({ repoCloned }),
+    updateGitAuthMode: (gitAuthMode) => updateServerState({ gitAuthMode }),
+    updatePartialState,
+    retireGitProxySecret,
+    getSessionConnectorGatewayBase: () =>
+      serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
+    githubTokenProvider: {
+      getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
+    },
+  });
+  const ensureRuntimeMigration = vi.fn(async (migrationId: string) => {
+    switch (migrationId) {
+      case "sprite.startup-toolchain": {
+        const result = await mockState.ensureSpriteStartupToolchain({
+          codexMinVersion: envOverrides.CODEX_MIN_VERSION,
+        });
+        if (!result.ok) {
+          return {
+            ok: false as const,
+            error: {
+              code: "APPLY_FAILED" as const,
+              message: result.error.message,
+              migrationId,
+            },
+          };
+        }
+        updateServerState({ startupToolchain: result.value });
+        break;
+      }
+      case "session.connector-resource":
+        await ensureSessionConnector();
+        break;
+      case "sprite.git-ephemeral-token-cutover":
+        if (!serverState.sessionConnectorId) {
+          await ensureSessionConnector();
+        }
+        await gitRepoService.reconcileEphemeralTokenCutover();
+        break;
+      case "sprite.network-policy":
+        await mockState.setNetworkPolicy([{ domain: "final", action: "allow" }]);
+        updateServerState({ finalNetworkPolicyApplied: true });
+        break;
+    }
+    return { ok: true as const, value: { outcome: "applied" as const } };
   });
   const service = new SessionProvisionService({
     logger: createTestLogger(),
@@ -179,19 +250,17 @@ export function createService(
       ...envOverrides,
     } as Env,
     spriteLifecycleClient: spriteLifecycleClient as never,
+    createSpriteClient,
     getServerState: () => serverState,
     getClientState: () => clientState,
     getEnvironmentSnapshot: () => environmentSnapshot,
     updateServerState,
     updatePartialState,
     synthesizeStatus: () => "preparing",
-    retireGitProxySecret,
-    ensureSessionConnector,
-    getSessionConnectorGatewayBase: () =>
-      serverState.sessionConnectorId ? "https://gateway.test/conn-1" : null,
-    githubTokenProvider: {
-      getReadOnlyTokenForRepo: mockState.getReadOnlyTokenForRepo,
-    },
+    gitRepoService,
+    discardFreshSpriteSnapshot,
+    onSpriteCreated,
+    ensureRuntimeMigration,
     setupReporter,
     setupOutputCollector,
   });
@@ -202,6 +271,9 @@ export function createService(
     spriteLifecycleClient,
     retireGitProxySecret,
     ensureSessionConnector,
+    ensureRuntimeMigration,
+    discardFreshSpriteSnapshot,
+    onSpriteCreated,
   };
 }
 

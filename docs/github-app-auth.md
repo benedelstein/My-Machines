@@ -118,7 +118,7 @@ Pull request creation also uses `GitHubAppService`. The manual route and the aut
 
 ### Git Authentication on the VM
 
-Git setup lives in `SessionProvisionService.cloneRepo(...)`:
+Git setup lives in `SessionGitRepoService`:
 
 - **Clone**: the API server mints a read-only installation token with `getReadOnlyTokenForRepo(...)`, base64-encodes `x-access-token:<TOKEN>`, and runs clone with an `http.extraHeader`:
   ```
@@ -131,7 +131,7 @@ Git setup lives in `SessionProvisionService.cloneRepo(...)`:
   3. The Durable Object validates the token and returns `{ token, expiresAt }`: a 5-minute ephemeral token, reused while it has more than 60 seconds left, then rotated with a grace window that keeps the previous unexpired token valid.
   4. Git presents the token as HTTP Basic auth (`x-ephemeral-git-token:<token>`). The Worker git proxy validates it in the DO (`SessionGitProxyService.authenticateGitRequest(...)`) and forwards to GitHub with a fresh or cached installation token from `getInstallationTokenForRepo(...)`. Push requests additionally enforce the session branch policy (session branch prefix plus the session's branch suffix).
 
-The session connector task is blocking and ordered before repository setup, so a missing connector gateway fails provisioning (`cloneRepo` throws) instead of downgrading git auth. Session teardown revokes outstanding ephemeral git tokens and the webhook token before external cleanup, so a stolen unexpired token dies with the session.
+The session connector task is blocking and ordered before repository setup, so a missing connector gateway fails the Git cutover instead of downgrading git auth. Session teardown revokes outstanding ephemeral git tokens and the webhook token before external cleanup, so a stolen unexpired token dies with the session.
 
 **Legacy sessions** (provisioned before ephemeral-token auth) have `gitAuthMode: "legacy_secret"` in DO server state. For those, the proxy accepts only the session's `git_proxy_secret` bearer, which their VM git config sends via `http.extraHeader`. Nothing mints new legacy secrets: new sessions are always `"ephemeral_token"` mode, and the cutover deletes any leftover secret via `retireGitProxySecret()`.
 
@@ -144,7 +144,8 @@ The session connector task is blocking and ordered before repository setup, so a
 | `services/api-server/src/modules/github/services/github-app.service.ts` | `GitHubAppService` - token resolution, installation lookup, webhook handling |
 | `services/api-server/src/modules/sessions/services/session-repo-access.service.ts` | Session repo access checks for create/read/connect/chat paths |
 | `services/api-server/src/modules/repo-environments/services/repo-environments.service.ts` | Repo environment ownership/access checks and session environment snapshot resolution |
-| `services/api-server/src/modules/session-agent/services/session-provision.service.ts` | Sprite provisioning, read-only clone, git remote setup |
+| `services/api-server/src/modules/session-agent/services/session-provision.service.ts` | Sprite provisioning and setup-task orchestration |
+| `services/api-server/src/modules/session-agent/services/session-git-repo.service.ts` | Read-only clone and post-clone Git authentication setup |
 | `services/api-server/src/modules/session-agent/services/session-git-proxy.service.ts` | Session-scoped git proxy adapter: ephemeral git token mint/rotation and request authentication |
 | `services/api-server/src/shared/integrations/git/git-proxy.service.ts` | Session-agnostic git proxy: GitHub forwarding and push branch validation |
 | `services/api-server/src/modules/session-agent/routes/internal.routes.ts` | Gateway-facing internal routes, including the ephemeral git token mint endpoint |

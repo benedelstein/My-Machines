@@ -480,25 +480,42 @@ configuration during readiness.
 - **WHEN** authorized future code updates the Durable Object's persisted session snapshot
 - **THEN** the next readiness pass SHALL naturally derive new relevant contract hashes and reconcile them
 
-### Requirement: Network policy is contract-based and readback-verified
+### Requirement: Network policy is contract-based and mutation-confirmed
 The system SHALL hash the desired normalized network policy derived from the
 session snapshot, provider, Worker/gateway hosts, and deployment policy inputs.
 
 #### Scenario: Allowed policy input changes
 - **WHEN** a persisted snapshot or deployment-owned default policy input changes
-- **THEN** the desired network-policy hash SHALL change and the Sprite policy SHALL be reapplied and verified
+- **THEN** the desired network-policy hash SHALL change and the Sprite policy SHALL be reapplied
 
 #### Scenario: Network policy is unchanged
 - **WHEN** the applied hash matches the normalized desired policy
 - **THEN** readiness SHALL not contact the Sprite network-policy API
 
-#### Scenario: Network policy verification runs
+#### Scenario: Network policy mutation succeeds
 - **WHEN** policy apply succeeds
-- **THEN** verification SHALL use normalized API response or policy readback and SHALL NOT ping an allowed endpoint
+- **THEN** the successful provider response SHALL be the apply postcondition, including a no-content response, and readiness SHALL NOT add policy readback or ping an allowed endpoint
+
+### Requirement: Sprite labels are an independent contract
+The system SHALL derive the exact Sprite label set from session identity and the
+persisted environment snapshot, and SHALL reconcile that provider-owned state
+before the connector resource.
+
+#### Scenario: Fresh Sprite already has exact labels
+- **WHEN** fresh Sprite creation returns the desired session and optional environment labels
+- **THEN** the label reconciler SHALL consume that response once, avoid an immediate GET or update, verify the contract, and allow the coordinator to record its revision
+
+#### Scenario: Existing Sprite labels differ
+- **WHEN** the label migration applies and an authoritative Sprite read contains a different label set
+- **THEN** the reconciler SHALL replace the complete label array and SHALL record the revision only when the mutation response reports exactly the desired set
+
+#### Scenario: Sprite labels cannot be verified
+- **WHEN** labels are omitted from the authoritative read or the update response differs from desired state
+- **THEN** the label migration SHALL fail before the later connector migration runs
 
 ### Requirement: Connector desired state is contract-based and identity-independent
 The system SHALL hash functional connector desired state, including base URL,
-test URL, required Sprite labels, and endpoint policy, without treating an
+test URL, and endpoint policy, without treating an
 allocated connector ID or the unrotated webhook token as desired configuration.
 
 #### Scenario: Connector ID checkpoint exists
@@ -506,8 +523,12 @@ allocated connector ID or the unrotated webhook token as desired configuration.
 - **THEN** the reconciler SHALL treat it as a hint, read external connector state, and verify it before trust
 
 #### Scenario: Connector policy changes
-- **WHEN** allowed endpoints, blocked endpoints, or required labels change
+- **WHEN** allowed endpoints or blocked endpoints change
 - **THEN** the contract hash SHALL change and the reconciler SHALL update and read back the replacement policy
+
+#### Scenario: Connector policy is constructed
+- **WHEN** the connector migration applies
+- **THEN** its access policy SHALL independently require `session:<sessionId>` even though Sprite label ownership belongs to the earlier label migration
 
 #### Scenario: Webhook token is needed before minting
 - **WHEN** the connector migration's apply runs for a session without a webhook token
@@ -598,8 +619,8 @@ their first production activation in the same deployment.
 - **THEN** the registry SHALL contain exactly `sprite.startup-toolchain`, setup history SHALL remain immutable, and connector, Git, network, and reusable-process definitions SHALL remain unreachable
 
 #### Scenario: Phase 5 activates session networking adopters
-- **WHEN** connector, Git cutover, and network-policy reconciliation activate
-- **THEN** the registry SHALL be ordered as startup toolchain, connector resource, Git cutover, and network policy, and `agent.reusable-process` SHALL remain unregistered
+- **WHEN** Sprite-label, connector, Git cutover, and network-policy reconciliation activate
+- **THEN** the registry SHALL be ordered as startup toolchain, Sprite labels, connector resource, Git cutover, and network policy, and `agent.reusable-process` SHALL remain unregistered
 
 #### Scenario: Phase 6 activates reusable-process reconciliation
 - **WHEN** the earlier adopter cohorts have passed their observation gates

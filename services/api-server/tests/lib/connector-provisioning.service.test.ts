@@ -1,28 +1,16 @@
 import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
-  CreateCustomApiConnectionRequest,
+  CreateCustomApiConnectorRequest,
   SpriteConnectorsClient,
-  SpritesConnection,
+  SpriteConnector,
   SpritesRestError,
 } from "@repo/sprites-client";
 import { describe, expect, it } from "vitest";
-import type { MintConnectorRequest } from "../../src/shared/integrations/sprite-connectors/connector-provisioning.schema";
 import {
   deleteConnectorAndVerify,
   mintConnector,
 } from "../../src/shared/integrations/sprite-connectors/connector-provisioning.service";
-
-const request: MintConnectorRequest = {
-  name: "connector-test",
-  baseApiUrl: "https://httpbin.org",
-  token: "dummy-secret-that-must-not-leak",
-  testUrl: "https://httpbin.org/headers",
-  headerName: "Authorization",
-  headerPrefix: "Bearer",
-  spriteLabels: ["session:test-123"],
-  allowedEndpoints: ["/headers"],
-};
 
 const accessPolicy: AccessPolicy = {
   allowAll: false,
@@ -30,9 +18,19 @@ const accessPolicy: AccessPolicy = {
   allowedEndpoints: ["/headers"],
 };
 
-function connection(overrides: Partial<SpritesConnection> = {}): SpritesConnection {
+const request: CreateCustomApiConnectorRequest = {
+  name: "connector-test",
+  baseApiUrl: "https://httpbin.org",
+  accessToken: "dummy-secret-that-must-not-leak",
+  testUrl: "https://httpbin.org/headers",
+  authHeaderPrefix: "Bearer",
+  description: "Provisioned by My Machines",
+  accessPolicy,
+};
+
+function connector(overrides: Partial<SpriteConnector> = {}): SpriteConnector {
   return {
-    id: "gateway-connection-id",
+    id: "gateway-connector-id",
     provider: "custom_api",
     providerAccountName: "connector-test-suffix01",
     providerInfo: {
@@ -45,42 +43,42 @@ function connection(overrides: Partial<SpritesConnection> = {}): SpritesConnecti
 }
 
 class FakeSpritesClient implements SpriteConnectorsClient {
-  readonly createdRequests: CreateCustomApiConnectionRequest[] = [];
+  readonly createdRequests: CreateCustomApiConnectorRequest[] = [];
   readonly deletedIds: string[] = [];
-  createResult: Result<SpritesConnection, SpritesRestError> = success(connection());
-  listResults: Array<Result<SpritesConnection[], SpritesRestError>> = [success([])];
-  getResults: Array<Result<SpritesConnection | null, SpritesRestError>> = [
-    success(connection()),
+  createResult: Result<SpriteConnector, SpritesRestError> = success(connector());
+  listResults: Array<Result<SpriteConnector[], SpritesRestError>> = [success([])];
+  getResults: Array<Result<SpriteConnector | null, SpritesRestError>> = [
+    success(connector()),
   ];
   deleteResult: Result<void, SpritesRestError> = success(undefined);
 
-  async createCustomApiConnection(
-    createRequest: CreateCustomApiConnectionRequest,
-  ): Promise<Result<SpritesConnection, SpritesRestError>> {
+  async createCustomApiConnector(
+    createRequest: CreateCustomApiConnectorRequest,
+  ): Promise<Result<SpriteConnector, SpritesRestError>> {
     this.createdRequests.push(createRequest);
     return this.createResult;
   }
 
-  async listConnections(): Promise<Result<SpritesConnection[], SpritesRestError>> {
+  async listConnectors(): Promise<Result<SpriteConnector[], SpritesRestError>> {
     return this.listResults.shift() ?? success([]);
   }
 
-  async updateAccessPolicy(): Promise<Result<SpritesConnection, SpritesRestError>> {
+  async updateAccessPolicy(): Promise<Result<SpriteConnector, SpritesRestError>> {
     throw new Error("Mint must set the final policy during creation.");
   }
 
-  async getConnection(): Promise<Result<SpritesConnection | null, SpritesRestError>> {
+  async getConnector(): Promise<Result<SpriteConnector | null, SpritesRestError>> {
     return this.getResults.shift() ?? success(null);
   }
 
-  async deleteConnection(connectionId: string): Promise<Result<void, SpritesRestError>> {
-    this.deletedIds.push(connectionId);
+  async deleteConnector(connectorId: string): Promise<Result<void, SpritesRestError>> {
+    this.deletedIds.push(connectorId);
     return this.deleteResult;
   }
 }
 
 describe("mintConnector", () => {
-  it("creates with the final policy and verifies the returned connection id", async () => {
+  it("creates with the final policy and verifies the returned connector id", async () => {
     const spritesClient = new FakeSpritesClient();
 
     const result = await mintConnector(request, {
@@ -92,7 +90,7 @@ describe("mintConnector", () => {
       ok: true,
       value: {
         name: "connector-test-suffix01",
-        gatewayConnectionId: "gateway-connection-id",
+        gatewayConnectorId: "gateway-connector-id",
         accessPolicy,
       },
     });
@@ -162,7 +160,7 @@ describe("mintConnector", () => {
       code: "sprites_request_failed",
       retryable: true,
     });
-    spritesClient.listResults = [success([connection()])];
+    spritesClient.listResults = [success([connector()])];
     spritesClient.getResults = [success(null)];
 
     const result = await mintConnector(request, {
@@ -180,7 +178,7 @@ describe("mintConnector", () => {
         cleanup: { attempted: true, succeeded: true },
       },
     });
-    expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
+    expect(spritesClient.deletedIds).toEqual(["gateway-connector-id"]);
   });
 
   it("reconciles an invalid create response because the connector may exist", async () => {
@@ -189,7 +187,7 @@ describe("mintConnector", () => {
       code: "sprites_response_invalid",
       retryable: false,
     });
-    spritesClient.listResults = [success([connection()])];
+    spritesClient.listResults = [success([connector()])];
     spritesClient.getResults = [success(null)];
 
     const result = await mintConnector(request, {
@@ -210,7 +208,7 @@ describe("mintConnector", () => {
   it("deletes a connector whose persisted policy does not match", async () => {
     const spritesClient = new FakeSpritesClient();
     spritesClient.getResults = [
-      success(connection({
+      success(connector({
         accessPolicy: {
           allowAll: true,
           spriteLabels: ["session:test-123"],
@@ -232,12 +230,12 @@ describe("mintConnector", () => {
         cleanup: { attempted: true, succeeded: true },
       },
     });
-    expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
+    expect(spritesClient.deletedIds).toEqual(["gateway-connector-id"]);
   });
 
   it("surfaces the orphan id when delete fails after a verification mismatch", async () => {
     const spritesClient = new FakeSpritesClient();
-    spritesClient.getResults = [success(connection({
+    spritesClient.getResults = [success(connector({
       accessPolicy: {
         allowAll: true,
         spriteLabels: ["session:test-123"],
@@ -260,7 +258,7 @@ describe("mintConnector", () => {
         cleanup: {
           attempted: true,
           succeeded: false,
-          gatewayConnectionId: "gateway-connection-id",
+          gatewayConnectorId: "gateway-connector-id",
           error: {
             code: "cleanup_failed",
             cause: "sprites_request_failed",
@@ -274,13 +272,13 @@ describe("mintConnector", () => {
   it("surfaces the orphan id when a connector remains after delete", async () => {
     const spritesClient = new FakeSpritesClient();
     spritesClient.getResults = [
-      success(connection({
+      success(connector({
         accessPolicy: {
           allowAll: true,
           spriteLabels: ["session:test-123"],
         },
       })),
-      success(connection()),
+      success(connector()),
     ];
 
     const result = await mintConnector(request, {
@@ -295,7 +293,7 @@ describe("mintConnector", () => {
         cleanup: {
           attempted: true,
           succeeded: false,
-          gatewayConnectionId: "gateway-connection-id",
+          gatewayConnectorId: "gateway-connector-id",
           error: {
             code: "cleanup_failed",
             cause: "connector_still_present",
@@ -312,17 +310,17 @@ describe("deleteConnectorAndVerify", () => {
     const spritesClient = new FakeSpritesClient();
     spritesClient.getResults = [success(null)];
 
-    const result = await deleteConnectorAndVerify("gateway-connection-id", spritesClient);
+    const result = await deleteConnectorAndVerify("gateway-connector-id", spritesClient);
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(spritesClient.deletedIds).toEqual(["gateway-connection-id"]);
+    expect(spritesClient.deletedIds).toEqual(["gateway-connector-id"]);
   });
 
   it("fails when a connector remains after delete", async () => {
     const spritesClient = new FakeSpritesClient();
-    spritesClient.getResults = [success(connection())];
+    spritesClient.getResults = [success(connector())];
 
-    const result = await deleteConnectorAndVerify("gateway-connection-id", spritesClient);
+    const result = await deleteConnectorAndVerify("gateway-connector-id", spritesClient);
 
     expect(result).toEqual({
       ok: false,

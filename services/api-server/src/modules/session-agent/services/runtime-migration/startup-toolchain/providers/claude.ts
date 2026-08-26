@@ -83,7 +83,7 @@ function shellQuote(value: string): string {
 
 class ClaudeCliCheck implements StartupToolchainCheck {
   readonly id = CLAUDE_CHECK_ID;
-  readonly contract: Record<string, unknown>;
+  readonly contract: StartupToolchainCheck["contract"];
   private readonly logger: Logger;
   private readonly startupScript: string;
 

@@ -44,21 +44,26 @@ readiness extension. The production registry must be exactly empty.
 Scope: setup immutability/targeted-ensure foundation in task group 7 and all of
 task group 8. The production registry contains only `sprite.startup-toolchain`.
 
-- [ ] P4.1 Make stored setup task arrays immutable before using setup as a targeted migration caller.
-- [ ] P4.2 Register only `sprite.startup-toolchain` and keep the legacy ServerState checkpoint compatibility path enabled.
+- [x] P4.1 Make stored setup task arrays immutable before using setup as a targeted migration caller.
+- [x] P4.2 Register only `sprite.startup-toolchain` and keep the legacy ServerState checkpoint compatibility path enabled.
 - [ ] P4.3 Canary new sessions, completed legacy sessions, incomplete historical setup, active turns, and failed toolchain checks.
-- [ ] P4.4 Confirm no connector, Git, network-policy, or process migration records/effects exist.
 - [ ] P4.5 Complete an observation window before removing the legacy checkpoint or advancing to Phase 5.
 
 ## Phase 5 — Connector, Git, and Network Adopters
 
 Scope: Phase 5 setup call sites from task group 7 and task group 10. The
-production registry is toolchain, connector, Git cutover, then network policy.
+production registry is toolchain, Sprite labels, connector, Git cutover, then
+network policy.
 
-- [ ] P5.1 Append `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and `sprite.network-policy` without reordering `sprite.startup-toolchain`.
-- [ ] P5.2 Add targeted setup ensures only at each complete postcondition and retain all legacy cleanup material required for rollback.
-- [ ] P5.3 Prove the production registry does not contain `agent.reusable-process` and no contract-driven process termination occurs.
+- [x] P5.1 Append `sprite.session-labels`, `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and `sprite.network-policy` without reordering `sprite.startup-toolchain`.
+- [x] P5.2 Add targeted setup ensures only at each complete postcondition and retain all legacy cleanup material required for rollback.
+- [x] P5.3 Prove the production registry does not contain `agent.reusable-process` and no contract-driven process termination occurs.
 - [ ] P5.4 Canary connector disagreement, uncertain create, existing-clone Git repair, policy update, active-turn deferral, and late-waking legacy sessions.
+  - [x] On 2026-08-14, use a late-waking completed local session to verify active-turn deferral occurs before attempt writes or provider calls.
+  - [x] After clearing the active turn, verify connector ID disagreement repairs ServerState from the existing external connector and restores `/health`.
+  - [x] Verify the same pass repairs an existing clone's `credential.useHttpPath`, replaces a drifted two-rule network policy, and records each adopter once in registry order.
+  - [x] Restart `pnpm dev:local` and verify all active migrations are `current`, with unchanged attempt counts and timestamps and no repeated provider mutations.
+  - [ ] Run the exact uncertain-create response-loss canary cohort; automated coverage exists, but this local run did not inject a lost provider response.
 - [ ] P5.5 Complete the legacy end-to-end cohort and an observation window before Phase 6.
 
 ## Phase 6 — Reusable Agent Process Adopter
@@ -174,40 +179,39 @@ marked against that decision.
 - [x] 6.16b Add chat-during-migration and turn-completion-after-deferral cases in Phase 3.
 - [x] 6.17 Add a regression test for the current await-sized race: no Sprite mutation may begin between direct-chat readiness and `beginTurn`.
 - [x] 6.18a Add compile-time tests/fixtures rejecting Phase 2 ownership-requiring calls without a lease, plus runtime non-reentrancy tests proving direct chat `_ensureReady(lease)` reuses the existing boundary without reacquiring the mutex.
-- [ ] 6.18b In Phases 3–4 prove setup targeted ensure and coordinator ownership-requiring calls reuse the existing lease at compile time and runtime.
+- [x] 6.18b In Phases 3–4 prove setup targeted ensure and coordinator ownership-requiring calls reuse the existing lease at compile time and runtime.
 
 ## 7. Immutable Setup and Targeted Ensure Integration — Foundation in Phase 4, Additional Call Sites in Phase 5
 
-- [ ] 7.1 Replace object-key enumeration with one canonical ordered setup task-definition array.
-- [ ] 7.2 Remove `ensureBackfilledTasksPresent`, `ensureSessionConnectorTaskPresent`, and `ensureNetworkPolicyTaskPresent`.
-- [ ] 7.3 Limit `repairOnStart()` to metadata/state repair for task IDs already present in the stored run.
-- [ ] 7.4 Preserve incomplete, completed, and failed stored task arrays byte-for-byte in membership and order.
-- [ ] 7.5 Gate post-setup runtime migrations on terminal setup success.
-- [ ] 7.6 Preserve retry of failed stored tasks that explicitly have `canRetry`; exclude failed runs with no retryable task from post-setup runtime work.
-- [ ] 7.7 Inject targeted coordinator access into setup executors without allowing them to call `RuntimeMigrationRepository.markApplied`.
-- [ ] 7.8 Make the cloud-container task call `ensureMigration("sprite.startup-toolchain", context, lease)` after Sprite creation and before repository/startup-script work.
-- [ ] 7.9 Make the session-connector task call `ensureMigration("session.connector-resource", context, lease)`.
-- [ ] 7.10 Make repository setup call the versioned Git cutover at the point its complete postcondition can be verified.
-- [ ] 7.11 Make network-policy setup call `ensureMigration("sprite.network-policy", context, lease)`.
-- [ ] 7.12 For any migration spanning multiple tasks, call low-level reconcilers early as needed but call targeted ensure only at the earliest complete postcondition.
-- [ ] 7.13 Add tests for canonical new order, unchanged old incomplete arrays, unchanged terminal arrays, compatibility prerequisites inside old executors, and no creation-time pre-stamping.
-- [ ] 7.14 Add two crash tests: effect before migration-record write and migration-record write before setup-task completion.
-- [ ] 7.15 Add a new-Sprite test where the required state already exists and targeted ensure verifies/no-ops rather than reinstalling.
+- [x] 7.1 Replace object-key enumeration with one canonical ordered setup task-definition array.
+- [x] 7.2 Remove `ensureBackfilledTasksPresent`, `ensureSessionConnectorTaskPresent`, and `ensureNetworkPolicyTaskPresent`.
+- [x] 7.3 Limit `repairOnStart()` to metadata/state repair for task IDs already present in the stored run.
+- [x] 7.4 Preserve incomplete, completed, and failed stored task arrays byte-for-byte in membership and order.
+- [x] 7.5 Gate post-setup runtime migrations on terminal setup success.
+- [x] 7.6 Preserve retry of failed stored tasks that explicitly have `canRetry`; exclude failed runs with no retryable task from post-setup runtime work.
+- [x] 7.7 Inject targeted coordinator access into setup executors without allowing them to call `RuntimeMigrationRepository.markApplied`.
+- [x] 7.8 Make the cloud-container task call `ensureMigration("sprite.startup-toolchain", context, lease)` after Sprite creation and before repository/startup-script work.
+- [x] 7.9 Make the session-connector task call `ensureMigration("session.connector-resource", context, lease)`.
+- [x] 7.10 Make repository setup call the versioned Git cutover at the point its complete postcondition can be verified.
+- [x] 7.11 Make network-policy setup call `ensureMigration("sprite.network-policy", context, lease)`.
+- [x] 7.12 For any migration spanning multiple tasks, call low-level reconcilers early as needed but call targeted ensure only at the earliest complete postcondition.
+- [x] 7.13 Add tests for canonical new order, unchanged old incomplete arrays, unchanged terminal arrays, compatibility prerequisites inside old executors, and no creation-time pre-stamping.
+- [x] 7.14 Add two crash tests: effect before migration-record write and migration-record write before setup-task completion.
+- [x] 7.15 Add a new-Sprite test where the required state already exists and targeted ensure verifies/no-ops rather than reinstalling.
 
 ## 8. Startup Toolchain Contract Migration — Phase 4
 
-- [ ] 8.1 Register `sprite.startup-toolchain` as an awaited contract migration.
-- [ ] 8.2 Reuse common and provider-specific check contract objects as desired inputs.
-- [ ] 8.3 Reuse each check's idempotent apply/verification logic while moving hash comparison and applied revision ownership to the coordinator.
-- [ ] 8.4 Add common-check coverage proving a shared binary/version/script change alters every affected provider's desired hash.
-- [ ] 8.5 Add provider coverage for minimum version, install URL, explicit script revision, and script body changes.
-- [ ] 8.6 Add one-time compatibility adoption from `ServerState.startupToolchain.contractHash`: matching legacy hash creates the applied migration record with zero Sprite calls; mismatching hash reconciles.
-- [ ] 8.7 Remove the setup-time `!startupToolchain` guard and replace the call site with targeted coordinator ensure.
-- [ ] 8.8 Remove the separate readiness-time toolchain stage from the old plan; readiness uses only the runtime registry.
-- [ ] 8.9 Preserve first-run ordering before repository clone and environment startup script.
-- [ ] 8.10 Add tests for completed legacy setup, incomplete historical setup, current hash skip, changed hash repair, failed check, retry, and setup checklist failure reporting.
+- [x] 8.1 Register `sprite.startup-toolchain` as an awaited contract migration.
+- [x] 8.2 Reuse common and provider-specific check contract objects as desired inputs.
+- [x] 8.3 Reuse each check's idempotent apply/verification logic while moving hash comparison and applied revision ownership to the coordinator.
+- [x] 8.4 Add common-check coverage proving a shared binary/version/script change alters every affected provider's desired hash.
+- [x] 8.5 Add provider coverage for minimum version, install URL, explicit script revision, and script body changes.
+- [x] 8.6 Add one-time compatibility adoption from `ServerState.startupToolchain.contractHash`: matching legacy hash creates the applied migration record with zero Sprite calls; mismatching hash reconciles.
+- [x] 8.7 Remove the setup-time `!startupToolchain` guard and replace the call site with targeted coordinator ensure.
+- [x] 8.8 Remove the separate readiness-time toolchain stage from the old plan; readiness uses only the runtime registry.
+- [x] 8.9 Preserve first-run ordering before repository clone and environment startup script.
+- [x] 8.10 Add tests for completed legacy setup, incomplete historical setup, current hash skip, changed hash repair, failed check, retry, and setup checklist failure reporting.
 - [ ] 8.11 After the compatibility window, add a local ServerState migration to remove the legacy checkpoint and delete compatibility reads/writes.
-- [ ] 8.12 Assert the Phase 4 production registry is exactly `[sprite.startup-toolchain]` and that no other runtime migration ID can produce a migration record.
 
 ## 9. Reusable Agent Process Contract — Phase 6
 
@@ -218,7 +222,7 @@ marked against that decision.
 - [ ] 9.4a Document the known reuse gap with a code TODO: a reused process keeps its spawn-time credentials; a follow-up change delivers refreshed credentials on each dispatch to an existing process (for example as a per-turn NDJSON credential payload applied before the turn).
 - [ ] 9.4b Reject an obviously active second chat before expensive preparation, then retain the authoritative mutex-held active check for race safety.
 - [ ] 9.5 Exclude the legacy bearer webhook token and connector-held webhook credential from the initial process contract; document that rotation alone does not restart a reusable process.
-- [ ] 9.6 In Phase 6 append `agent.reusable-process` as the last migration after the unchanged four-entry Phase 5 registry prefix.
+- [ ] 9.6 In Phase 6 append `agent.reusable-process` as the last migration after the unchanged five-entry Phase 5 registry prefix.
 - [ ] 9.7 Use the runtime migration repository as the sole process-contract checkpoint; do not add `agentProcessContractHash` to ServerState.
 - [ ] 9.8 Clear process ID and run ID together while preserving provider `agentSessionId`.
 - [ ] 9.9 Change process termination to return `confirmed_killed`, `already_gone`, or typed `failed`.
@@ -236,29 +240,32 @@ marked against that decision.
 
 ## 10. Connector, Git, and Network Migrations — Phase 5
 
-- [ ] 10.1 Extend `@repo/sprites-client` with the official connector access-policy update operation and parsed response types if not already present.
-- [ ] 10.2 Build `SessionConnectorContract` from provider, base/test URLs, required labels, and allowed/blocked endpoints; exclude the webhook token, which `apply` ensures exists locally before minting and which is not rotated today.
-- [ ] 10.3 Exclude allocated connector ID and incidental connector name from the desired contract.
-- [ ] 10.4 Register `session.connector-resource` as an awaited contract migration.
-- [ ] 10.5 Extract an idempotent connector reconciler that treats external state as authoritative, ServerState ID as a hint, D1 as a mirror, and writes ServerState last.
-- [ ] 10.6 PATCH and read back policy-only changes, including newly allowed internal endpoints.
-- [ ] 10.7 Replace rather than falsely checkpoint connectors when base URL or credential changes cannot be applied in place.
-- [ ] 10.8 Persist secret-safe desired-revision and attempt-identity metadata sufficient to distinguish a connector created by the current attempt from an unverifiable abandoned connector.
-- [ ] 10.8a Handle uncertain create, abandoned external connector, replacement rollback window, failed cleanup, and D1 write failure without losing the authoritative external ID; replace rather than adopt when attempt provenance cannot be proven.
-- [ ] 10.9 Verify connector configuration through API readback and do not ping the connector URL.
-- [ ] 10.10 Register `sprite.git-ephemeral-token-cutover` as an awaited versioned migration for historical existing-clone repair.
-- [ ] 10.11 Make Git apply inspect and reconcile existing remote URLs, helper bundle contents, credential settings, proactive auth, and persisted `gitAuthMode`.
-- [ ] 10.12 Verify Git locally and do not ping the proxy/gateway.
-- [ ] 10.13 Retire the legacy Git proxy secret only after the new local Git configuration verifies.
-- [ ] 10.14 Register `sprite.network-policy` as an awaited contract migration based on the persisted session environment snapshot, provider, Worker/gateway hostnames, and deployment allowlist revision.
-- [ ] 10.15 Verify network policy through normalized apply response or readback rather than endpoint reachability.
-- [ ] 10.16 Preserve the current behavior that source environment edits do not mutate existing session snapshots.
+- [x] 10.1 Extend `@repo/sprites-client` with the official connector access-policy update operation and parsed response types if not already present.
+- [x] 10.2 Build `SessionConnectorContract` from provider, base/test URLs, and allowed/blocked endpoints; exclude the webhook token, which `apply` ensures exists locally before minting and which is not rotated today.
+- [x] 10.2a Build `SessionSpriteLabelsContract` from the session id and persisted environment snapshot, and reconcile its exact label set through a dedicated service before connector reconciliation.
+- [x] 10.3 Exclude allocated connector ID and incidental connector name from the desired contract.
+- [x] 10.3a Register `sprite.session-labels` as an awaited contract migration immediately before `session.connector-resource`.
+- [x] 10.4 Register `session.connector-resource` as an awaited contract migration.
+- [x] 10.5 Extract an idempotent connector reconciler that treats external state as authoritative, ServerState ID as a hint, D1 as a mirror, and writes ServerState last.
+- [x] 10.6 Update and read back policy-only changes, including newly allowed internal endpoints.
+- [x] 10.7 Replace rather than falsely checkpoint connectors when base URL or credential changes cannot be applied in place.
+- [x] 10.8 Persist secret-safe desired-revision and attempt-identity metadata sufficient to distinguish a connector created by the current attempt from an unverifiable abandoned connector.
+- [x] 10.8a Handle uncertain create, abandoned external connector, replacement rollback window, failed cleanup, and D1 write failure without losing the authoritative external ID; replace rather than adopt when attempt provenance cannot be proven.
+- [x] 10.9 Verify connector configuration through API readback and do not ping the connector URL.
+- [x] 10.10 Register `sprite.git-ephemeral-token-cutover` as an awaited versioned migration for historical existing-clone repair.
+- [x] 10.11 Make Git apply inspect and reconcile existing remote URLs, helper bundle contents, credential settings, proactive auth, and persisted `gitAuthMode`.
+- [x] 10.12 Verify Git locally and do not ping the proxy/gateway.
+- [x] 10.13 Retire the legacy Git proxy secret only after the new local Git configuration verifies.
+- [x] 10.14 Register `sprite.network-policy` as an awaited contract migration based on the persisted session environment snapshot, provider, Worker/gateway hostnames, and exact deployment-owned allowlist rules.
+- [x] 10.15 Treat a successful provider policy mutation response as the apply postcondition; do not add policy readback or endpoint reachability to readiness.
+- [x] 10.16 Preserve the current behavior that source environment edits do not mutate existing session snapshots.
 - [ ] 10.17 Add tests showing an intentional future snapshot-row update would change the network and process contracts without coordinator redesign.
-- [ ] 10.18 Add the Phase 5 registry order: toolchain, connector, Git cutover, network policy; explicitly keep reusable process unregistered until Phase 6.
-- [ ] 10.19 Add an end-to-end legacy-session test with terminal setup, existing clone, connector creation/reuse, label repair, Git cutover, network policy, old-process termination, and next-turn gateway webhook delivery.
-- [ ] 10.20 Add connector tests for endpoint addition, policy correction, base URL change, missing checkpointed connector, abandoned create, D1 disagreement, and no secret leakage.
+- [x] 10.18 Add the Phase 5 registry order: toolchain, Sprite labels, connector, Git cutover, network policy; explicitly keep reusable process unregistered until Phase 6.
+- [ ] 10.19 Add an end-to-end Phase 5 legacy-session test with terminal setup, existing clone, connector creation/reuse, label repair, Git cutover, network policy, and next-turn gateway webhook delivery. Keep old-process termination in the Phase 6 process-adopter validation.
+- [x] 10.20 Add connector tests for endpoint addition, policy correction, base URL change, missing checkpointed connector, abandoned create, D1 disagreement, and no secret leakage.
+- [x] 10.20a Add focused label-service tests for fresh-snapshot reuse, authoritative fallback, no-op, exact replacement, omitted labels, and failed update verification.
 - [ ] 10.21 Define but do not prematurely enable a later versioned cleanup migration for obsolete Sprite-held Git/webhook delivery material; retain the connector-injected server-held webhook credential.
-- [ ] 10.22 Assert the Phase 5 production registry exactly matches its four-entry snapshot and cannot perform contract-driven process termination.
+- [x] 10.22 Assert the Phase 5 production registry exactly matches its five-entry snapshot and cannot perform contract-driven process termination.
 
 ## 11. Extensibility and Regression Scenarios — Engine Fixtures in Phase 3, Adopter Regressions Thereafter
 
@@ -282,7 +289,7 @@ marked against that decision.
 - [ ] 12.5 Add an operator-visible query surface for pending/failed runtime migration records without exposing secret inputs; do not keep an unused repository-wide list API as a placeholder.
 - [x] 12.6 Document forward-only local/version rules, contract rollback semantics, compensating migrations, contract retirement, and preparation/cutover/cleanup windows.
 - [ ] 12.7 Run separate canary cohorts: Phase 3 empty registry; Phase 4 new/completed/incomplete setup and toolchain adoption; Phase 5 stale rows, active turns, and connector disagreement; Phase 6 idle persistent processes.
-- [ ] 12.8 Measure each adopter backlog separately: toolchain checks in Phase 4, connector/Git/network changes in Phase 5, and idle process terminations in Phase 6.
+- [ ] 12.8 Measure each adopter backlog separately: toolchain checks in Phase 4, label/connector/Git/network changes in Phase 5, and idle process terminations in Phase 6.
 - [ ] 12.9 Keep legacy ServerState toolchain compatibility until canaries prove migration-record adoption, then remove it through the planned local migration.
 
 ## 13. Validation — Required Before Every Phase Advances

@@ -118,7 +118,7 @@ phase activates additional behavior:
 4. **Startup-toolchain first adopter:** register only
    `sprite.startup-toolchain`, add legacy-checkpoint adoption, and introduce
    immutable setup/targeted-ensure integration.
-5. **Connector, Git, and network adopters:** append
+5. **Session networking adopters:** append `sprite.session-labels`,
    `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and
    `sprite.network-policy` in that order. Keep reusable-process reconciliation
    disabled during this phase.

@@ -10,17 +10,15 @@ import {
   RuntimeMigrationCoordinator,
   type RuntimeMigrationLifecycleEvent,
 } from
-  "../../src/modules/session-agent/services/runtime-migration-coordinator.service";
+  "../../src/modules/session-agent/services/runtime-migration/runtime-migration-coordinator.service";
 import {
   defineContractRuntimeMigration,
   defineVersionedRuntimeMigration,
-} from "../../src/modules/session-agent/services/runtime-migration-definition.service";
+} from "../../src/modules/session-agent/services/runtime-migration/runtime-migration-definition.service";
 import type { RuntimeBoundaryLease } from
   "../../src/modules/session-agent/types/runtime-boundary.types";
-import type {
-  RuntimeMigrationContext,
-  RuntimeMigrationDefinition,
-} from "../../src/modules/session-agent/types/runtime-migration.types";
+import type { RuntimeMigrationDefinition } from
+  "../../src/modules/session-agent/types/runtime-migration.types";
 import { fingerprintHighEntropySecret } from
   "../../src/modules/session-agent/utils/runtime-migration-contract.utils";
 import {
@@ -28,6 +26,7 @@ import {
   createSqlFn,
   createTestDatabase,
 } from "./session-agent-do-harness";
+import { createMigrationDependencies } from "./runtime-migration-test-support";
 
 const lease = {} as RuntimeBoundaryLease;
 
@@ -43,18 +42,6 @@ function createLogger(): Logger & { calls: unknown[][] } {
     scope: vi.fn(() => logger),
   };
   return logger;
-}
-
-function createContext(args: {
-  activeUserMessageId?: string | null;
-  teardownStarted?: boolean;
-} = {}): RuntimeMigrationContext {
-  return {
-    getServerState: () => ({
-      activeUserMessageId: args.activeUserMessageId ?? null,
-    }),
-    isTeardownStarted: () => args.teardownStarted ?? false,
-  };
 }
 
 function createFixture(
@@ -98,16 +85,17 @@ describe("RuntimeMigrationCoordinator", () => {
     const versionTwo = defineVersionedRuntimeMigration({
       id: "fixture.version",
       description: "Fixture version",
+      buildContext: () => null,
       version: 2,
       apply: applyVersionTwo,
     });
     const fixture = createFixture([versionTwo]);
 
-    expect(await fixture.coordinator.ensureMigrations(createContext(), lease)).toEqual({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "applied" },
     });
-    expect(await fixture.coordinator.ensureMigrations(createContext(), lease)).toEqual({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "current" },
     });
@@ -119,18 +107,40 @@ describe("RuntimeMigrationCoordinator", () => {
       definitions: [defineVersionedRuntimeMigration({
         id: "fixture.version",
         description: "Fixture version",
+        buildContext: () => null,
         version: 1,
         apply: applyVersionOne,
       })],
       logger: createLogger(),
       observe: (event) => rollbackEvents.push(event),
     });
-    expect(await rolledBack.ensureMigrations(createContext(), lease)).toEqual({
+    expect(await rolledBack.ensureMigrations(createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "current" },
     });
     expect(applyVersionTwo).toHaveBeenCalledOnce();
     expect(applyVersionOne).not.toHaveBeenCalled();
+    expect(fixture.logger.info).toHaveBeenCalledWith(
+      "Runtime migration lifecycle event",
+      {
+        fields: expect.objectContaining({
+          event: "applied",
+          revision: 2,
+          appliedRevision: 2,
+        }),
+      },
+    );
+    expect(fixture.logger.info).toHaveBeenCalledWith(
+      "Runtime migration lifecycle event",
+      {
+        fields: {
+          event: "current",
+          migrationId: "fixture.version",
+          revisionKind: "version",
+          revision: 2,
+        },
+      },
+    );
     expect(rollbackEvents).toContainEqual(expect.objectContaining({
       event: "newer_version_skipped",
       migrationId: "fixture.version",
@@ -145,14 +155,15 @@ describe("RuntimeMigrationCoordinator", () => {
     const definition = defineContractRuntimeMigration({
       id: "fixture.contract",
       description: "Fixture contract",
+      buildContext: () => null,
       buildContract: () => ({ revision }),
       apply,
     });
     const { coordinator } = createFixture([definition]);
 
-    await coordinator.ensureMigrations(createContext(), lease);
+    await coordinator.ensureMigrations(createMigrationDependencies(), lease);
     revision = 2;
-    expect(await coordinator.ensureMigrations(createContext(), lease)).toMatchObject({
+    expect(await coordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -168,6 +179,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const definition = defineContractRuntimeMigration({
       id: "fixture.changed-attempt",
       description: "Changed attempt fixture",
+      buildContext: () => null,
       buildContract: () => desired,
       apply,
     });
@@ -182,7 +194,7 @@ describe("RuntimeMigrationCoordinator", () => {
       "2026-08-01T00:00:00.000Z",
     );
 
-    expect(await fixture.coordinator.ensureMigrations(createContext(), lease)).toMatchObject({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -203,6 +215,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const first = defineVersionedRuntimeMigration({
       id: "fixture.first",
       description: "First fixture",
+      buildContext: () => null,
       version: 1,
       apply: async () => {
         calls.push("first");
@@ -212,6 +225,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const second = defineVersionedRuntimeMigration({
       id: "fixture.second",
       description: "Second fixture",
+      buildContext: () => null,
       version: 1,
       apply: async () => {
         calls.push("second");
@@ -221,6 +235,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const third = defineVersionedRuntimeMigration({
       id: "fixture.third",
       description: "Third fixture",
+      buildContext: () => null,
       version: 1,
       apply: async () => {
         calls.push("third");
@@ -229,12 +244,12 @@ describe("RuntimeMigrationCoordinator", () => {
     });
     const { coordinator } = createFixture([first, second, third]);
 
-    expect(await coordinator.ensureMigration("fixture.second", createContext(), lease)).toEqual({
+    expect(await coordinator.ensureMigration("fixture.second", createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "applied" },
     });
     expect(calls).toEqual(["first", "second"]);
-    expect(await coordinator.ensureMigration("fixture.third", createContext(), lease)).toEqual({
+    expect(await coordinator.ensureMigration("fixture.third", createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -245,6 +260,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const definition = defineContractRuntimeMigration({
       id: "fixture.deferred",
       description: "Deferred fixture",
+      buildContext: () => null,
       buildContract: vi.fn(() => ({ revision: 1 })),
       apply: async () => success(undefined),
     });
@@ -253,7 +269,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const get = vi.spyOn(fixture.repository, "get");
 
     expect(await fixture.coordinator.ensureMigrations(
-      createContext({ activeUserMessageId: "message-1" }),
+      createMigrationDependencies({ activeUserMessageId: "message-1" }),
       lease,
     )).toEqual({ ok: true, value: { outcome: "deferred_active_turn" } });
     expect(prepare).not.toHaveBeenCalled();
@@ -264,6 +280,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const first = defineVersionedRuntimeMigration({
       id: "fixture.failure",
       description: "Failure fixture",
+      buildContext: () => null,
       version: 1,
       apply: async () => success(undefined),
     });
@@ -271,16 +288,18 @@ describe("RuntimeMigrationCoordinator", () => {
     const later = defineVersionedRuntimeMigration({
       id: "fixture.later",
       description: "Later fixture",
+      buildContext: () => null,
       version: 1,
       apply: laterApply,
     });
     const fixture = createFixture([first, later]);
-    await fixture.coordinator.ensureMigrations(createContext(), lease);
+    await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
     laterApply.mockClear();
 
     const failing = defineVersionedRuntimeMigration({
       id: "fixture.failure",
       description: "Failure fixture",
+      buildContext: () => null,
       version: 2,
       apply: async () => failure({
         code: "APPLY_FAILED",
@@ -293,7 +312,7 @@ describe("RuntimeMigrationCoordinator", () => {
       logger: createLogger(),
       retryPolicy: { baseDelayMs: 0, maxDelayMs: 0, operatorThreshold: 3 },
     });
-    expect(await failingCoordinator.ensureMigrations(createContext(), lease)).toMatchObject({
+    expect(await failingCoordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: false,
       error: { code: "APPLY_FAILED" },
     });
@@ -327,6 +346,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const definition = defineVersionedRuntimeMigration({
       id: "fixture.crash",
       description: "Crash fixture",
+      buildContext: () => null,
       version: 1,
       apply,
     });
@@ -349,7 +369,7 @@ describe("RuntimeMigrationCoordinator", () => {
       );
     }
 
-    const result = await fixture.coordinator.ensureMigrations(createContext(), lease);
+    const result = await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
     expect(result.ok).toBe(true);
     expect(completedEffects).toBe(2);
     expect(apply).toHaveBeenCalledTimes(scenario.recordApplied ? 0 : 1);
@@ -363,6 +383,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const definition = defineVersionedRuntimeMigration({
       id: "fixture.retry",
       description: "Retry fixture",
+      buildContext: () => null,
       version: 1,
       apply: async () => success(undefined),
     });
@@ -377,12 +398,12 @@ describe("RuntimeMigrationCoordinator", () => {
       message: "Safe failure",
     });
 
-    expect(await fixture.coordinator.ensureMigrations(createContext(), lease)).toMatchObject({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: false,
       error: { code: "MIGRATION_RETRY_BACKOFF" },
     });
     expect(await fixture.coordinator.ensureMigrations(
-      createContext({ teardownStarted: true }),
+      createMigrationDependencies({ teardownStarted: true }),
       lease,
     )).toMatchObject({ ok: false, error: { code: "SESSION_TEARDOWN_STARTED" } });
   });
@@ -393,6 +414,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const definition = defineContractRuntimeMigration({
       id: "fixture.secret-safe",
       description: "Secret-safe fixture",
+      buildContext: () => null,
       buildContract: () => ({ fingerprint, label: "private-contract-preimage" }),
       apply: async () => failure({
         code: "APPLY_FAILED",
@@ -400,7 +422,7 @@ describe("RuntimeMigrationCoordinator", () => {
       }),
     });
     const fixture = createFixture([definition]);
-    await fixture.coordinator.ensureMigrations(createContext(), lease);
+    await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
 
     const serializedLogs = JSON.stringify(fixture.logger.calls);
     const serializedRecords = JSON.stringify(
@@ -417,6 +439,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const legacy = defineContractRuntimeMigration({
       id: "fixture.recurring",
       description: "Recurring fixture",
+      buildContext: () => null,
       buildContract: () => ({ desired: "legacy" }),
       apply: async () => {
         externalState = "legacy";
@@ -424,7 +447,7 @@ describe("RuntimeMigrationCoordinator", () => {
       },
     });
     const fixture = createFixture([legacy]);
-    await fixture.coordinator.ensureMigrations(createContext(), lease);
+    await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
 
     const retiredApply = vi.fn(async () => {
       externalState = "absent";
@@ -433,12 +456,14 @@ describe("RuntimeMigrationCoordinator", () => {
     const retired = defineContractRuntimeMigration({
       id: "fixture.recurring",
       description: "Recurring fixture",
+      buildContext: () => null,
       buildContract: () => ({ desired: "retired" }),
       apply: retiredApply,
     });
     const replacement = defineVersionedRuntimeMigration({
       id: "fixture.replacement",
       description: "Replacement fixture",
+      buildContext: () => null,
       version: 1,
       apply: async () => {
         externalState = "replacement";
@@ -451,8 +476,8 @@ describe("RuntimeMigrationCoordinator", () => {
       logger: createLogger(),
     });
 
-    await coordinator.ensureMigrations(createContext(), lease);
-    await coordinator.ensureMigrations(createContext(), lease);
+    await coordinator.ensureMigrations(createMigrationDependencies(), lease);
+    await coordinator.ensureMigrations(createMigrationDependencies(), lease);
     expect(externalState).toBe("replacement");
     expect(retiredApply).toHaveBeenCalledOnce();
   });
@@ -463,12 +488,14 @@ describe("RuntimeMigrationCoordinator", () => {
     const versioned = defineVersionedRuntimeMigration({
       id: "fixture.late-version",
       description: "Late version fixture",
+      buildContext: () => null,
       version: 1,
       apply: versionApply,
     });
     const contract = defineContractRuntimeMigration({
       id: "fixture.late-contract",
       description: "Late contract fixture",
+      buildContext: () => null,
       buildContract: () => ({ desired: "current" }),
       apply: async () => {
         externalContractState = "current";
@@ -499,7 +526,7 @@ describe("RuntimeMigrationCoordinator", () => {
       "2026-08-01T00:00:01.000Z",
     );
 
-    expect(await fixture.coordinator.ensureMigrations(createContext(), lease)).toMatchObject({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -512,6 +539,7 @@ describe("RuntimeMigrationCoordinator", () => {
     const current = defineContractRuntimeMigration({
       id: "fixture.rollback-contract",
       description: "Rollback contract fixture",
+      buildContext: () => null,
       buildContract: () => ({ desired: "new" }),
       apply: async () => {
         externalState = "new";
@@ -519,11 +547,12 @@ describe("RuntimeMigrationCoordinator", () => {
       },
     });
     const fixture = createFixture([current]);
-    await fixture.coordinator.ensureMigrations(createContext(), lease);
+    await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease);
 
     const rolledBack = defineContractRuntimeMigration({
       id: "fixture.rollback-contract",
       description: "Rollback contract fixture",
+      buildContext: () => null,
       buildContract: () => ({ desired: "old" }),
       apply: async () => {
         externalState = "old";
@@ -536,7 +565,7 @@ describe("RuntimeMigrationCoordinator", () => {
       logger: createLogger(),
     });
 
-    expect(await rollbackCoordinator.ensureMigrations(createContext(), lease)).toMatchObject({
+    expect(await rollbackCoordinator.ensureMigrations(createMigrationDependencies(), lease)).toMatchObject({
       ok: true,
       value: { outcome: "applied" },
     });
@@ -546,7 +575,7 @@ describe("RuntimeMigrationCoordinator", () => {
   it("ships an empty registry as a local no-op with no records", async () => {
     const fixture = createFixture([]);
     const beginAttempt = vi.spyOn(fixture.repository, "beginAttempt");
-    expect(await fixture.coordinator.ensureMigrations(createContext(), lease)).toEqual({
+    expect(await fixture.coordinator.ensureMigrations(createMigrationDependencies(), lease)).toEqual({
       ok: true,
       value: { outcome: "current" },
     });

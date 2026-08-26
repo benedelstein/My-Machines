@@ -12,7 +12,7 @@ export type CleanupStatus =
   | {
     attempted: true;
     succeeded: false;
-    gatewayConnectionId: string;
+    gatewayConnectorId: string;
     error: ConnectorCleanupError;
   };
 
@@ -53,7 +53,7 @@ export interface ConnectorCleanupError {
 
 export interface MintConnectorResult {
   name: string;
-  gatewayConnectionId: string;
+  gatewayConnectorId: string;
   accessPolicy: AccessPolicy;
   durations: ConnectorProvisioningDurations;
 }

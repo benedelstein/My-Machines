@@ -3,7 +3,7 @@
  *
  * This is not the connector's SSRF boundary. It blocks common literal internal
  * addresses and suffixes only; it does not resolve DNS, defend against rebinding,
- * or control redirect-time credential forwarding. Sprites' connection test
+ * or control redirect-time credential forwarding. Sprites' connector test
  * executes from Fly's backend and proves reachability, not safety.
  *
  * @param hostname Hostname from a parsed URL, with IPv6 literals still bracketed.

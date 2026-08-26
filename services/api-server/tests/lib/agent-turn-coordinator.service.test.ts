@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ClientState, Logger } from "@repo/shared";
 import type { UIMessage, UIMessageChunk } from "ai";
-import type { ServerState } from "../../src/modules/session-agent/repositories/server-state.repository";
+import type { ServerState } from
+  "../../src/modules/session-agent/types/server-state.types";
 import {
   AgentTurnCoordinator,
   type FinishedAssistantTurn,

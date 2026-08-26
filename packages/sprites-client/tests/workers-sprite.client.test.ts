@@ -110,6 +110,45 @@ describe("WorkersSpriteClient", () => {
       "WebSocket closed before receiving process exit",
     );
   });
+
+  it("treats any successful network-policy response as applied", async () => {
+    const rules = [
+      { domain: "api.github.com", action: "allow" as const },
+      { domain: "*", action: "deny" as const },
+    ];
+    const fetchSpy = vi.fn<typeof fetch>().mockImplementation(async () => {
+      return Response.json({ rules });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = new WorkersSpriteClient(
+      "sprite-1",
+      "sprites-key",
+      "https://api.sprites.test",
+      testLogger,
+    );
+
+    await expect(client.setNetworkPolicy(rules)).resolves.toBeUndefined();
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://api.sprites.test/v1/sprites/sprite-1/policy/network",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("accepts the provider's no-content network-policy response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const client = new WorkersSpriteClient(
+      "sprite-1",
+      "sprites-key",
+      "https://api.sprites.test",
+      testLogger,
+    );
+
+    await expect(client.setNetworkPolicy([
+      { domain: "*", action: "deny" },
+    ])).resolves.toBeUndefined();
+  });
 });
 
 function createFrame(streamId: number, payload: string): Uint8Array {

@@ -89,7 +89,7 @@ function shellQuote(value: string): string {
 
 class CodexCliCheck implements StartupToolchainCheck {
   readonly id = CODEX_CHECK_ID;
-  readonly contract: Record<string, unknown>;
+  readonly contract: StartupToolchainCheck["contract"];
   private readonly logger: Logger;
   private readonly minCodexVersion: string;
   private readonly startupScript: string;

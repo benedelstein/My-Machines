@@ -1,10 +1,10 @@
 import { failure, success, type Result } from "@repo/shared";
 import type {
   AccessPolicy,
-  SpritesConnection,
+  CreateCustomApiConnectorRequest,
+  SpriteConnector,
   SpriteConnectorsClient,
 } from "@repo/sprites-client";
-import type { MintConnectorRequest } from "./connector-provisioning.schema";
 import type {
   CleanupStatus,
   ConnectorCleanupError,
@@ -52,35 +52,20 @@ class MintTimings {
 }
 
 export async function mintConnector(
-  callerRequest: MintConnectorRequest,
+  callerRequest: CreateCustomApiConnectorRequest,
   dependencies: MintConnectorDependencies,
 ): Promise<Result<MintConnectorResult, ConnectorProvisioningError>> {
   const now = dependencies.now ?? performance.now.bind(performance);
   const sleep = dependencies.sleep ?? delay;
   const nameSuffix = dependencies.nameSuffix ?? defaultNameSuffix;
-  const request: MintConnectorRequest = {
+  const request: CreateCustomApiConnectorRequest = {
     ...callerRequest,
     name: `${callerRequest.name}-${nameSuffix()}`,
-  };
-  const accessPolicy: AccessPolicy = {
-    allowAll: false,
-    spriteLabels: [...request.spriteLabels],
-    ...(request.allowedEndpoints === undefined
-      ? {}
-      : { allowedEndpoints: [...request.allowedEndpoints] }),
   };
   const timings = new MintTimings(now);
 
   const createResult = await timings.time("createMs", () => {
-    return dependencies.spritesClient.createCustomApiConnection({
-      name: request.name,
-      baseApiUrl: request.baseApiUrl,
-      accessToken: request.token,
-      testUrl: request.testUrl,
-      authHeaderPrefix: request.headerPrefix,
-      description: "Provisioned by My Machines",
-      accessPolicy,
-    });
+    return dependencies.spritesClient.createCustomApiConnector(request);
   });
   if (!createResult.ok) {
     const outcomeIsUncertain = createResult.error.retryable
@@ -105,7 +90,7 @@ export async function mintConnector(
 
   const createdConnector = createResult.value;
   const verifyResult = await timings.time("verifyMs", () => {
-    return dependencies.spritesClient.getConnection(createdConnector.id);
+    return dependencies.spritesClient.getConnector(createdConnector.id);
   });
   if (!verifyResult.ok) {
     return failure(buildError({
@@ -120,7 +105,7 @@ export async function mintConnector(
   if (!connectorMatches(verifyResult.value, {
     id: createdConnector.id,
     name: request.name,
-    accessPolicy,
+    accessPolicy: request.accessPolicy,
   })) {
     return failure(buildError({
       code: "connector_verification_failed",
@@ -133,8 +118,8 @@ export async function mintConnector(
 
   return success({
     name: request.name,
-    gatewayConnectionId: createdConnector.id,
-    accessPolicy,
+    gatewayConnectorId: createdConnector.id,
+    accessPolicy: request.accessPolicy,
     durations: timings.snapshot(),
   });
 }
@@ -142,20 +127,20 @@ export async function mintConnector(
 /**
  * Deletes a connector and confirms it is gone.
  *
- * @param connectionId Gateway connection id to delete.
+ * @param connectorId Gateway connector id to delete.
  * @param spritesClient Sprites REST client used for the delete and re-read.
  * @returns Success once the connector no longer resolves.
  */
 export async function deleteConnectorAndVerify(
-  connectionId: string,
+  connectorId: string,
   spritesClient: SpriteConnectorsClient,
 ): Promise<Result<void, ConnectorCleanupError>> {
-  const deleteResult = await spritesClient.deleteConnection(connectionId);
+  const deleteResult = await spritesClient.deleteConnector(connectorId);
   if (!deleteResult.ok) {
     return failure(cleanupError(deleteResult.error.code, deleteResult.error.retryable));
   }
 
-  const getResult = await spritesClient.getConnection(connectionId);
+  const getResult = await spritesClient.getConnector(connectorId);
   if (!getResult.ok) {
     return failure(cleanupError(getResult.error.code, getResult.error.retryable));
   }
@@ -174,7 +159,7 @@ function cleanupError(
 }
 
 function connectorMatches(
-  actual: SpritesConnection | null,
+  actual: SpriteConnector | null,
   expected: {
     id: string;
     name: string;
@@ -258,9 +243,9 @@ async function findCreatedConnector(
     sleep: (milliseconds: number) => Promise<void>;
     timings: MintTimings;
   },
-): Promise<SpritesConnection | undefined> {
-  const lookup = async (): Promise<SpritesConnection | undefined> => {
-    const listResult = await spritesClient.listConnections();
+): Promise<SpriteConnector | undefined> {
+  const lookup = async (): Promise<SpriteConnector | undefined> => {
+    const listResult = await spritesClient.listConnectors();
     return listResult.ok ? findConnectorByName(listResult.value, options.name) : undefined;
   };
 
@@ -278,12 +263,12 @@ async function findCreatedConnector(
 }
 
 async function cleanupConnector(
-  connectionId: string,
+  connectorId: string,
   spritesClient: SpriteConnectorsClient,
   timings: MintTimings,
 ): Promise<CleanupStatus> {
   const result = await timings.time("cleanupMs", () => {
-    return deleteConnectorAndVerify(connectionId, spritesClient);
+    return deleteConnectorAndVerify(connectorId, spritesClient);
   });
   if (result.ok) {
     return { attempted: true, succeeded: true };
@@ -291,7 +276,7 @@ async function cleanupConnector(
   return {
     attempted: true,
     succeeded: false,
-    gatewayConnectionId: connectionId,
+    gatewayConnectorId: connectorId,
     error: result.error,
   };
 }
@@ -336,11 +321,11 @@ async function reconcileAfterUncertainCreate(params: {
 }
 
 function findConnectorByName(
-  connections: SpritesConnection[],
+  connectors: SpriteConnector[],
   name: string,
-): SpritesConnection | undefined {
-  return connections.find((connection) => {
-    return connection.provider === "custom_api" && connection.providerAccountName === name;
+): SpriteConnector | undefined {
+  return connectors.find((connector) => {
+    return connector.provider === "custom_api" && connector.providerAccountName === name;
   });
 }
 

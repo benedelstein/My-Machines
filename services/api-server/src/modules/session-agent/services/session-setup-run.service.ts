@@ -7,20 +7,24 @@ import type {
   SessionSetupTaskOutput,
   StartupScriptSetupTaskSkipReason,
 } from "@repo/shared";
-import type { ServerState } from "../repositories/server-state.repository";
+import type { ServerState } from
+  "../types/server-state.types";
 
-const SETUP_TASK_DEFINITIONS = {
-  cloud_container: { isBlocking: true, canRetry: true },
-  session_connector: { isBlocking: true, canRetry: true },
-  repository: { isBlocking: true, canRetry: true },
-  setup_script: { isBlocking: false, canRetry: false },
-  network_policy: { isBlocking: true, canRetry: true },
-} as const satisfies Record<SessionSetupTaskId, {
+const SETUP_TASK_DEFINITIONS = [
+  { id: "cloud_container", isBlocking: true, canRetry: true },
+  { id: "session_connector", isBlocking: true, canRetry: true },
+  { id: "repository", isBlocking: true, canRetry: true },
+  { id: "setup_script", isBlocking: false, canRetry: false },
+  { id: "network_policy", isBlocking: true, canRetry: true },
+] as const satisfies ReadonlyArray<{
+  id: SessionSetupTaskId;
   isBlocking: boolean;
   canRetry: boolean;
 }>;
 
-const CREATE_SETUP_TASK_IDS = Object.keys(SETUP_TASK_DEFINITIONS) as SessionSetupTaskId[];
+const SETUP_TASK_DEFINITION_BY_ID = Object.fromEntries(
+  SETUP_TASK_DEFINITIONS.map((definition) => [definition.id, definition]),
+) as Record<SessionSetupTaskId, (typeof SETUP_TASK_DEFINITIONS)[number]>;
 
 export interface SessionSetupRunServiceDeps {
   getServerState: () => ServerState;
@@ -50,7 +54,7 @@ export class SessionSetupRunService {
       status: "running",
       startedAt: now,
       completedAt: null,
-      tasks: CREATE_SETUP_TASK_IDS.map(createSetupTask),
+      tasks: SETUP_TASK_DEFINITIONS.map((definition) => createSetupTask(definition.id)),
     };
   }
 
@@ -153,11 +157,10 @@ export class SessionSetupRunService {
   }
 
   /**
-   * Recovers setup run state from saved state when the DO restarts. Only a
-   * running run is repaired; terminal runs are never reopened, so tasks added
-   * after a session finished provisioning are not applied retroactively.
+   * Recovers setup run state from durable checkpoints before provisioning.
+   * Only a running run is repaired; terminal runs are never reopened.
    */
-  repairOnStart(): void {
+  repairBeforeProvisioning(): void {
     const setupRun = this.getClientState().sessionSetupRun;
     if (!setupRun) { return; }
     const currentRun = normalizeSetupTaskMetadata(setupRun);
@@ -170,14 +173,12 @@ export class SessionSetupRunService {
 
     const serverState = this.getServerState();
     const now = new Date().toISOString();
-    const repairableRun = ensureBackfilledTasksPresent(currentRun, serverState, now);
-    const repairedTasks = repairableRun.tasks.map((task): SessionSetupTask => {
+    const repairedTasks = currentRun.tasks.map((task): SessionSetupTask => {
       if (isTerminalSetupTask(task)) { return task; }
       switch (task.id) {
         case "cloud_container":
-          return serverState.spriteName && serverState.startupToolchain
-            ? completeSetupTaskForRepair(task, now)
-            : task;
+          // The targeted runtime migration owns toolchain recovery and currentness.
+          return task;
         case "session_connector":
           return serverState.sessionConnectorId
             ? completeSetupTaskForRepair(task, now)
@@ -195,7 +196,7 @@ export class SessionSetupRunService {
       }
     });
 
-    this.updateRun(this.completeRunIfReady({ ...repairableRun, tasks: repairedTasks }));
+    this.updateRun(this.completeRunIfReady({ ...currentRun, tasks: repairedTasks }));
   }
 
   private updateTask(
@@ -289,7 +290,7 @@ function createBaseSetupTask(taskId: SessionSetupTaskId): BaseSessionSetupTask &
   completedAt: null;
   error: null;
 } {
-  const definition = SETUP_TASK_DEFINITIONS[taskId];
+  const definition = SETUP_TASK_DEFINITION_BY_ID[taskId];
   return {
     id: taskId,
     isBlocking: definition.isBlocking,
@@ -319,56 +320,6 @@ function updateSetupTask(
   }
 }
 
-/** Inserts setup tasks added after this run was built, in their run positions. */
-function ensureBackfilledTasksPresent(
-  setupRun: SessionSetupRun,
-  serverState: ServerState,
-  now: string,
-): SessionSetupRun {
-  const withNetworkPolicy = ensureNetworkPolicyTaskPresent(setupRun, serverState, now);
-  return ensureSessionConnectorTaskPresent(withNetworkPolicy, serverState, now);
-}
-
-function ensureNetworkPolicyTaskPresent(
-  setupRun: SessionSetupRun,
-  serverState: ServerState,
-  now: string,
-): SessionSetupRun {
-  if (setupRun.tasks.some((task) => task.id === "network_policy")) {
-    return setupRun;
-  }
-
-  const networkPolicyTask = serverState.finalNetworkPolicyApplied
-    ? completeSetupTaskForRepair(createSetupTask("network_policy"), now)
-    : createSetupTask("network_policy");
-  const tasks = [...setupRun.tasks];
-  tasks.push(networkPolicyTask);
-  return { ...setupRun, tasks };
-}
-
-/**
- * Back-fills session_connector into running setup runs created before that
- * task existed. It stays after cloud_container so a mid-provision restart
- * mints the connector before repository and network-policy setup.
- */
-function ensureSessionConnectorTaskPresent(
-  setupRun: SessionSetupRun,
-  serverState: ServerState,
-  now: string,
-): SessionSetupRun {
-  if (setupRun.tasks.some((task) => task.id === "session_connector")) {
-    return setupRun;
-  }
-
-  const connectorTask = serverState.sessionConnectorId
-    ? completeSetupTaskForRepair(createSetupTask("session_connector"), now)
-    : createSetupTask("session_connector");
-  const tasks = [...setupRun.tasks];
-  const cloudContainerIndex = tasks.findIndex((task) => task.id === "cloud_container");
-  tasks.splice(cloudContainerIndex + 1, 0, connectorTask);
-  return { ...setupRun, tasks };
-}
-
 function normalizeSetupTaskMetadata(setupRun: SessionSetupRun): SessionSetupRun {
   let changed = false;
   const tasks = setupRun.tasks.map((task) => {
@@ -379,7 +330,7 @@ function normalizeSetupTaskMetadata(setupRun: SessionSetupRun): SessionSetupRun 
     changed = true;
     return {
       ...task,
-      canRetry: SETUP_TASK_DEFINITIONS[task.id].canRetry,
+      canRetry: SETUP_TASK_DEFINITION_BY_ID[task.id].canRetry,
     } as SessionSetupTask;
   });
   return changed ? { ...setupRun, tasks } : setupRun;
