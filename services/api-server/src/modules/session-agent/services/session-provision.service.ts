@@ -159,6 +159,8 @@ export class SessionProvisionService {
   }
 
   private async _provision(lease: RuntimeBoundaryLease): Promise<void> {
+    // A failed pass can leave an unconsumed create response in memory. A new
+    // pass must read current provider state instead of reusing that snapshot.
     this.discardFreshSpriteSnapshot();
     this.spriteName = this.getServerState().spriteName;
     const setupRun = this.getClientState().sessionSetupRun;
@@ -297,7 +299,7 @@ export class SessionProvisionService {
     await this.ensureTargetedMigration(
       GIT_EPHEMERAL_TOKEN_RUNTIME_MIGRATION_ID,
       lease,
-      "Ephemeral Git token cutover",
+      "Ephemeral Git authentication",
     );
     this.updatePartialState({ lastError: null });
   }

@@ -641,8 +641,13 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       });
     }
 
+    // Native RPC can bypass onStart, so repair persisted setup state at the
+    // mutex-held readiness boundary before the provisioner reads it.
     this.setupRunService.repairBeforeProvisioning();
     try {
+      // Provisioning executes persisted setup tasks, including their targeted
+      // migration prefixes. The full pass stays below so later revisions remain
+      // runtime reconciliation rather than setup-task reruns.
       await this.provisionService.ensureProvisioned(_lease);
     } catch (error) {
       return failure({
