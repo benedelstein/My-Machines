@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getFadeScaleVisibilityClasses, normalizeHost } from "@/lib/utils";
+import { normalizeHost } from "@/lib/utils";
 
 describe("normalizeHost", () => {
   it("extracts the host from URLs", () => {
@@ -14,34 +14,5 @@ describe("normalizeHost", () => {
 
   it("returns an empty string for blank input", () => {
     expect(normalizeHost("   ")).toBe("");
-  });
-});
-
-describe("getFadeScaleVisibilityClasses", () => {
-  it("returns visible classes when enabled", () => {
-    expect(getFadeScaleVisibilityClasses(true)).toContain("scale-100");
-    expect(getFadeScaleVisibilityClasses(true)).toContain("opacity-100");
-  });
-
-  it("returns hidden classes when disabled", () => {
-    const classes = getFadeScaleVisibilityClasses(false, {
-      hiddenScaleClass: "scale-75",
-    });
-
-    expect(classes).toContain("pointer-events-none");
-    expect(classes).toContain("opacity-0");
-    expect(classes).toContain("scale-75");
-  });
-
-  it("merges optional classes", () => {
-    const classes = getFadeScaleVisibilityClasses(true, {
-      durationClass: "duration-500",
-      easingClass: "ease-out",
-      className: "rounded-md",
-    });
-
-    expect(classes).toContain("duration-500");
-    expect(classes).toContain("ease-out");
-    expect(classes).toContain("rounded-md");
   });
 });

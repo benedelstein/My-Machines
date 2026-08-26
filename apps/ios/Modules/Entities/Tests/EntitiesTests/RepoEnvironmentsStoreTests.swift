@@ -64,10 +64,19 @@ final class RepoEnvironmentsStoreTests: XCTestCase {
         }
 
         try await store.load(repoId: 1)
+        let seededStaleRows = try await pollUntil {
+            let rows = try await cache.fetch(RepoEnvironmentEntity.self, ids: ["stale"])
+            return rows.isEmpty ? nil : rows
+        }
+        XCTAssertEqual(seededStaleRows.map(\.id), ["stale"])
+
         try await store.load(repoId: 1, forceRefresh: true)
 
         XCTAssertEqual(store.environments(repoId: 1)?.map(\.id), ["e1"])
-        let staleRows = try await cache.fetch(RepoEnvironmentEntity.self, ids: ["stale"])
+        let staleRows = try await pollUntil {
+            let rows = try await cache.fetch(RepoEnvironmentEntity.self, ids: ["stale"])
+            return rows.isEmpty ? rows : nil
+        }
         XCTAssertTrue(staleRows.isEmpty)
     }
 
@@ -229,7 +238,7 @@ private actor ResponseQueue {
 }
 
 private actor EnvironmentLoadGate {
-    private(set) var didStart = false
+    private(set) var didStart: Bool = false
     private var continuation: CheckedContinuation<[Domain.RepoEnvironment], Never>?
 
     func response() async -> [Domain.RepoEnvironment] {

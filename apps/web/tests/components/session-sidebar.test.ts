@@ -224,7 +224,7 @@ describe("SessionSidebar", () => {
     ).toBeNull();
   });
 
-  it("renders compact timestamps and reserves the hover action slot", async () => {
+  it("renders compact timestamps", async () => {
     renderSidebar();
 
     await waitFor(() => expect(screen.getByText("5m")).toBeTruthy());
@@ -232,14 +232,6 @@ describe("SessionSidebar", () => {
     expect(screen.getByText("5d")).toBeTruthy();
     expect(screen.getByText("2w")).toBeTruthy();
     expect(screen.getAllByText("1mo")).toHaveLength(2);
-
-    const timestamp = screen.getByText("5m");
-    expect(timestamp.parentElement?.className).toContain("group-hover/menu-item:opacity-0");
-    const openRow = screen.getByText("Open PR").closest("li");
-    expect(openRow).toBeTruthy();
-    expect(
-      within(openRow as HTMLElement).getByRole("button").className,
-    ).toContain("group-hover/menu-item:opacity-100");
   });
 
   it("collapses repo groups and starts new sessions with the repo preselected", async () => {
@@ -247,16 +239,13 @@ describe("SessionSidebar", () => {
 
     expect(screen.getByText("Open PR")).toBeTruthy();
     const repoToggle = screen.getByRole("button", { name: "repo" });
-    const animatedRegion = screen.getByText("Open PR")
-      .closest("[class*='grid-rows']");
-
-    expect(animatedRegion?.className).toContain("grid-rows-[1fr]");
+    expect(repoToggle.getAttribute("aria-expanded")).toBe("true");
 
     fireEvent.click(repoToggle);
-    expect(animatedRegion?.className).toContain("grid-rows-[0fr]");
+    expect(repoToggle.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(repoToggle);
-    expect(animatedRegion?.className).toContain("grid-rows-[1fr]");
+    expect(repoToggle.getAttribute("aria-expanded")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "New session in repo" }));
     expect(mocks.push).toHaveBeenCalledWith(

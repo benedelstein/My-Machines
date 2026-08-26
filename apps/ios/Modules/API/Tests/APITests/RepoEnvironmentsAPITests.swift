@@ -14,7 +14,7 @@ struct RepoEnvironmentsAPITests {
 
         let domains = try await api.defaultNetworkAllowlist()
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         #expect(request.httpMethod == "GET")
         #expect(request.url?.path == "/environments/default-allowlist")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
@@ -76,7 +76,7 @@ struct RepoEnvironmentsAPITests {
             )
         )
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/repos/42/environments")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
@@ -98,8 +98,8 @@ struct RepoEnvironmentsAPITests {
             )
         )
 
-        let request = try #require(await recorder.request)
-        let body = try #require(await recorder.body)
+        let request = try #require(recorder.request)
+        let body = try #require(recorder.body)
         let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
         #expect(request.httpMethod == "PATCH")
         #expect(request.url?.path == "/repos/42/environments/environment-id")
@@ -131,7 +131,7 @@ struct RepoEnvironmentsAPITests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [EnvironmentURLProtocol.self]
         EnvironmentURLProtocol.handler = { request in
-            await recorder.record(request, body: request.bodyData)
+            recorder.record(request, body: request.bodyData)
             guard let url = request.url,
                   let response = HTTPURLResponse(
                       url: url,
@@ -152,7 +152,7 @@ struct RepoEnvironmentsAPITests {
         )
     }
 
-    private static let responseJSON = #"""
+    private static let responseJSON: String = #"""
     {
       "environment": {
         "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -172,13 +172,24 @@ struct RepoEnvironmentsAPITests {
     """#
 }
 
-private actor RequestRecorder {
-    private(set) var request: URLRequest?
-    private(set) var body: Data?
+private final class RequestRecorder: @unchecked Sendable {
+    private let lock: NSLock = .init()
+    private var storedRequest: URLRequest?
+    private var storedBody: Data?
+
+    var request: URLRequest? {
+        lock.withLock { storedRequest }
+    }
+
+    var body: Data? {
+        lock.withLock { storedBody }
+    }
 
     func record(_ request: URLRequest, body: Data?) {
-        self.request = request
-        self.body = body
+        lock.withLock {
+            storedRequest = request
+            storedBody = body
+        }
     }
 }
 
@@ -208,19 +219,17 @@ private struct TestTokenProvider: AuthTokenProviding {
 }
 
 private final class EnvironmentURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) async -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
 
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        Task { [request] in
-            guard let handler = Self.handler else { return }
-            let (response, data) = await handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        }
+        guard let handler = Self.handler else { return }
+        let (response, data) = handler(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
     }
 
     override func stopLoading() {}

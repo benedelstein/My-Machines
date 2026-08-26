@@ -41,6 +41,17 @@ const LINK_ATTEMPT_TTL_MS = 15 * 60 * 1000;
 const ACCOUNT_LINK_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const LINK_TOKEN_BYTES = 32;
 
+export interface IntegrationSessionRequestStores {
+  accountLinks: Pick<
+    IntegrationAccountLinkRepository,
+    "getActive" | "listActiveByUserId" | "revokeByUserAndProvider" | "touchLastUsed" | "upsert"
+  >;
+  linkAttempts: Pick<
+    IntegrationLinkAttemptRepository,
+    "consumeValid" | "create" | "deleteForExternalUser"
+  >;
+}
+
 // Anthropic structured output rejects numeric minimum/maximum and string
 // maxLength schema keywords, so express the bounds in descriptions instead.
 const repoRoutingSchema = z.object({
@@ -60,14 +71,20 @@ const REPO_ROUTER_SYSTEM_PROMPT = dedent`
 export class IntegrationSessionRequestService {
   private readonly env: Env;
   private readonly deps: IntegrationSessionRequestDeps;
-  private readonly accountLinkRepository: IntegrationAccountLinkRepository;
-  private readonly linkAttemptRepository: IntegrationLinkAttemptRepository;
+  private readonly accountLinkRepository: IntegrationSessionRequestStores["accountLinks"];
+  private readonly linkAttemptRepository: IntegrationSessionRequestStores["linkAttempts"];
 
-  constructor(env: Env, deps: IntegrationSessionRequestDeps) {
+  constructor(
+    env: Env,
+    deps: IntegrationSessionRequestDeps,
+    stores?: IntegrationSessionRequestStores,
+  ) {
     this.env = env;
     this.deps = deps;
-    this.accountLinkRepository = new IntegrationAccountLinkRepository(env.DB);
-    this.linkAttemptRepository = new IntegrationLinkAttemptRepository(env.DB);
+    this.accountLinkRepository = stores?.accountLinks
+      ?? new IntegrationAccountLinkRepository(env.DB);
+    this.linkAttemptRepository = stores?.linkAttempts
+      ?? new IntegrationLinkAttemptRepository(env.DB);
   }
 
   /**

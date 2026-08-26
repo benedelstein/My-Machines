@@ -14,7 +14,7 @@ struct ProviderAuthAPITests {
 
         let authorization = try await api.claudeAuthorization()
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         #expect(request.httpMethod == "GET")
         #expect(request.url?.path == "/auth/claude")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
@@ -31,8 +31,8 @@ struct ProviderAuthAPITests {
             sessionId: "session-1"
         )
 
-        let request = try #require(await recorder.request)
-        let body = try #require(await recorder.body)
+        let request = try #require(recorder.request)
+        let body = try #require(recorder.body)
         let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: String])
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/auth/claude/token")
@@ -43,12 +43,20 @@ struct ProviderAuthAPITests {
         let recorder = ProviderAuthRequestRecorder()
         let api = makeAPI(
             recorder: recorder,
-            responseJSON: #"{"attemptId":"attempt-1","verificationUrl":"https://openai.com/device","userCode":"ABCD","intervalSeconds":5,"expiresAt":"2026-07-17T12:00:00Z"}"#
+            responseJSON: #"""
+            {
+              "attemptId":"attempt-1",
+              "verificationUrl":"https://openai.com/device",
+              "userCode":"ABCD",
+              "intervalSeconds":5,
+              "expiresAt":"2026-07-17T12:00:00Z"
+            }
+            """#
         )
 
         let authorization = try await api.startOpenAIDeviceAuthorization()
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/auth/openai/device/start")
         #expect(authorization.attemptId == "attempt-1")
@@ -66,7 +74,7 @@ struct ProviderAuthAPITests {
             sessionId: "session-2"
         )
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         #expect(request.httpMethod == "GET")
         #expect(request.url?.path == "/auth/openai/device/attempts/attempt-1")
         #expect(request.url?.query == "sessionId=session-2")
@@ -79,7 +87,7 @@ struct ProviderAuthAPITests {
 
         try await api.disconnectClaude()
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/auth/claude/disconnect")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
@@ -91,7 +99,7 @@ struct ProviderAuthAPITests {
 
         try await api.disconnectOpenAI()
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/auth/openai/disconnect")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
@@ -107,7 +115,7 @@ struct ProviderAuthAPITests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ProviderAuthURLProtocol.self]
         ProviderAuthURLProtocol.handler = { request in
-            await recorder.record(request, body: request.providerAuthBodyData)
+            recorder.record(request, body: request.providerAuthBodyData)
             guard let url = request.url,
                   let response = HTTPURLResponse(
                       url: url,
@@ -129,13 +137,24 @@ struct ProviderAuthAPITests {
     }
 }
 
-private actor ProviderAuthRequestRecorder {
-    private(set) var request: URLRequest?
-    private(set) var body: Data?
+private final class ProviderAuthRequestRecorder: @unchecked Sendable {
+    private let lock: NSLock = .init()
+    private var storedRequest: URLRequest?
+    private var storedBody: Data?
+
+    var request: URLRequest? {
+        lock.withLock { storedRequest }
+    }
+
+    var body: Data? {
+        lock.withLock { storedBody }
+    }
 
     func record(_ request: URLRequest, body: Data?) {
-        self.request = request
-        self.body = body
+        lock.withLock {
+            storedRequest = request
+            storedBody = body
+        }
     }
 }
 
@@ -165,19 +184,17 @@ private struct ProviderAuthTestTokenProvider: AuthTokenProviding {
 }
 
 private final class ProviderAuthURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) async -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
 
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        Task { [request] in
-            guard let handler = Self.handler else { return }
-            let (response, data) = await handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        }
+        guard let handler = Self.handler else { return }
+        let (response, data) = handler(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
     }
 
     override func stopLoading() {}

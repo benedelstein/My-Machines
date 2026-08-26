@@ -14,6 +14,20 @@ This document is the source of truth for repo-wide coding style and engineering 
 - Use concise git commit messages.
 - Do not use emojis in git messages or code comments.
 
+## Pull Requests
+
+- Keep each pull request focused. Use a clear title and description that explain the intent, important tradeoffs,
+  and validation performed. Do not include unrelated working-tree changes.
+- Before requesting review, run the relevant validation and push the complete change so reviewers inspect the
+  current head.
+- Monitor required checks and every GitHub review conversation. Evaluate each comment against the code; fix and
+  validate valid findings, or explain why no change is appropriate.
+- Reply in each review thread with the concrete outcome and, when applicable, the fixing commit before resolving
+  the conversation.
+- Resolve every conversation once it has been handled, including informational callouts intended for reviewers.
+- Merge only after required checks and reviews pass and no unresolved conversations remain. Address any new CI or
+  review feedback before merging.
+
 ## Dependencies
 
 - If adding a dependency to multiple packages, prefer the shared catalog in `pnpm-workspace.yaml`.

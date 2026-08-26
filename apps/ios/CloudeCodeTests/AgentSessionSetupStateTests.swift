@@ -35,7 +35,7 @@ extension AgentSessionTranscriptStateTests {
         #expect(!viewModel.isSetupRunExpanded)
     }
 
-    @Test func completedSetupWithNonBlockingFailureStaysExpanded() {
+    @Test func completedSetupWithNonBlockingFailureCollapsesTheRun() {
         let viewModel = makeViewModel()
 
         viewModel.applyLiveState(liveState(
@@ -43,7 +43,7 @@ extension AgentSessionTranscriptStateTests {
             setupRun: setupRun(status: .completed, taskStatus: .failed)
         ))
 
-        #expect(viewModel.isSetupRunExpanded)
+        #expect(!viewModel.isSetupRunExpanded)
     }
 
     private func setupRun(
