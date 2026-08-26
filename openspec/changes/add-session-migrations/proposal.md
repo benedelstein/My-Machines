@@ -77,9 +77,10 @@ before application code hydrates or reads them.
   acquiring the mutex. Have the mutex yield an opaque branded lease required by
   `_ensureReady(lease, ...)` and mutating coordinator methods so ordinary ungated calls
   fail compilation.
-- Make `ensureReady()` the single readiness pipeline for initialization,
-  provisioning, awaited runtime migrations, and pending initial-message
-  dispatch.
+- Keep `_ensureReady(lease)` limited to runtime preparation: initialization,
+  provisioning, and awaited runtime migrations. Use one admission/dispatch
+  orchestration path that runs readiness first, claims pending work under the
+  same boundary, and performs process I/O after release.
 - Keep background/best-effort maintenance out of the initial migration API.
   Every registered runtime migration is awaited, runs serially, and must be
   current before a turn begins.

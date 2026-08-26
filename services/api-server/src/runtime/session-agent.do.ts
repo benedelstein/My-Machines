@@ -1,7 +1,7 @@
-import { SpriteLifecycleClient } from "@repo/sprites-client";
 import {
   type ClientState,
   type Logger,
+  type Result,
   type SessionSetupRun,
   ClientMessage as ClientMessageSchema,
   type ClientMessage,
@@ -13,19 +13,13 @@ import {
 } from "@repo/shared";
 import type { Env } from "@/shared/types";
 import { Agent, type Connection } from "agents";
-import { MessageRepository } from "@/modules/session-agent/repositories/message.repository";
-import { PendingChunkRepository } from "@/modules/session-agent/repositories/pending-chunk.repository";
-import { SecretRepository } from "@/modules/session-agent/repositories/secret.repository";
-import { LatestPlanRepository } from "@/modules/session-agent/repositories/latest-plan.repository";
-import {
-  ServerStateRepository,
-  type ServerState,
-} from "@/modules/session-agent/repositories/server-state.repository";
-import { SessionEnvironmentSnapshotRepository } from "@/modules/session-agent/repositories/session-environment-snapshot.repository";
-import { SessionConnectorsRepository } from "@/modules/session-agent/repositories/session-connectors.repository";
-import { SetupOutputRepository } from "@/modules/session-agent/repositories/setup-output.repository";
-import { migrateAll } from "@/modules/session-agent/repositories/schema-manager.repository";
-import { AgentSdkStateRepository } from "@/modules/session-agent/repositories/agent-sdk-state.repository";
+import type { SpriteLifecycleClient } from "@repo/sprites-client";
+import type { SecretRepository } from
+  "@/modules/session-agent/repositories/secret.repository";
+import type { ServerStateRepository, ServerState } from
+  "@/modules/session-agent/repositories/server-state.repository";
+import type { SessionEnvironmentSnapshotRepository } from
+  "@/modules/session-agent/repositories/session-environment-snapshot.repository";
 import { createLogger, initializeLogger } from "@/shared/logging";
 import type { UIMessage, UIMessageChunk } from "ai";
 import type {
@@ -50,48 +44,91 @@ import type {
   LogLevel,
   ChatMessageEvent,
 } from "@repo/shared";
-import { AgentTurnCoordinator } from "@/modules/session-agent/services/agent-turn-coordinator.service";
-import { SessionConnectorService } from "@/modules/session-agent/services/session-connector.service";
-import { SessionProvisionService } from "@/modules/session-agent/services/session-provision.service";
-import { SessionChatDispatchService } from "@/modules/session-agent/services/session-chat-dispatch.service";
-import { SessionSetupRunService } from "@/modules/session-agent/services/session-setup-run.service";
-import { SessionSetupOutputService } from "@/modules/session-agent/services/session-setup-output.service";
-import { SessionProviderConnectionService } from "@/modules/session-agent/services/session-provider-connection.service";
-import { SessionGitProxyService } from "@/modules/session-agent/services/session-git-proxy.service";
-import { SessionQueryService } from "@/modules/session-agent/services/session-query.service";
-import { SessionSummaryService } from "@/modules/session-agent/services/session-summary.service";
-import { SessionSyncService } from "@/modules/session-agent/services/session-sync.service";
-import { getProviderAuthService } from "@/modules/ai-auth/services/provider-auth.service";
-import { getProviderCredentialAdapter } from "@/modules/ai-auth/services/provider-credential-adapter.service";
-import { GitHubAppService } from "@/modules/github/services/github-app.service";
-import { SessionsRepository } from "@/modules/sessions/repositories/sessions.repository";
-import { createSessionSummaryWriter } from "@/modules/sessions/services/session-access.service";
-import { createPullRequestForSessionContext } from "@/modules/sessions/services/session-pull-request.service";
-import { createUserSessionsPublisher } from "@/modules/sessions/services/user-sessions-publisher.service";
-import { NotificationPublisher } from "@/modules/notifications/services/notification-publisher.service";
-import { SessionAgentAttachmentProvider } from "./session-agent-attachment-provider";
-import { SpriteAgentProcessManager } from "@/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
+import type {
+  AgentTurnCoordinator,
+  FinishedAssistantTurn,
+} from
+  "@/modules/session-agent/services/agent-turn-coordinator.service";
+import type { SpriteAgentProcessManager } from
+  "@/modules/session-agent/services/agent-process/sprite-agent-process-manager.service";
+import type {
+  ChatDispatchError,
+  ClaimedTurn,
+  PreparedChatMessage,
+  SessionChatDispatchService,
+} from "@/modules/session-agent/services/session-chat-dispatch.service";
+import type { SessionConnectorService } from
+  "@/modules/session-agent/services/session-connector.service";
+import type { SessionGitProxyService } from
+  "@/modules/session-agent/services/session-git-proxy.service";
+import type { SessionProviderConnectionService } from
+  "@/modules/session-agent/services/session-provider-connection.service";
+import type { SessionProvisionService } from
+  "@/modules/session-agent/services/session-provision.service";
+import type { SessionQueryService } from
+  "@/modules/session-agent/services/session-query.service";
+import type { SessionSetupRunService } from
+  "@/modules/session-agent/services/session-setup-run.service";
+import type { SessionSummaryService } from
+  "@/modules/session-agent/services/session-summary.service";
+import type { SessionSyncService } from
+  "@/modules/session-agent/services/session-sync.service";
 import { normalizePullRequestState } from "@/modules/session-agent/utils/session-agent-pull-request-state.utils";
 import { synthesizeSessionStatus } from "@/modules/session-agent/utils/session-status.utils";
-import { SessionAutoPullRequestService } from "./session-auto-pull-request.service";
-import { SessionPullRequestLifecycleService } from "./session-pull-request-lifecycle.service";
-import { SessionRepoAccessLifecycleService } from "./session-repo-access-lifecycle.service";
-import { SessionTurnNotificationService } from "./session-turn-notification.service";
+import {
+  RuntimeBoundaryMutex,
+  type RuntimeBoundaryLease,
+} from "./runtime-boundary-mutex";
+import { getInitialClientState } from "@/modules/session-agent/utils/initial-client-state.utils";
+import type { SessionAgentAttachmentProvider } from "./session-agent-attachment-provider";
+import type { SessionAutoPullRequestService } from
+  "./session-auto-pull-request.service";
+import type { SessionPullRequestLifecycleService } from
+  "./session-pull-request-lifecycle.service";
+import type { SessionRepoAccessLifecycleService } from
+  "./session-repo-access-lifecycle.service";
+import type { SessionTurnNotificationService } from
+  "./session-turn-notification.service";
+import {
+  createSessionAgentDependencies,
+  createSessionAgentRepositories,
+} from "./session-agent-dependencies";
+
+type EnsureReadyOutcome =
+  | { outcome: "ready" }
+  | { outcome: "setup_incomplete" };
+
+type EnsureReadyError = {
+  code:
+    | "SESSION_NOT_INITIALIZED"
+    | "INITIALIZATION_FAILED"
+    | "PROVISIONING_FAILED";
+  message: string;
+};
+
+type EnsureReadyResult = Result<EnsureReadyOutcome, EnsureReadyError>;
+
+type ChatAdmissionError = {
+  code: "READINESS_FAILED" | "TURN_CONFLICT";
+  message: string;
+};
+
+type ChatAdmissionResult = Result<void, ChatAdmissionError | ChatDispatchError>;
+
+type ReadyTurnAdmission = {
+  source: "pending" | "prepared";
+  turn: ClaimedTurn;
+};
 
 interface AgentStateInternalAccess {
   _setStateInternal(state: ClientState, source: Connection | "server"): unknown;
 }
-
 export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAgentRpc {
   private readonly logger: Logger;
   private readonly spriteLifecycleClient: SpriteLifecycleClient;
-  private readonly messageRepository: MessageRepository;
   private readonly secretRepository: SecretRepository;
-  private readonly latestPlanRepository: LatestPlanRepository;
   private readonly serverStateRepository: ServerStateRepository;
   private readonly environmentSnapshotRepository: SessionEnvironmentSnapshotRepository;
-  private readonly pendingChunkRepository: PendingChunkRepository;
-  private readonly setupOutputRepository: SetupOutputRepository;
   private readonly attachmentService: SessionAgentAttachmentProvider;
   /** In-memory ServerState mirror — written through via updateServerState() */
   private serverState: ServerState;
@@ -100,39 +137,20 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   private readonly provisionService: SessionProvisionService;
   private readonly chatDispatchService: SessionChatDispatchService;
   private readonly setupRunService: SessionSetupRunService;
-  private readonly setupOutputService: SessionSetupOutputService;
   private readonly providerConnectionService: SessionProviderConnectionService;
   private readonly sessionConnectorService: SessionConnectorService;
   private readonly gitProxyService: SessionGitProxyService;
   private readonly queryService: SessionQueryService;
   private readonly sessionSummaryService: SessionSummaryService;
   private readonly syncService: SessionSyncService;
-  private readonly githubAppService: GitHubAppService;
   private readonly pullRequestLifecycleService: SessionPullRequestLifecycleService;
   private readonly repoAccessLifecycleService: SessionRepoAccessLifecycleService;
   private readonly autoPullRequestService: SessionAutoPullRequestService;
-  private readonly notificationPublisher: NotificationPublisher;
   private readonly turnNotificationService: SessionTurnNotificationService;
+  private readonly runtimeBoundaryMutex = new RuntimeBoundaryMutex();
   private initializeSessionStatePromise: Promise<HandleInitResult> | null = null;
 
-  initialState: ClientState = {
-    repoFullName: null,
-    status: "preparing",
-    sessionSetupRun: null,
-    agentSettings: { ...DEFAULT_AGENT_SETTINGS },
-    agentMode: "edit",
-    pushedBranch: null,
-    pullRequest: null,
-    todos: null,
-    plan: null,
-    pendingUserMessage: null,
-    activeTurn: null,
-    editorUrl: null,
-    providerConnection: null,
-    lastError: null,
-    baseBranch: null,
-    createdAt: new Date().toISOString(),
-  };
+  initialState: ClientState = getInitialClientState();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -145,251 +163,61 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
 
     this.disableClientStateUpdates();
 
-    // Local migrations must run before ServerState loads, services construct,
-    // or SDK state hydrates.
-    const sql = this.sql.bind(this);
-    this.messageRepository = new MessageRepository(sql);
-    this.secretRepository = new SecretRepository(sql);
-    this.latestPlanRepository = new LatestPlanRepository(sql);
-    this.serverStateRepository = new ServerStateRepository(sql);
-    this.environmentSnapshotRepository = new SessionEnvironmentSnapshotRepository(sql);
-    this.pendingChunkRepository = new PendingChunkRepository(sql);
-    this.setupOutputRepository = new SetupOutputRepository(sql);
-
-    migrateAll(sql, ctx.storage, [
-      this.messageRepository, this.secretRepository, this.latestPlanRepository,
-      this.serverStateRepository, this.environmentSnapshotRepository,
-      this.pendingChunkRepository, this.setupOutputRepository,
-      // Migration-only Agents SDK client-state adapter; normal reads/writes stay on the SDK.
-      new AgentSdkStateRepository(),
-    ]);
-
+    // Local migrations and ServerState load must precede service construction.
+    const repositories = createSessionAgentRepositories(
+      this.sql.bind(this),
+      ctx.storage,
+    );
+    this.secretRepository = repositories.secretRepository;
+    this.serverStateRepository = repositories.serverStateRepository;
+    this.environmentSnapshotRepository = repositories.environmentSnapshotRepository;
     this.serverState = this.serverStateRepository.get();
 
-    this.setupOutputService = new SessionSetupOutputService({
+    const dependencies = createSessionAgentDependencies({
+      env,
       logger: this.logger,
-      repository: this.setupOutputRepository,
-      broadcastMessage: (msg) => this.broadcastMessage(msg),
-    });
-    this.spriteLifecycleClient = new SpriteLifecycleClient({
-      apiKey: this.env.SPRITES_API_KEY,
-      logger: createLogger("sprites.ts"),
-    });
-    this.attachmentService = new SessionAgentAttachmentProvider(this.env.DB);
-    this.githubAppService = new GitHubAppService(this.env, this.logger);
-    this.notificationPublisher = new NotificationPublisher(this.env);
-    this.turnNotificationService = new SessionTurnNotificationService({
-      notificationPublisher: this.notificationPublisher,
-      sessionsRepository: new SessionsRepository(this.env.DB),
-    });
-    const userSessionsPublisher = createUserSessionsPublisher(
-      this.env,
-      this.logger.scope("user-sessions-publisher"),
-    );
-    this.sessionSummaryService = new SessionSummaryService({
-      repository: createSessionSummaryWriter(this.env),
-      getSessionId: () => this.serverState.sessionId,
-      getUserId: () => this.serverState.userId,
-      publishSessionSummaryInvalidated: (userId, sessionId) =>
-        userSessionsPublisher.invalidateSessionSummary({ userId, sessionId }),
-      logger: this.logger,
-    });
-    this.queryService = new SessionQueryService({
-      messageRepository: this.messageRepository,
-      latestPlanRepository: this.latestPlanRepository,
-      setupOutputRepository: this.setupOutputRepository,
-      getSetupOutputEpoch: () => this.setupOutputService.getEpoch(),
-      getServerState: () => this.serverState,
-      getClientState: () => this.state,
-    });
-    this.pullRequestLifecycleService = new SessionPullRequestLifecycleService({
-      logger: this.logger,
-      github: this.githubAppService,
-      anthropicApiKey: this.env.ANTHROPIC_API_KEY,
-      webOrigin: this.env.WEB_ORIGIN,
-      createPullRequest: createPullRequestForSessionContext,
-      messageRepository: this.messageRepository,
-      sessionSummaryService: this.sessionSummaryService,
-      getServerState: () => this.serverState,
-      getClientState: () => this.state,
-      setPullRequestClientState: (pullRequest) =>
-        this.updatePartialState({ pullRequest }),
-    });
-    this.repoAccessLifecycleService = new SessionRepoAccessLifecycleService({
-      logger: this.logger,
-      env: this.env,
-      getServerState: () => this.serverState,
-      updatePartialState: (partial) => this.updatePartialState(partial),
-      cancelActiveTurnAndClearState: () => this.cancelActiveTurnAndClearState(),
-      killActiveProcess: () => this.processManager.kill(),
-    });
-    this.autoPullRequestService = new SessionAutoPullRequestService({
-      logger: this.logger,
-      createPullRequest: () => this.handleCreatePullRequest(),
-      getState: () => ({
-        sessionId: this.serverState.sessionId,
-        repoFullName: this.state.repoFullName,
-        pushedBranch: this.state.pushedBranch,
-        pullRequestStatus: this.state.pullRequest?.status ?? null,
-      }),
-      keepAliveWhile: (callback) => this.keepAliveWhile(callback),
-      assertSessionRepoAccess: () =>
-        this.repoAccessLifecycleService.assertSessionRepoAccess(),
-      enforceSessionAccessBlocked: () => this.enforceSessionAccessBlocked(false),
-    });
-
-    this.setupRunService = new SessionSetupRunService({
-      getServerState: () => this.serverState,
-      getClientState: () => this.state,
-      updateRunState: (setupRun) => this.updateSetupRun(setupRun),
-    });
-    this.turnCoordinator = new AgentTurnCoordinator({
-      logger: this.logger,
-      env: this.env,
-      messageRepository: this.messageRepository,
-      pendingChunkRepository: this.pendingChunkRepository,
-      latestPlanRepository: this.latestPlanRepository,
-      getServerState: () => this.serverState,
-      updateServerState: (partial) => this.updateServerState(partial),
-      getClientState: () => this.state,
-      updatePartialState: (partial) => this.updatePartialState(partial),
-      broadcastMessage: (msg: ServerMessage) => this.broadcastMessage(msg),
-      synthesizeStatus: () => this.synthesizeStatus(),
-      terminateActiveProcess: () => this.processManager.terminateActiveProcess(),
-      updateWorkingState: (state) =>
-        this.sessionSummaryService.persistWorkingState(state),
-      onTurnFinished: (turn) => {
-        const summaryPersistence = this.sessionSummaryService.persistAssistantTurnFinished({
-          messageId: turn.message.id,
-          messageCreatedAt: turn.messageCreatedAt,
-          aborted: turn.aborted,
-        });
-        if (turn.aborted) {
-          return;
-        }
-        void summaryPersistence
-          .then(() => this.publishTurnFinishedNotification(turn.message))
-          .catch((error: unknown) => {
-            this.logger.error("Failed to enqueue turn finished notification", {
-              fields: {
-                sessionId: this.serverState.sessionId,
-                userId: this.serverState.userId,
-                messageId: turn.message.id,
-              },
-              error,
-            });
-          });
-        this.autoPullRequestService.queueCreateAfterTurnFinish();
+      repositories,
+      host: {
+        getServerState: () => this.serverState,
+        getClientState: () => this.state,
+        updateServerState: (partial) => this.updateServerState(partial),
+        updatePartialState: (partial) => this.updatePartialState(partial),
+        updateSetupRun: (setupRun) => this.updateSetupRun(setupRun),
+        broadcastMessage: (message, without) =>
+          this.broadcastMessage(message, without),
+        sendMessageToConnection: (message, connectionId) =>
+          this.sendMessageToConnection(message, connectionId),
+        synthesizeStatus: () => this.synthesizeStatus(),
+        cancelActiveTurnAndClearState: () => this.cancelActiveTurnAndClearState(),
+        keepAliveWhile: (callback) => this.keepAliveWhile(callback),
+        createPullRequest: () => this.handleCreatePullRequest(),
+        enforceSessionAccessBlocked: (notifyClients) =>
+          this.enforceSessionAccessBlocked(notifyClients),
+        updateWorkingState: (state) =>
+          this.sessionSummaryService.persistWorkingState(state),
+        persistPushedBranch: (branch) =>
+          this.sessionSummaryService.persistPushedBranch(branch),
+        onTurnFinished: (turn) => this.handleTurnFinished(turn),
+        onTurnSettled: () => this.startRuntimeReadinessAndDispatch(),
       },
     });
-    this.syncService = new SessionSyncService({
-      messageRepository: this.messageRepository,
-      getServerState: () => this.serverState,
-      getClientState: () => this.state,
-      getPendingChunks: () => this.turnCoordinator.getPendingChunks(),
-      getPendingMessageMetadata: () => this.turnCoordinator.getPendingMessageMetadata(),
-    });
-
-    this.processManager = new SpriteAgentProcessManager({
-      env: this.env,
-      logger: this.logger,
-      secretRepository: this.secretRepository,
-      getServerState: () => this.serverState,
-      updateAgentProcessState: (partial) => this.updateServerState(partial),
-      getClientState: () => this.state,
-      getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
-      getProviderCredentialAdapter,
-      getConnectorGatewayBase: () => this.sessionConnectorService.getGatewayBase(),
-    });
-
-    this.sessionConnectorService = new SessionConnectorService({
-      logger: this.logger,
-      env: this.env,
-      spriteLifecycleClient: this.spriteLifecycleClient,
-      repository: new SessionConnectorsRepository(this.env.DB),
-      getServerState: () => this.serverState,
-      setSessionConnectorId: (gatewayConnectionId) =>
-        this.updateServerState({ sessionConnectorId: gatewayConnectionId }),
-      getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
-      ensureWebhookToken: () => this.processManager.ensureWebhookToken(),
-    });
-
-    this.provisionService = new SessionProvisionService({
-      logger: this.logger,
-      env: this.env,
-      spriteLifecycleClient: this.spriteLifecycleClient,
-      getServerState: () => this.serverState,
-      getClientState: () => this.state,
-      getEnvironmentSnapshot: () => this.environmentSnapshotRepository.get(),
-      updateServerState: (partial) => this.updateServerState(partial),
-      updatePartialState: (partial) => this.updatePartialState(partial),
-      synthesizeStatus: () => this.synthesizeStatus(),
-      retireGitProxySecret: () => this.gitProxyService.retireGitProxySecret(),
-      ensureSessionConnector: (spriteName) =>
-        this.sessionConnectorService.ensureMinted(spriteName),
-      getSessionConnectorGatewayBase: () =>
-        this.sessionConnectorService.getGatewayBase(),
-      githubTokenProvider: this.githubAppService,
-      setupReporter: {
-        startTask: (taskId) => this.setupRunService.startTask(taskId),
-        completeTask: (taskId, output) => this.setupRunService.completeTask(taskId, output),
-        failTask: (taskId, error, output) => this.setupRunService.failTask(taskId, error, output),
-        skipTask: (taskId, skipReason) => this.setupRunService.skipTask(taskId, skipReason),
-      },
-      setupOutputCollector: this.setupOutputService,
-    });
-
-    this.chatDispatchService = new SessionChatDispatchService({
-      logger: this.logger,
-      env: this.env,
-      messageRepository: this.messageRepository,
-      attachmentService: this.attachmentService,
-      turnCoordinator: this.turnCoordinator,
-      processManager: this.processManager,
-      getServerState: () => this.serverState,
-      getClientState: () => this.state,
-      updatePartialState: (partial) => this.updatePartialState(partial),
-      broadcastMessage: (msg, without) => this.broadcastMessage(msg, without),
-      sendMessageToConnection: (msg, connectionId) => {
-        const connection = Array.from(this.getConnections())
-          .find((candidate) => candidate.id === connectionId);
-        if (!connection) {
-          this.logger.warn("Cannot send message to missing connection", {
-            fields: { connectionId, type: msg.type },
-          });
-          return;
-        }
-        this.sendMessage(msg, connection);
-      },
-      synthesizeStatus: () => this.synthesizeStatus(),
-      publishSessionSummaryInvalidated: (userId, sessionId) =>
-        userSessionsPublisher.invalidateSessionSummary({ userId, sessionId }),
-    });
-
-    this.providerConnectionService = new SessionProviderConnectionService({
-      logger: this.logger,
-      env: this.env,
-      getServerState: () => this.serverState,
-      getClientState: () => this.state,
-      updatePartialState: (partial) => this.updatePartialState(partial),
-      getProviderConnectionStatus: (provider, userId, env, logger) =>
-        getProviderAuthService(provider, env, logger).getConnectionStatus(userId),
-    });
-
-    this.gitProxyService = new SessionGitProxyService({
-      logger: this.logger,
-      env: this.env,
-      secretRepository: this.secretRepository,
-      getServerState: () => this.serverState,
-      getClientState: () => this.state,
-      updatePartialState: (partial) => this.updatePartialState(partial),
-      updatePushedBranch: (branch) =>
-        this.sessionSummaryService.persistPushedBranch(branch),
-      assertSessionRepoAccess: () =>
-        this.repoAccessLifecycleService.assertSessionRepoAccess(),
-      enforceSessionAccessBlocked: () => this.enforceSessionAccessBlocked(),
-      githubTokenProvider: this.githubAppService,
-    });
+    this.spriteLifecycleClient = dependencies.spriteLifecycleClient;
+    this.attachmentService = dependencies.attachmentService;
+    this.turnCoordinator = dependencies.turnCoordinator;
+    this.processManager = dependencies.processManager;
+    this.provisionService = dependencies.provisionService;
+    this.chatDispatchService = dependencies.chatDispatchService;
+    this.setupRunService = dependencies.setupRunService;
+    this.providerConnectionService = dependencies.providerConnectionService;
+    this.sessionConnectorService = dependencies.sessionConnectorService;
+    this.gitProxyService = dependencies.gitProxyService;
+    this.queryService = dependencies.queryService;
+    this.sessionSummaryService = dependencies.sessionSummaryService;
+    this.syncService = dependencies.syncService;
+    this.pullRequestLifecycleService = dependencies.pullRequestLifecycleService;
+    this.repoAccessLifecycleService = dependencies.repoAccessLifecycleService;
+    this.autoPullRequestService = dependencies.autoPullRequestService;
+    this.turnNotificationService = dependencies.turnNotificationService;
 
     this.logger.info("Constructed agent DO", {
       fields: { sessionId: this.serverState.sessionId },
@@ -431,7 +259,6 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   // State helpers
-
   private updatePartialState(partial: Partial<ClientState>): void {
     this.setState({ ...this.state, ...partial });
   }
@@ -455,6 +282,30 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       initialized: this.serverState.initialized,
       setupRun: setupRun === undefined ? this.state.sessionSetupRun : setupRun,
     });
+  }
+
+  private handleTurnFinished(turn: FinishedAssistantTurn): void {
+    const summaryPersistence = this.sessionSummaryService.persistAssistantTurnFinished({
+      messageId: turn.message.id,
+      messageCreatedAt: turn.messageCreatedAt,
+      aborted: turn.aborted,
+    });
+    if (turn.aborted) {
+      return;
+    }
+    void summaryPersistence
+      .then(() => this.publishTurnFinishedNotification(turn.message))
+      .catch((error: unknown) => {
+        this.logger.error("Failed to enqueue turn finished notification", {
+          fields: {
+            sessionId: this.serverState.sessionId,
+            userId: this.serverState.userId,
+            messageId: turn.message.id,
+          },
+          error,
+        });
+      });
+    this.autoPullRequestService.queueCreateAfterTurnFinish();
   }
 
   private async publishTurnFinishedNotification(message: UIMessage): Promise<void> {
@@ -579,7 +430,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     }
 
     // Always call ensureReady — idempotent, skips completed steps via serverState checkpoints
-    this.queueEnsureReady();
+    this.startRuntimeReadinessAndDispatch();
     this.providerConnectionService.queueRefresh();
   }
 
@@ -671,32 +522,142 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
   }
 
   // Provisioning
+  /** Runs readiness, then synchronously admits pending work before prepared work. */
+  private async admitNextTurn(
+    prepared?: PreparedChatMessage,
+  ): Promise<{
+    readiness: EnsureReadyResult;
+    admission: ReadyTurnAdmission | null;
+  }> {
+    return this.runtimeBoundaryMutex.runExclusive(async (lease) => {
+      this.chatDispatchService.recoverInterruptedClaim();
+      const readiness = await this._ensureReady(lease);
+      let admission: ReadyTurnAdmission | null = null;
+      if (readiness.ok && readiness.value.outcome === "ready") {
+        const pendingTurn = this.chatDispatchService.claimPendingMessage();
+        if (pendingTurn) {
+          admission = { source: "pending", turn: pendingTurn };
+        } else if (
+          prepared &&
+          !this.serverState.activeUserMessageId &&
+          !this.state.pendingUserMessage
+        ) {
+          admission = {
+            source: "prepared",
+            turn: this.chatDispatchService.claimPreparedMessage(prepared),
+          };
+        }
+      }
+      return { readiness, admission };
+    });
+  }
 
-  /**
-   * Single entry point for getting the session to a ready state.
-   * Called by both handleInit (HTTP) and onConnect (WebSocket).
-   * Uses mutexes so concurrent callers share one in-flight operation.
-   * Each step is idempotent — skipped if already completed via serverState checkpoints.
+  /** Keeps the complete readiness, admission, and post-boundary dispatch alive. */
+  private async ensureRuntimeReadyAndDispatchNextTurn(): Promise<
+    EnsureReadyResult
+  >;
+  private async ensureRuntimeReadyAndDispatchNextTurn(
+    prepared: PreparedChatMessage,
+  ): Promise<ChatAdmissionResult>;
+  private async ensureRuntimeReadyAndDispatchNextTurn(
+    prepared?: PreparedChatMessage,
+  ): Promise<EnsureReadyResult | ChatAdmissionResult> {
+    return this.keepAliveWhile(async () => {
+      const boundary = await this.admitNextTurn(prepared);
+      let dispatchResult: Result<void, ChatDispatchError> | null = null;
+      if (boundary.admission) {
+        dispatchResult = await this.chatDispatchService.spawnClaimedTurn(
+          boundary.admission.turn,
+        );
+        if (boundary.admission.source === "pending" && !dispatchResult.ok) {
+          this.logger.error("Failed to dispatch pending message", {
+            fields: { code: dispatchResult.error.code },
+            error: dispatchResult.error.message,
+          });
+        }
+      }
+
+      if (!prepared) {
+        return boundary.readiness;
+      }
+      if (!boundary.readiness.ok) {
+        return failure({
+          code: "READINESS_FAILED",
+          message: boundary.readiness.error.message,
+        });
+      }
+      if (boundary.readiness.value.outcome !== "ready") {
+        return failure({
+          code: "READINESS_FAILED",
+          message: "Session setup is not complete",
+        });
+      }
+      if (boundary.admission?.source !== "prepared") {
+        return failure({
+          code: "TURN_CONFLICT",
+          message: "Agent is already handling a message",
+        });
+      }
+      return dispatchResult ?? success(undefined);
+    });
+  }
+
+  /** Runs readiness stages while the caller owns the runtime boundary.
+   * The _lease is just to ensure this is only called within a mutex
+   * and not independently
    */
-  private async ensureReady(): Promise<void> {
+  private async _ensureReady(
+    _lease: RuntimeBoundaryLease,
+  ): Promise<EnsureReadyResult> {
     if (!this.serverState.initialized) {
       const initResult = await this.initializeSessionStatePromise;
       if (!initResult) {
-        this.logger.error("Session not initialized — skipping ensureReady");
-        return;
+        return failure({
+          code: "SESSION_NOT_INITIALIZED",
+          message: "Session is not initialized",
+        });
       }
       if (!initResult.ok) {
-        return;
+        return failure({
+          code: "INITIALIZATION_FAILED",
+          message: initResult.error.message,
+        });
       }
     }
-    await this.provisionService.ensureProvisioned();
-    await this.chatDispatchService.maybeDispatchPendingMessage();
+
+    try {
+      await this.provisionService.ensureProvisioned();
+    } catch (error) {
+      return failure({
+        code: "PROVISIONING_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return success({
+      outcome: this.state.sessionSetupRun?.status === "completed"
+        ? "ready"
+        : "setup_incomplete",
+    });
   }
 
-  private queueEnsureReady(): void {
-    void this.keepAliveWhile(() => this.ensureReady()).catch((error) => {
-      this.logger.error("ensureReady failed", { error });
-    });
+  /**
+   * Starts the runtime readiness and dispatch process asynchronously
+   */
+  private startRuntimeReadinessAndDispatch(): void {
+    void this.ensureRuntimeReadyAndDispatchNextTurn()
+      .then((readiness) => {
+        if (!readiness.ok) {
+          this.logger.warn("Runtime readiness and dispatch did not complete", {
+            fields: { code: readiness.error.code },
+          });
+        }
+      })
+      .catch((error) => {
+        this.logger.error("Runtime readiness and dispatch failed unexpectedly", {
+          error,
+        });
+      });
   }
 
   // Init handler
@@ -710,7 +671,7 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
     try {
       const initResult = await initPromise;
       if (initResult.ok) {
-        this.queueEnsureReady();
+        this.startRuntimeReadinessAndDispatch();
       }
       return initResult;
     } finally {
@@ -888,54 +849,22 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         return;
       }
 
-      await this.keepAliveWhile(async () => {
-        await this.ensureReady();
+      const prepared = await this.chatDispatchService.prepareChatMessage(
+        payload,
+        connection.id,
+      );
+      if (!prepared.ok) {
+        this.sendChatFailure(connection, prepared.error.message);
+        return;
+      }
 
-        if (
-          this.serverState.activeUserMessageId &&
-          !this.serverState.agentProcessId &&
-          !this.state.pendingUserMessage
-        ) {
-          const staleUserMessageId = this.serverState.activeUserMessageId;
-          this.logger.warn(
-            "Clearing active turn with no agent process before chat dispatch",
-            { fields: { userMessageId: staleUserMessageId } },
-          );
-          this.turnCoordinator.handleTurnSpawnFailed(
-            staleUserMessageId,
-            "Previous agent turn did not start",
-          );
-        }
-
-        if (this.serverState.activeUserMessageId || this.state.pendingUserMessage) {
-          // TODO: message queuing
-          this.sendMessage(
-            {
-              type: "operation.error",
-              code: "CHAT_MESSAGE_FAILED",
-              message: "Agent is already handling a message",
-            },
-            connection,
-          );
-          return;
-        }
-
-        const result = await this.chatDispatchService.dispatchChatMessage(payload, connection.id);
-        if (!result.ok) {
-          this.logger.warn("Workflow chat message dispatch failed", {
-            fields: { code: result.error.code },
-          });
-          this.sendMessage(
-            {
-              type: "operation.error",
-              code: "CHAT_MESSAGE_FAILED",
-              message: result.error.message,
-            },
-            connection,
-          );
-          return;
-        }
-      });
+      const admission = await this.ensureRuntimeReadyAndDispatchNextTurn(
+        prepared.value,
+      );
+      if (!admission.ok) {
+        this.sendChatFailure(connection, admission.error.message);
+        return;
+      }
     } catch (error) {
       this.logger.error("Failed to handle chat message", { error });
       this.sendMessage(
@@ -947,6 +876,17 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
         connection,
       );
     }
+  }
+
+  private sendChatFailure(connection: Connection, message: string): void {
+    this.sendMessage(
+      {
+        type: "operation.error",
+        code: "CHAT_MESSAGE_FAILED",
+        message,
+      },
+      connection,
+    );
   }
 
   private async handleSyncRequest(connection: Connection): Promise<void> {
@@ -992,6 +932,18 @@ export class SessionAgentDO extends Agent<Env, ClientState> implements SessionAg
       fields: { type: message.type, connectionCount },
     });
     this.broadcast(JSON.stringify(message), without);
+  }
+
+  private sendMessageToConnection(message: ServerMessage, connectionId: string): void {
+    const connection = Array.from(this.getConnections())
+      .find((candidate) => candidate.id === connectionId);
+    if (!connection) {
+      this.logger.warn("Cannot send message to missing connection", {
+        fields: { connectionId, type: message.type },
+      });
+      return;
+    }
+    this.sendMessage(message, connection);
   }
 
   private sendMessage(message: ServerMessage, to: Connection): void {

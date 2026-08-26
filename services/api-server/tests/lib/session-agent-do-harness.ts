@@ -51,7 +51,12 @@ export function createFakeDurableObjectState(db: DatabaseSync): DurableObjectSta
       }
     },
   };
-  return { storage } as unknown as DurableObjectState;
+  return {
+    storage,
+    blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
+      return callback();
+    },
+  } as unknown as DurableObjectState;
 }
 
 /**
@@ -68,6 +73,8 @@ export class FakeAgent<TEnv = unknown, TState = unknown> {
   readonly testBroadcasts: string[] = [];
   /** Number of `_setStateInternal` calls (the SDK broadcasts on each). */
   testStateWriteCount = 0;
+  /** Messages sent directly to a connection by the Durable Object. */
+  readonly testSentMessages: unknown[] = [];
 
   constructor(ctx: DurableObjectState, env: TEnv) {
     this.ctx = ctx;
@@ -124,6 +131,10 @@ export class FakeAgent<TEnv = unknown, TState = unknown> {
 
   broadcast(message: string, _without?: string[]): void {
     this.testBroadcasts.push(message);
+  }
+
+  sendMessage(message: unknown, _connection: unknown): void {
+    this.testSentMessages.push(message);
   }
 
   getConnections(): Iterable<never> {
