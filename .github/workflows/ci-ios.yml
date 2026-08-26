@@ -109,7 +109,7 @@ jobs:
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
             -derivedDataPath .build/DerivedData \
             -only-testing:CloudeCodeTests \
-            -parallel-testing-enabled NO \
+            -parallel-testing-enabled YES \
             CODE_SIGNING_ALLOWED=NO
 
       - name: UI smoke test
