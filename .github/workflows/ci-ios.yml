@@ -70,7 +70,8 @@ jobs:
       - name: Install SwiftLint
         run: brew install swiftlint
 
-      - name: App unit and UI smoke tests
+      - name: Select iOS simulator
+        id: simulator
         working-directory: apps/ios
         run: |
           simulator_id=$(
@@ -98,16 +99,25 @@ jobs:
           print(simulator["udid"])
           '
           )
+          echo "id=${simulator_id}" >> "$GITHUB_OUTPUT"
+
+      - name: App unit tests
+        working-directory: apps/ios
+        run: |
           xcodebuild test -project CloudeCode.xcodeproj -scheme CloudeCode \
             -configuration Debug \
-            -destination "platform=iOS Simulator,id=${simulator_id}" \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
             -derivedDataPath .build/DerivedData \
             -only-testing:CloudeCodeTests \
             -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: UI smoke test
+        working-directory: apps/ios
+        run: |
           xcodebuild test -project CloudeCode.xcodeproj -scheme CloudeCode \
             -configuration Debug \
-            -destination "platform=iOS Simulator,id=${simulator_id}" \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
             -derivedDataPath .build/DerivedData \
             -only-testing:CloudeCodeUITests/CloudeCodeUITests/testLaunchesSignedOutScreen \
             -parallel-testing-enabled NO \
