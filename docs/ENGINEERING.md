@@ -28,6 +28,13 @@ This document is the source of truth for repo-wide coding style and engineering 
 - Merge only after required checks and reviews pass and no unresolved conversations remain. Address any new CI or
   review feedback before merging.
 
+## Testing
+
+- All behavior-changing code changes must have appropriate automated test coverage.
+- If automated testing is impractical, explain why and document the manual validation performed. Manual validation
+  is not a substitute when automated coverage is practical.
+Follow the repository's [testing guidelines](testing.md)!!
+
 ## Dependencies
 
 - If adding a dependency to multiple packages, prefer the shared catalog in `pnpm-workspace.yaml`.
@@ -48,24 +55,7 @@ Treat `ARCHITECTURE.md` as a short, stable codemap. It should answer where major
 
 Package lint scripts own package-local checks. For example, `@repo/api-server` runs ESLint over `src/`, `tests/`, and `scripts/`, then runs `pnpm lint:module-boundaries`.
 
-The repo-wide ESLint config enforces:
-
-- Double-quoted strings.
-- Braced control-flow bodies.
-- Strict equality.
-- Spaced single-line blocks.
-- Explicit type-only imports.
-- No type-only imports that leave runtime side-effect imports behind.
-- No `any`.
-- No unused variables except intentionally `_`-prefixed values.
-- Maximum line length of 120 characters for code, ignoring comments, strings, template literals, regex literals, and URLs.
-- Maximum file length of 1000 lines.
-- Naming conventions for symbols:
-  - Variables and imports use `camelCase`, `PascalCase`, or `UPPER_CASE`.
-  - Functions use `camelCase`, with `PascalCase` allowed for React components and `UPPER_CASE` allowed for Next.js route handlers like `GET`.
-  - Parameters use `camelCase`, with `PascalCase` allowed when passing component references.
-  - Types, interfaces, classes, and enums use `PascalCase`.
-  - Object properties, object methods, and type properties are exempt so API payloads, database fields, and external protocol names can keep their source shape.
+The repo-wide ESLint config is located in `packages/shared/eslint.config.ts`.
 
 When a lint rule exposes existing drift, prefer the mechanical fix over weakening the rule. If a rule is wrong for a specific case, add a narrow local disable with a reason rather than lowering the repo-wide standard.
 

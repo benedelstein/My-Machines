@@ -1,6 +1,6 @@
 # Architecture
 
-My Machines is a cloud-hosted agent service. It runs agents inside isolated VMs (Fly.io Sprites) and coordinates sessions through Cloudflare Durable Objects on an API server.
+My Machines is a cloud-hosted agent service. It runs agents inside isolated VMs (currently Fly.io Sprites) and coordinates sessions through Cloudflare Durable Objects on an API server.
 
 Users connect to the API server and create a session to make changes in a repository. Each session gets its own Durable Object, which provisions a Sprite VM, clones the repository, runs an agent process on the VM, and communicates with the API server and the client.
 
