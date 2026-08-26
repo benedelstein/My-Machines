@@ -53,6 +53,7 @@ const VM_AGENT_SCRIPT_PATH = `${APP_DIR}/agent-webhook.js`;
 const VM_AGENT_MESSAGE_DIR = `${APP_DIR}/turns`;
 
 const FRESH_START_READY_TIMEOUT_MS = 30_000;
+const SETUP_WEBSOCKET_CLOSE_GRACE_MS = 2_000;
 
 export interface ProviderCredentialAdapter {
   getCredentialSnapshot(userId: string): Promise<Result<AuthCredentialSnapshot, ProviderCredentialError>>;
@@ -73,6 +74,8 @@ export interface SpriteAgentProcessManagerDeps {
   ): ProviderCredentialAdapter;
   /** Session connector gateway base, or null before/without a minted connector. */
   getConnectorGatewayBase: () => string | null;
+  /** Wait implementation used for setup websocket close-grace timing. */
+  sleep?: (milliseconds: number) => Promise<void>;
 }
 
 export type DispatchMessageResult = Result<
@@ -112,6 +115,7 @@ export class SpriteAgentProcessManager {
   private readonly attachmentService: AgentAttachmentService;
   private readonly getProviderCredentialAdapter: SpriteAgentProcessManagerDeps["getProviderCredentialAdapter"];
   private readonly getConnectorGatewayBase: SpriteAgentProcessManagerDeps["getConnectorGatewayBase"];
+  private readonly sleep: NonNullable<SpriteAgentProcessManagerDeps["sleep"]>;
 
   /** In-flight spawn promise, or null if no spawn is running. */
   private startMutex: Promise<DispatchMessageResult> | null = null;
@@ -129,6 +133,7 @@ export class SpriteAgentProcessManager {
     this.attachmentService = new AgentAttachmentService(deps.env, this.logger);
     this.getProviderCredentialAdapter = deps.getProviderCredentialAdapter;
     this.getConnectorGatewayBase = deps.getConnectorGatewayBase;
+    this.sleep = deps.sleep ?? delay;
   }
 
   /**
@@ -468,7 +473,7 @@ export class SpriteAgentProcessManager {
       // for up to maxRunAfterDisconnect.
       if (session) {
         try {
-          await new Promise((resolve) => setTimeout(resolve, 2_000));
+          await this.sleep(SETUP_WEBSOCKET_CLOSE_GRACE_MS);
           session.close();
         } catch (error) {
           this.logger.debug("Failed to close setup websocket", { error });
@@ -886,4 +891,8 @@ export class SpriteAgentProcessManager {
       createLogger("sprite-websocket.session.ts"),
     );
   }
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

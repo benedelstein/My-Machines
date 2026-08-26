@@ -45,7 +45,7 @@ final class SessionClientStateStoreTests: XCTestCase {
             isResponding: false
         )])
 
-        let restored = try await pollUntil {
+        let restoredStatus: SessionClientState.Status = try await pollUntil {
             let snapshots = try await cache.fetch(SessionClientStateEntity.self, ids: ["s1"])
             guard let snapshot = snapshots.first,
                   snapshot.repoFullName == nil,
@@ -56,10 +56,10 @@ final class SessionClientStateStoreTests: XCTestCase {
                   !snapshot.isResponding else {
                 return nil
             }
-            return snapshot
+            return snapshot.status
         }
 
-        XCTAssertEqual(restored.status, .ready)
+        XCTAssertEqual(restoredStatus, .ready)
     }
 
     func testEntityMapsSnapshotToFlatFields() throws {

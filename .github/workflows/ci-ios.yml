@@ -51,17 +51,64 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: API package tests
+        working-directory: apps/ios/Modules/API
+        run: swift test
+
       - name: CoreAPI package tests (wire fixtures)
         working-directory: apps/ios/Modules/CoreAPI
+        run: swift test
+
+      - name: Entities package tests
+        working-directory: apps/ios/Modules/Entities
+        run: swift test
+
+      - name: MarkdownParsing package tests
+        working-directory: apps/ios/Modules/MarkdownParsing
         run: swift test
 
       - name: Install SwiftLint
         run: brew install swiftlint
 
-      - name: Build app
+      - name: App unit and UI smoke tests
         working-directory: apps/ios
         run: |
-          xcodebuild -project CloudeCode.xcodeproj -scheme CloudeCode \
-            -configuration Debug -destination 'generic/platform=iOS Simulator' \
+          simulator_id=$(
+            xcrun simctl list devices available --json | python3 -c '
+          import json
+          import sys
+
+          runtimes = json.load(sys.stdin)["devices"]
+          ios_runtimes = {
+              runtime: devices
+              for runtime, devices in runtimes.items()
+              if ".iOS-" in runtime
+          }
+          latest_runtime = max(
+              ios_runtimes,
+              key=lambda runtime: tuple(
+                  int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-")
+              ),
+          )
+          simulator = next(
+              device
+              for device in ios_runtimes[latest_runtime]
+              if device["isAvailable"] and device["name"].startswith("iPhone")
+          )
+          print(simulator["udid"])
+          '
+          )
+          xcodebuild test -project CloudeCode.xcodeproj -scheme CloudeCode \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${simulator_id}" \
             -derivedDataPath .build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO build
+            -only-testing:CloudeCodeTests \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO
+          xcodebuild test -project CloudeCode.xcodeproj -scheme CloudeCode \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${simulator_id}" \
+            -derivedDataPath .build/DerivedData \
+            -only-testing:CloudeCodeUITests/CloudeCodeUITests/testLaunchesSignedOutScreen \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO

@@ -5,7 +5,6 @@ import type { Env } from "../../src/shared/types";
 import type { ServerState } from
   "../../src/modules/session-agent/types/server-state.types";
 
-// FIXME - THESE TESTS TAKE VERY LONG.
 const mockState = vi.hoisted(() => ({
   attachSession: vi.fn(),
   createSession: vi.fn(),
@@ -123,11 +122,21 @@ function createServerState(overrides: Partial<ServerState> = {}): ServerState {
 
 function createManager(
   serverState: ServerState,
-  envOverrides: Partial<Env> = {},
-  snapshotPlainEnvVars: Record<string, string> = {},
-  clientState: ClientState = createClientState(),
-  connectorGatewayBase: string | null = null,
-  loggerWarn: ReturnType<typeof vi.fn> = vi.fn(),
+  {
+    envOverrides = {},
+    snapshotPlainEnvVars = {},
+    clientState = createClientState(),
+    connectorGatewayBase = null,
+    loggerWarn = vi.fn(),
+    sleep = async () => undefined,
+  }: {
+    envOverrides?: Partial<Env>;
+    snapshotPlainEnvVars?: Record<string, string>;
+    clientState?: ClientState;
+    connectorGatewayBase?: string | null;
+    loggerWarn?: ReturnType<typeof vi.fn>;
+    sleep?: (milliseconds: number) => Promise<void>;
+  } = {},
 ) {
   const updateAgentProcessState = vi.fn(
     (partial: Pick<ServerState, "agentProcessId" | "agentProcessRunId">) => {
@@ -172,6 +181,7 @@ function createManager(
       getCredentialSnapshot: mockState.getCredentialSnapshot,
     }),
     getConnectorGatewayBase: () => connectorGatewayBase,
+    sleep,
   });
 
   return {
@@ -374,7 +384,7 @@ describe("SpriteAgentProcessManager", () => {
         completedAt: null,
       },
     });
-    const { manager } = createManager(serverState, {}, {}, clientState);
+    const { manager } = createManager(serverState, { clientState });
 
     const result = await manager.dispatchMessage({
       userMessage: { id: "user-message-2", content: "second turn", attachmentIds: [] },
@@ -558,6 +568,46 @@ describe("SpriteAgentProcessManager", () => {
     expect(updateAgentProcessState).toHaveBeenLastCalledWith(spawnedProcessState(91));
   });
 
+  it("keeps the setup websocket open for the close-grace period", async () => {
+    vi.useFakeTimers();
+    const digestSpy = vi.spyOn(crypto.subtle, "digest").mockResolvedValue(new ArrayBuffer(32));
+    const spawnSession = createSpawnSession();
+    mockState.createSession.mockReturnValue(spawnSession);
+    let resolveSleepStarted!: () => void;
+    const sleepStarted = new Promise<void>((resolve) => {
+      resolveSleepStarted = resolve;
+    });
+    const sleep = vi.fn(
+      async (milliseconds: number) => {
+        resolveSleepStarted();
+        await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+      },
+    );
+    const serverState = createServerState();
+    const { manager } = createManager(serverState, { sleep });
+
+    try {
+      const resultPromise = manager.dispatchMessage({
+        userMessage: { id: "user-message-3", content: "fresh turn", attachmentIds: [] },
+      });
+      await sleepStarted;
+
+      expect(sleep).toHaveBeenCalledWith(2_000);
+      expect(spawnSession.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(spawnSession.close).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await resultPromise;
+
+      expect(result.ok).toBe(true);
+      expect(spawnSession.close).toHaveBeenCalledOnce();
+    } finally {
+      digestSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("returns TURN_DID_NOT_START when a fresh process exits before ready", async () => {
     const spawnSession = createSpawnSession({ readyChunks: [], exitCode: 1 });
     mockState.createSession.mockReturnValue(spawnSession);
@@ -649,7 +699,6 @@ describe("SpriteAgentProcessManager", () => {
         expect(spawnSession.start).toHaveBeenCalledOnce();
       });
       await vi.advanceTimersByTimeAsync(30_000);
-      await vi.advanceTimersByTimeAsync(2_000);
       const result = await resultPromise;
 
       expect(result.ok).toBe(false);
@@ -695,7 +744,7 @@ describe("SpriteAgentProcessManager", () => {
 
     const serverState = createServerState({ agentProcessId: 42 });
     const { manager } = createManager(serverState, {
-      CODEX_MIN_VERSION: "0.140.0",
+      envOverrides: { CODEX_MIN_VERSION: "0.140.0" },
     });
 
     const result = await manager.dispatchMessage({
@@ -724,12 +773,14 @@ describe("SpriteAgentProcessManager", () => {
     mockState.createSession.mockReturnValue(spawnSession);
 
     const serverState = createServerState({ agentProcessId: 42 });
-    const { manager } = createManager(serverState, {}, {
-      SESSION_ID: "user-session",
-      DO_WEBHOOK_URL: "https://evil.test",
-      DO_WEBHOOK_TOKEN: "user-token",
-      DO_WEBHOOK_AUTH: "gateway",
-      AGENT_PROCESS_RUN_ID: "user-run",
+    const { manager } = createManager(serverState, {
+      snapshotPlainEnvVars: {
+        SESSION_ID: "user-session",
+        DO_WEBHOOK_URL: "https://evil.test",
+        DO_WEBHOOK_TOKEN: "user-token",
+        DO_WEBHOOK_AUTH: "gateway",
+        AGENT_PROCESS_RUN_ID: "user-run",
+      },
     });
 
     const result = await manager.dispatchMessage({
@@ -812,13 +863,9 @@ describe("SpriteAgentProcessManager", () => {
   it("hands the VM the connector gateway base when a connector exists", async () => {
     mockState.createSession.mockReturnValue(createSpawnSession());
     const serverState = createServerState({ sessionConnectorId: "conn-1" });
-    const { manager } = createManager(
-      serverState,
-      {},
-      {},
-      createClientState(),
-      "https://api.sprites.test/v1/gateway/custom_api/conn-1",
-    );
+    const { manager } = createManager(serverState, {
+      connectorGatewayBase: "https://api.sprites.test/v1/gateway/custom_api/conn-1",
+    });
 
     const result = await manager.dispatchMessage({
       userMessage: { id: "user-message-1", content: "turn", attachmentIds: [] },

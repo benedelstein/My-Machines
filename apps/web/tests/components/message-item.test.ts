@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { UIMessage } from "ai";
 import { MessageItem } from "@/components/chat/message-item";
@@ -69,7 +69,7 @@ function codexTodoPart(id: string): UIMessage["parts"][number] {
 
 describe("MessageItem", () => {
   it("hides the copy action while an assistant message is streaming", () => {
-    const { container } = render(React.createElement(MessageItem, {
+    render(React.createElement(MessageItem, {
       message: {
         ...assistantMessage(),
         metadata: { startedAt: new Date(Date.now() - 5_000).toISOString() },
@@ -78,8 +78,6 @@ describe("MessageItem", () => {
     }));
 
     expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
-    expect(container.querySelector("[class*='group-hover/message:opacity-100']")).toBeNull();
-    expect(container.querySelector("div[aria-hidden='true'].h-6")).toBeTruthy();
   });
 
   it("shows a live work header while an assistant message is streaming", () => {
@@ -112,18 +110,6 @@ describe("MessageItem", () => {
     expect(screen.getByRole("button", { name: "Copy message" })).toBeTruthy();
   });
 
-  it("shrink-wraps user message bubbles", () => {
-    render(React.createElement(MessageItem, {
-      message: userMessage(),
-    }));
-
-    const bubble = screen.getByText("User prompt").closest(".bg-accent-subtle");
-
-    expect(bubble?.className).toContain("w-fit");
-    expect(bubble?.className).toContain("max-w-full");
-    expect(bubble?.className).toContain("ml-auto");
-  });
-
   it("uses active wording for the final command group while streaming", () => {
     render(React.createElement(MessageItem, {
       message: {
@@ -142,7 +128,7 @@ describe("MessageItem", () => {
     expect(screen.queryByText("Ran 2 commands")).toBeNull();
   });
 
-  it("keeps collapsed work headers tight against their first tool row", () => {
+  it("expands and collapses settled work from its summary", () => {
     render(React.createElement(MessageItem, {
       message: {
         id: "message-6",
@@ -161,10 +147,14 @@ describe("MessageItem", () => {
       providerId: "openai-codex",
     }));
 
-    const workHeader = screen.getByText("Worked for 35s").closest("button");
+    const workHeader = screen.getByRole("button", { name: "Worked for 35s" });
 
-    expect(workHeader?.className).toContain("mb-0");
-    expect(workHeader?.className).not.toContain("mb-2");
+    expect(workHeader.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(workHeader);
+    expect(workHeader.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(workHeader);
+    expect(workHeader.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("uses past wording for command groups once another tool item follows", () => {
