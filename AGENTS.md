@@ -1,7 +1,5 @@
 # AGENTS.md
 
-This file provides guidance to ai agents when working with code in this repository.
-
 ## Project Overview
 
 My Machines is a cloud-hosted agent service. Users create sessions through the API server; each session is coordinated by a Cloudflare Durable Object, runs agent work inside an isolated Fly.io Sprite VM, and receives VM output through webhooks.
@@ -30,9 +28,6 @@ pnpm typecheck
 
 # Lint all packages
 pnpm lint
-
-# Clean build artifacts
-pnpm clean
 ```
 
 ### Validating your work
@@ -40,26 +35,6 @@ pnpm clean
 NOTE: After making changes, always make sure to build, lint, and typecheck the repo.
 NOTE: You have access to local browser tools to validate your visual changes. Use them.
 NOTE: If you are tasked with committing to git, prefer concise messages. 
-
-### Package-specific commands
-
-```bash
-# API Server (services/api-server)
-cd services/api-server
-pnpm dev           # wrangler dev
-pnpm deploy        # wrangler deploy
-
-# VM Agent (packages/vm-agent)
-cd packages/vm-agent
-pnpm build         # builds NDJSON and webhook bundles to dist/
-pnpm test:live:agent    # Test an agent provider locally
-pnpm test:live:webhook  # Test the webhook runner locally
-
-# Shared types and utils (packages/shared)
-# NOTE: build is not needed for shared, as it is a pure typescript package that is imported directly by other services
-cd packages/shared
-pnpm build         # tsc --noEmit
-```
 
 ## Documentation / Further Information
 
