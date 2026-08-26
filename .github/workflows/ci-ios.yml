@@ -101,19 +101,10 @@ jobs:
           )
           echo "id=${simulator_id}" >> "$GITHUB_OUTPUT"
 
-      - name: Build app for testing
-        working-directory: apps/ios
-        run: |
-          xcodebuild build-for-testing -project CloudeCode.xcodeproj -scheme CloudeCode \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
-            -derivedDataPath .build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO
-
       - name: App unit tests
         working-directory: apps/ios
         run: |
-          xcodebuild test-without-building -project CloudeCode.xcodeproj -scheme CloudeCode \
+          xcodebuild test -project CloudeCode.xcodeproj -scheme CloudeCode \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
             -derivedDataPath .build/DerivedData \
@@ -124,7 +115,7 @@ jobs:
       - name: UI smoke test
         working-directory: apps/ios
         run: |
-          xcodebuild test-without-building -project CloudeCode.xcodeproj -scheme CloudeCode \
+          xcodebuild test -project CloudeCode.xcodeproj -scheme CloudeCode \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
             -derivedDataPath .build/DerivedData \
