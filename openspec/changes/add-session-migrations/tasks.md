@@ -32,10 +32,10 @@ production path yet.
 Scope: task groups 2–5, engine-level portions of 11–12, and the Phase 3
 readiness extension. The production registry must be exactly empty.
 
-- [ ] P3.1 Add revision APIs, hashing, the `RuntimeMigrationRepository` schema/API, coordinator, lease plumbing, and observability with `RUNTIME_MIGRATIONS = []`.
-- [ ] P3.2 Extend `_ensureReady(lease)` to call the coordinator, but prove an empty registry returns `current`, writes no migration record, and makes no Sprite/connector/process call.
-- [ ] P3.3 Keep every setup executor free of targeted `ensureMigration` calls and register no placeholder/tombstone production migration.
-- [ ] P3.4 Pass migration-record crash matrices and non-empty fixture definitions entirely in tests without activating a production adopter.
+- [x] P3.1 Add revision APIs, hashing, the `RuntimeMigrationRepository` schema/API, coordinator, lease plumbing, and observability with `RUNTIME_MIGRATIONS = []`.
+- [x] P3.2 Extend `_ensureReady(lease)` to call the coordinator, but prove an empty registry returns `current`, writes no migration record, and makes no Sprite/connector/process call.
+- [x] P3.3 Keep every setup executor free of targeted `ensureMigration` calls and register no placeholder/tombstone production migration.
+- [x] P3.4 Pass migration-record crash matrices and non-empty fixture definitions entirely in tests without activating a production adopter.
 - [ ] P3.5 Deploy the additive unused `session_runtime_migrations` table and confirm rollback code safely ignores it.
 - [ ] P3.6 Observe empty-registry readiness latency and error rates before Phase 4.
 
@@ -97,70 +97,70 @@ marked against that decision.
 
 ## 2. Runtime Revision Types and Declaration API — Phase 3
 
-- [ ] 2.1 Define `RuntimeMigrationRevision` as a discriminated union of `{ kind: "version"; version }` and `{ kind: "contract"; hash }`.
-- [ ] 2.2 Keep execution policy out of the initial declaration API: every registered runtime migration is awaited serially and must be current before turn dispatch.
-- [ ] 2.3 Define the coordinator success-outcome union as `current | applied | deferred_active_turn`; keep failures in the tagged `Result` error branch and keep pending/running as migration-record status or observability vocabulary.
-- [ ] 2.4 Implement `defineVersionedRuntimeMigration` with positive-safe-integer validation and an explicit scoped version revision.
-- [ ] 2.5 Implement `defineContractRuntimeMigration` so it builds the desired contract at runtime, hashes it once, and passes the same in-memory desired value to apply.
-- [ ] 2.6 Ensure callers cannot provide a precomputed arbitrary `desiredHash` that bypasses canonicalization and domain separation.
-- [ ] 2.7 Define one static ordered registry with immutable stable IDs and descriptions, with tests preserving the relative order of existing definitions when new entries are inserted.
-- [ ] 2.8 Add startup validation for duplicate IDs and revision-kind changes.
-- [ ] 2.9 Document that a version bump may skip intermediate implementations and therefore its current apply must converge from every lower stored version; otherwise use separate IDs.
-- [ ] 2.10 Add API examples for one arbitrary version migration, one contract migration, and one future local-service migration.
+- [x] 2.1 Define `RuntimeMigrationRevision` as a discriminated union of `{ kind: "version"; version }` and `{ kind: "contract"; hash }`.
+- [x] 2.2 Keep execution policy out of the initial declaration API: every registered runtime migration is awaited serially and must be current before turn dispatch.
+- [x] 2.3 Define the coordinator success-outcome union as `current | applied | deferred_active_turn`; keep failures in the tagged `Result` error branch and keep pending/running as migration-record status or observability vocabulary.
+- [x] 2.4 Implement `defineVersionedRuntimeMigration` with positive-safe-integer validation and an explicit scoped version revision.
+- [x] 2.5 Implement `defineContractRuntimeMigration` so it builds the desired contract at runtime, hashes it once, and passes the same in-memory desired value to apply.
+- [x] 2.6 Ensure callers cannot provide a precomputed arbitrary `desiredHash` that bypasses canonicalization and domain separation.
+- [x] 2.7 Define one static ordered registry with immutable stable IDs and descriptions, with tests preserving the relative order of existing definitions when new entries are inserted.
+- [x] 2.8 Add startup validation for duplicate IDs and revision-kind changes.
+- [x] 2.9 Document that a version bump may skip intermediate implementations and therefore its current apply must converge from every lower stored version; otherwise use separate IDs.
+- [x] 2.10 Add API examples for one arbitrary version migration, one contract migration, and one future local-service migration.
 
 ## 3. Canonical Contract Hashing and Secret Fingerprints — Phase 3
 
-- [ ] 3.1 Implement a deterministic canonical JSON serializer that recursively sorts object keys and preserves array order.
-- [ ] 3.2 Reject `undefined`, functions, symbols, non-finite numbers, `Date`, `Map`, `Set`, `BigInt`, cyclic values, and other non-JSON contract inputs.
-- [ ] 3.3 Hash with SHA-256 over a versioned domain separator, stable migration ID, and canonical JSON.
-- [ ] 3.4 Add canonicalization fixtures for nested key reordering, array ordering, Unicode strings, null, numbers, and invalid inputs.
-- [ ] 3.5 Add `SecretFingerprint` and a helper for high-entropy SHA-256 fingerprints without exposing raw input in returned diagnostic data.
-- [ ] 3.6 Establish a keyed-fingerprint or durable-version escape hatch for any future low-entropy secret.
-- [ ] 3.7 Add tests proving `sha256(canonical({ fingerprint: sha256(secret), otherInputs }))` changes on rotation while neither migration records nor logs contain the secret.
-- [ ] 3.8 Add logger tests preventing contract preimages, secret values, raw connector payloads, and unbounded process output from entering structured migration logs.
+- [x] 3.1 Implement a deterministic canonical JSON serializer that recursively sorts object keys and preserves array order.
+- [x] 3.2 Reject `undefined`, functions, symbols, non-finite numbers, `Date`, `Map`, `Set`, `BigInt`, cyclic values, and other non-JSON contract inputs.
+- [x] 3.3 Hash with SHA-256 over a versioned domain separator, stable migration ID, and canonical JSON.
+- [x] 3.4 Add canonicalization fixtures for nested key reordering, array ordering, Unicode strings, null, numbers, and invalid inputs.
+- [x] 3.5 Add `SecretFingerprint` and a helper for high-entropy SHA-256 fingerprints without exposing raw input in returned diagnostic data.
+- [x] 3.6 Establish a keyed-fingerprint or durable-version escape hatch for any future low-entropy secret.
+- [x] 3.7 Add tests proving `sha256(canonical({ fingerprint: sha256(secret), otherInputs }))` changes on rotation while neither migration records nor logs contain the secret.
+- [x] 3.8 Add logger tests preventing contract preimages, secret values, raw connector payloads, and unbounded process output from entering structured migration logs.
 
 ## 4. Runtime Migration Repository — Phase 3
 
-- [ ] 4.1 Add the Durable Object-local `session_runtime_migrations` schema migration.
-- [ ] 4.2 Persist migration ID, serialized attempted revision, nullable serialized applied revision, status (`running`, `failed`, or `applied`), attempt count, timestamps, and sanitized error code/message.
-- [ ] 4.3 Add one stable serializer and untrusted-row parser for the `RuntimeMigrationRevision` discriminated union; reject malformed JSON, invalid members, mismatched applied/attempted kinds, and registry-kind conflicts.
-- [ ] 4.4 Implement `get`, `list`, `beginAttempt`, `markApplied`, `markFailed`, and retry/backoff query operations.
-- [ ] 4.5 Make `beginAttempt` retain the prior applied revision while replacing the attempted revision and incrementing attempts.
-- [ ] 4.6 Make `markApplied` conditional on the matching attempted revision so a stale completion cannot overwrite a newer attempt.
-- [ ] 4.7 Treat `running` as retry evidence rather than a durable lock.
-- [ ] 4.8 Add tests for serialized parsing into `appliedRevision`/`attemptedRevision`, missing rows, version rows, contract rows, malformed JSON, invalid union members, kind mismatch, attempt increment, retained prior applied revision, conditional completion, stale running recovery, and error truncation.
-- [ ] 4.9 Add repository parsing that treats every SQLite row as untrusted boundary input.
+- [x] 4.1 Add the Durable Object-local `session_runtime_migrations` schema migration.
+- [x] 4.2 Persist migration ID, serialized attempted revision, nullable serialized applied revision, status (`running`, `failed`, or `applied`), attempt count, timestamps, and sanitized error code/message.
+- [x] 4.3 Add one stable serializer and untrusted-row parser for the `RuntimeMigrationRevision` discriminated union; reject malformed JSON, invalid members, mismatched applied/attempted kinds, and registry-kind conflicts.
+- [x] 4.4 Keep `RuntimeMigrationRepository` CRUD-only with `get`, `beginAttempt`, `markApplied`, and `markFailed`; keep status-aware retry/backoff policy in the coordinator service.
+- [x] 4.5 Make `beginAttempt` retain the prior applied revision while replacing the attempted revision and incrementing attempts.
+- [x] 4.6 Make `markApplied` conditional on the matching attempted revision so a stale completion cannot overwrite a newer attempt.
+- [x] 4.7 Treat `running` as retry evidence rather than a durable lock.
+- [x] 4.8 Add tests for serialized parsing into `appliedRevision`/`attemptedRevision`, missing rows, version rows, contract rows, malformed JSON, invalid union members, kind mismatch, attempt increment, retained prior applied revision, conditional completion, stale running recovery, and error truncation.
+- [x] 4.9 Add repository parsing that treats every SQLite row as untrusted boundary input.
 
 ## 5. Awaited Runtime Migration Coordinator — Phase 3
 
-- [ ] 5.1 Implement version comparison: missing/lower applies, equal skips, and higher stored version skips after rollback.
-- [ ] 5.2 Implement contract comparison: missing or unequal applies and equal skips.
-- [ ] 5.3 Prepare and compare revisions before any Sprite/connector request.
-- [ ] 5.4 Check `activeUserMessageId` once at the start of the shared range executor; return range-level `deferred_active_turn` without a migration ID and before contract preparation, migration-record reads, attempt writes, or external calls.
-- [ ] 5.5 Record running, call idempotent apply, return `applied` only after apply-owned verification and the repository records success, return `current` on a comparison skip, and record sanitized failure otherwise.
-- [ ] 5.6 Implement one shared serial range executor for full-registry and targeted-prefix execution: apply the active-turn gate before iteration, then continue on `current` or `applied`, stop on failure, and return `applied` for a satisfied range when any entry was freshly applied.
-- [ ] 5.7 Implement targeted `ensureMigration(id, context, lease)` for setup using the shared range loop over the registry prefix through the target ID; require the boundary already held by readiness and do not expose a direct migration-record mutation API or acquire the runtime mutex again.
-- [ ] 5.8 Treat the repository's applied revision as the sole initial reconciliation checkpoint; do not add generic invalidation state or compare secondary process/connector/toolchain hashes when the revision is current.
-- [ ] 5.9 Reject a targeted setup integration whose earlier registry prefix cannot be satisfied at that setup point; reorder/regroup rather than bypassing entries.
-- [ ] 5.10 Add tests for first apply returning `applied`, current skip returning `current` with zero external calls, a prefix continuing through both outcomes to its target, aggregate `applied` propagation, active-turn deferral before any definition preparation/read, failure stopping the range, contract change, version increase, higher-version rollback, kind mismatch, stale attempt retry, and desired revision changing between attempts.
-- [ ] 5.11 Add a crash-boundary matrix that simulates interruption before attempt write, after attempt write, after each external effect, after verification, and after applied write.
-- [ ] 5.12 Add a registry-order test rather than introducing a dependency graph or parallel executor.
-- [ ] 5.13 Add tests proving equal applied revisions remain local no-ops even when secondary process/connector/toolchain metadata is absent; document that observed-drift repair is outside the initial coordinator API.
-- [ ] 5.14 Ship the Phase 3 production registry as exactly `[]`; exercise non-empty versioned and contract definitions only through test fixtures.
-- [ ] 5.15 Add an empty-registry integration test proving readiness returns current with zero migration records, zero setup targeted ensures, and zero Sprite, connector, process-manager, or network-policy calls.
+- [x] 5.1 Implement version comparison: missing/lower applies, equal skips, and higher stored version skips after rollback while emitting a distinct lifecycle event.
+- [x] 5.2 Implement contract comparison: missing or unequal applies and equal skips.
+- [x] 5.3 Prepare and compare revisions before any Sprite/connector request.
+- [x] 5.4 Check `activeUserMessageId` once at the start of the shared range executor; return range-level `deferred_active_turn` without a migration ID and before contract preparation, migration-record reads, attempt writes, or external calls.
+- [x] 5.5 Record running, call idempotent apply, return `applied` only after apply-owned verification and the repository records success, return `current` on a comparison skip, and record sanitized failure otherwise.
+- [x] 5.6 Implement one shared serial range executor for full-registry and targeted-prefix execution: apply the active-turn gate before iteration, then continue on `current` or `applied`, stop on failure, and return `applied` for a satisfied range when any entry was freshly applied.
+- [x] 5.7 Implement targeted `ensureMigration(id, context, lease)` for setup using the shared range loop over the registry prefix through the target ID; require the boundary already held by readiness and do not expose a direct migration-record mutation API or acquire the runtime mutex again.
+- [x] 5.8 Treat the repository's applied revision as the sole initial reconciliation checkpoint; do not add generic invalidation state or compare secondary process/connector/toolchain hashes when the revision is current.
+- [x] 5.9 Reject a targeted setup integration whose earlier registry prefix cannot be satisfied at that setup point; reorder/regroup rather than bypassing entries.
+- [x] 5.10 Add tests for first apply returning `applied`, current skip returning `current` with zero external calls, a prefix continuing through both outcomes to its target, aggregate `applied` propagation, active-turn deferral before any definition preparation/read, failure stopping the range, contract change, version increase, higher-version rollback, kind mismatch, stale attempt retry, and desired revision changing between attempts.
+- [x] 5.11 Add a crash-boundary matrix that simulates interruption before attempt write, after attempt write, after each external effect, after verification, and after applied write.
+- [x] 5.12 Add a registry-order test rather than introducing a dependency graph or parallel executor.
+- [x] 5.13 Add tests proving equal applied revisions remain local no-ops even when secondary process/connector/toolchain metadata is absent; document that observed-drift repair is outside the initial coordinator API.
+- [x] 5.14 Ship the Phase 3 production registry as exactly `[]`; exercise non-empty versioned and contract definitions only through test fixtures.
+- [x] 5.15 Add an empty-registry integration test proving readiness returns current with zero migration records, zero setup targeted ensures, and zero Sprite, connector, process-manager, or network-policy calls.
 
 ## 6. Runtime Boundary Mutex and Readiness Pipeline — Phase 2, Extended in Phases 3 and 6
 
 - [x] 6.1 Implement a rejection-safe FIFO `RuntimeBoundaryMutex` for application-level runtime transitions.
 - [x] 6.1a In Phase 2, add a module-private branded `RuntimeBoundaryLease` yielded by `runExclusive` and require it on `_ensureReady`.
-- [ ] 6.1b In Phases 3–4 extend the same lease requirement to `ensureMigrations` and targeted `ensureMigration`, with no independently callable mutating coordinator RPC/entry point.
+- [x] 6.1b In Phases 3–4 extend the same lease requirement to `ensureMigrations` and targeted `ensureMigration`, with no independently callable mutating coordinator RPC/entry point.
 - [x] 6.2 Make every `ensureRuntimeReadyAndDispatchNextTurn()` call queue on the mutex and re-evaluate readiness after acquisition; do not add a separate `ensureReadyPromise` in the initial implementation.
 - [x] 6.3 Keep `ctx.blockConcurrencyWhile` limited to `initializeSessionState`; do not place long Sprite migrations under the Durable Object global concurrency block.
 - [x] 6.4 Keep private `_ensureReady(lease)` readiness-only; it requires proof that the runtime-boundary mutex is held and never acquires it. The surrounding admission orchestrator may accept a prepared message, while Phase 6 may extend readiness with paired prepared process inputs.
 - [x] 6.5a Give Phase 2 readiness explicit `ready`, `setup_incomplete`, and tagged failure outcomes.
-- [ ] 6.5b When Phase 3 connects the coordinator, add `deferred_active_turn` and treat migration-range `current` and `applied` as ready.
+- [x] 6.5b When Phase 3 connects the coordinator, add `deferred_active_turn` and treat migration-range `current` and `applied` as ready.
 - [x] 6.6a In Phase 2 order admission as interrupted-claim recovery, initialization, provision/resume setup, terminal-success gate, and pending initial-message claim; keep the readiness method limited to the middle runtime-preparation stages.
-- [ ] 6.6b In Phase 3 insert awaited migrations after terminal setup success and before admission.
+- [x] 6.6b In Phase 3 insert awaited migrations after terminal setup success and before admission.
 - [x] 6.7 Preserve `handleInit` latency by awaiting durable initialization only and queueing readiness through `keepAliveWhile`.
 - [x] 6.8 Keep `onConnect` snapshot/history delivery and queue readiness on the shared mutex.
 - [x] 6.9 Refactor direct chat into mutation-free preparation followed by acquisition of the shared runtime boundary, private `_ensureReady(lease)`, synchronous message persistence/`beginTurn`, boundary release, and spawn after claim.
@@ -171,7 +171,7 @@ marked against that decision.
 - [x] 6.14 In Phase 2 queue readiness from every turn-completion, abort, or failure path that may unblock pending admission; in Phase 3 use those same hooks to unblock deferred migrations.
 - [x] 6.15 Preserve service-local provisioning single-flight guards as defensive direct-call protection until all call sites are proven to use the runtime boundary.
 - [x] 6.16a In Phase 2 add concurrency tests for two connections, init plus connection, attachment preparation during queued readiness, pending initial dispatch versus direct chat, mutex release on failure, claim-to-dispatch crash recovery, and webhook progress.
-- [ ] 6.16b Add chat-during-migration and turn-completion-after-deferral cases in Phase 3.
+- [x] 6.16b Add chat-during-migration and turn-completion-after-deferral cases in Phase 3.
 - [x] 6.17 Add a regression test for the current await-sized race: no Sprite mutation may begin between direct-chat readiness and `beginTurn`.
 - [x] 6.18a Add compile-time tests/fixtures rejecting Phase 2 ownership-requiring calls without a lease, plus runtime non-reentrancy tests proving direct chat `_ensureReady(lease)` reuses the existing boundary without reacquiring the mutex.
 - [ ] 6.18b In Phases 3–4 prove setup targeted ensure and coordinator ownership-requiring calls reuse the existing lease at compile time and runtime.
@@ -262,38 +262,38 @@ marked against that decision.
 
 ## 11. Extensibility and Regression Scenarios — Engine Fixtures in Phase 3, Adopter Regressions Thereafter
 
-- [ ] 11.1 Add a documented example of `sprite.git-direct-connector-url` as a future versioned migration that removes helper state without conflicting with the already-applied historical cutover.
-- [ ] 11.2 Add a documented example of a helper bundle update using a new migration ID or safe scoped version bump.
-- [ ] 11.3 Add a documented contract migration for a future Sprite-local session service using bundle, service-definition, protocol, and configuration hashes.
-- [ ] 11.4 Add a paired versioned data/layout migration example that must precede the future local-service contract.
-- [ ] 11.5 Document service removal through desired absence or a versioned uninstall plus retired/tombstone contract.
-- [ ] 11.6 Add a contract-retirement regression test proving a superseded recurring migration cannot reinstall legacy state.
-- [ ] 11.7 Add a late-waking-session test that skips historical applied versions and converges every current contract from old external state.
-- [ ] 11.8 Add a code-rollback test proving higher versioned state is not downgraded.
-- [ ] 11.9 Add a contract-rollback test documenting controller-style reconciliation to the old desired hash and requiring staged compatibility for destructive cutovers.
-- [ ] 11.10 Add a static-registry test proving no dependency graph or category enum is required when registering a new arbitrary migration.
+- [x] 11.1 Add a documented example of `sprite.git-direct-connector-url` as a future versioned migration that removes helper state without conflicting with the already-applied historical cutover.
+- [x] 11.2 Add a documented example of a helper bundle update using a new migration ID or safe scoped version bump.
+- [x] 11.3 Add a documented contract migration for a future Sprite-local session service using bundle, service-definition, protocol, and configuration hashes.
+- [x] 11.4 Add a paired versioned data/layout migration example that must precede the future local-service contract.
+- [x] 11.5 Document service removal through desired absence or a versioned uninstall plus retired/tombstone contract.
+- [x] 11.6 Add a contract-retirement regression test proving a superseded recurring migration cannot reinstall legacy state.
+- [x] 11.7 Add a late-waking-session test that skips historical applied versions and converges every current contract from old external state.
+- [x] 11.8 Add a code-rollback test proving higher versioned state is not downgraded.
+- [x] 11.9 Add a contract-rollback test documenting controller-style reconciliation to the old desired hash and requiring staged compatibility for destructive cutovers.
+- [x] 11.10 Add a static-registry test proving no dependency graph or category enum is required when registering a new arbitrary migration.
 
 ## 12. Observability, Rollout, and Operations — Added Incrementally Per Phase
 
-- [ ] 12.1 Add structured secret-safe logs/metrics for prepared, current, running, applied, failed, deferred, and stale-retried outcomes.
-- [ ] 12.2 Include migration ID, revision kind, hash/version, attempt, duration, and sanitized error code without contract preimages.
-- [ ] 12.3 Define bounded exponential retry/backoff, cap, and repeated-failure operator threshold.
-- [ ] 12.4 Prevent new migration claims after session teardown begins.
-- [ ] 12.5 Add operator queries or diagnostics for pending/failed runtime migration records without exposing secret inputs.
-- [ ] 12.6 Document forward-only local/version rules, contract rollback semantics, compensating migrations, contract retirement, and preparation/cutover/cleanup windows.
+- [x] 12.1 Add structured secret-safe lifecycle events for prepared, pending, current, running, applied, failed, deferred, interrupted retry, and newer-version skip states; keep them distinct from coordinator outcomes.
+- [x] 12.2 Include migration ID, revision kind, hash/version, attempt, duration, and sanitized error code without contract preimages.
+- [x] 12.3 Define bounded exponential retry/backoff, cap, and repeated-failure operator threshold.
+- [x] 12.4 Prevent new migration claims after session teardown begins.
+- [ ] 12.5 Add an operator-visible query surface for pending/failed runtime migration records without exposing secret inputs; do not keep an unused repository-wide list API as a placeholder.
+- [x] 12.6 Document forward-only local/version rules, contract rollback semantics, compensating migrations, contract retirement, and preparation/cutover/cleanup windows.
 - [ ] 12.7 Run separate canary cohorts: Phase 3 empty registry; Phase 4 new/completed/incomplete setup and toolchain adoption; Phase 5 stale rows, active turns, and connector disagreement; Phase 6 idle persistent processes.
 - [ ] 12.8 Measure each adopter backlog separately: toolchain checks in Phase 4, connector/Git/network changes in Phase 5, and idle process terminations in Phase 6.
 - [ ] 12.9 Keep legacy ServerState toolchain compatibility until canaries prove migration-record adoption, then remove it through the planned local migration.
 
 ## 13. Validation — Required Before Every Phase Advances
 
-- [ ] 13.1 Run focused API-server repository, constructor, SDK-state, setup, readiness, mutex, coordinator, toolchain, process-manager, connector, Git, and network-policy tests.
+- [x] 13.1 Run focused API-server repository, constructor, SDK-state, setup, readiness, mutex, coordinator, toolchain, process-manager, connector, Git, and network-policy tests.
 - [ ] 13.2 Run the end-to-end new-session and legacy-session scenario suites.
-- [ ] 13.3 Run `pnpm build`.
-- [ ] 13.4 Run `pnpm lint`.
-- [ ] 13.5 Run `pnpm typecheck`.
-- [ ] 13.6 Run `pnpm test`.
-- [ ] 13.7 Run strict OpenSpec validation and resolve all artifact errors.
-- [ ] 13.8 Re-read the implementation against every edge-case row in `design.md` and add any missing regression test before rollout.
-- [ ] 13.9 For each deployment, assert the exact production registry snapshot and prove definitions assigned to later phases are not reachable.
+- [x] 13.3 Run `pnpm build`.
+- [x] 13.4 Run `pnpm lint`.
+- [x] 13.5 Run `pnpm typecheck`.
+- [x] 13.6 Run `pnpm test`.
+- [x] 13.7 Run strict OpenSpec validation and resolve all artifact errors.
+- [x] 13.8 Re-read the implementation against every edge-case row in `design.md` and add any missing regression test before rollout.
+- [x] 13.9 For each deployment, assert the exact production registry snapshot and prove definitions assigned to later phases are not reachable.
 - [ ] 13.10 Record the phase's deployment identifier, canary cohort, observation window, rollback decision, and explicit approval to advance.

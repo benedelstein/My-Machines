@@ -598,6 +598,12 @@ The invariants are load-bearing:
 - only verified success advances the applied revision;
 - raw desired contract JSON is never persisted.
 
+The repository remains a CRUD persistence boundary. It does not own retry
+policy, status interpretation, or a repository-wide diagnostic list. The
+coordinator exhaustively interprets `applied`, `running`, and `failed` records
+and owns bounded retry/backoff. An operator-visible pending/failed query should
+be added with its actual transport rather than preserved as an unused list API.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Missing
@@ -617,29 +623,55 @@ stateDiagram-v2
 #### Revision comparison
 
 ```ts
-function needsApply(
+type RevisionDisposition =
+  | { kind: "apply" }
+  | { kind: "current" }
+  | { kind: "newer_version"; appliedVersion: number };
+
+function compareRevision(
   record: RuntimeMigrationRecord | null,
   desired: RuntimeMigrationRevision,
-): boolean {
+): Result<RevisionDisposition, RuntimeMigrationError> {
   if (record === null || record.appliedRevision === null) {
-    return true;
+    return success({ kind: "apply" });
   }
   const applied = record.appliedRevision;
-  if (applied.kind !== desired.kind) {
-    throw new Error("Runtime migration revision kind changed");
-  }
 
-  switch (desired.kind) {
+  switch (applied.kind) {
     case "version":
-      if (applied.version > desired.version) {
-        return false;
+      if (desired.kind !== "version") {
+        return failure(revisionKindChanged(record.migrationId));
       }
-      return applied.version < desired.version || record.status !== "applied";
+      if (applied.version > desired.version) {
+        return success({
+          kind: "newer_version",
+          appliedVersion: applied.version,
+        });
+      }
+      return success(
+        applied.version < desired.version || record.status !== "applied"
+          ? { kind: "apply" }
+          : { kind: "current" },
+      );
     case "contract":
-      return applied.hash !== desired.hash || record.status !== "applied";
+      if (desired.kind !== "contract") {
+        return failure(revisionKindChanged(record.migrationId));
+      }
+      return success(
+        applied.hash !== desired.hash || record.status !== "applied"
+          ? { kind: "apply" }
+          : { kind: "current" },
+      );
   }
 }
 ```
+
+A higher stored version is expected during a rolling deployment or code
+rollback, so it is not an invariant failure. The coordinator skips the older
+imperative transition and emits `newer_version_skipped` as a warning-level
+lifecycle event containing both desired and applied versions because
+compatibility with newer external state is still an operationally important
+condition.
 
 A stale `running` record is retry evidence, not a distributed lock. A Worker may
 stop at any point:
@@ -748,7 +780,7 @@ Security invariants:
 
 - never log or persist the contract preimage;
 - never include raw secrets in structured logging fields or failure messages;
-- log only migration ID, revision kind, revision hash/version, attempt, outcome,
+- log only migration ID, revision kind, revision hash/version, attempt, event,
 and duration;
 - sanitize integration errors before migration-record persistence;
 - do not persist stdout/stderr unless separately redacted and bounded;
@@ -1892,7 +1924,7 @@ integration exceptions at service boundaries and records only:
 - revision kind and desired version/hash;
 - attempt count;
 - start/end/duration;
-- applied, current, failed, or deferred outcome;
+- applied, current, failed, deferred, interrupted-retry, or newer-version-skip event;
 - sanitized error code/message.
 
 Migration failure:
@@ -1923,7 +1955,7 @@ unambiguous.
 | Worker stops after connector create               | retry discovers/verifies/adopts or replaces connector                                            |
 | Worker stops after effect before recording success   | retry idempotently and verify                                                                    |
 | Desired contract changes while attempt is stale   | retry new desired revision                                                                       |
-| Old code sees higher stored version               | skip; never downgrade                                                                            |
+| Old code sees higher stored version               | skip; never downgrade; emit a distinct warning-level lifecycle event                             |
 | Old code sees newer contract hash                 | may reconcile old desired; staged compatibility is required                                      |
 | Bundle hash only changes                          | idle process terminates; next spawn writes current bundle                                        |
 | Webhook URL/auth mode changes                     | process contract changes                                                                         |
