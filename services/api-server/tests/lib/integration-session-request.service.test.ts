@@ -1,5 +1,5 @@
 import { generateText } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   failure,
   success,
@@ -125,6 +125,10 @@ function makeHarness() {
 describe("IntegrationSessionRequestService", () => {
   beforeEach(() => {
     vi.mocked(generateText).mockRejectedValue(new Error("routing unavailable"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("creates a link attempt when the external user is not linked", async () => {

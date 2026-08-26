@@ -14,7 +14,7 @@ struct AuthAPITests {
             completionCode: "completion-1"
         )
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         let body = try requestBody(request)
         let json = try #require(
             JSONSerialization.jsonObject(with: body) as? [String: String]
@@ -32,7 +32,7 @@ struct AuthAPITests {
             redirectUri: "cloudecode-dev://auth/callback"
         )
 
-        let request = try #require(await recorder.request)
+        let request = try #require(recorder.request)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/auth/github/install/start")
         #expect(request.url?.query == "redirectUri=cloudecode-dev://auth/callback")
@@ -48,7 +48,7 @@ struct AuthAPITests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AuthURLProtocol.self]
         AuthURLProtocol.handler = { request in
-            await recorder.record(request)
+            recorder.record(request)
             guard let url = request.url,
                   let response = HTTPURLResponse(
                       url: url,
@@ -108,7 +108,7 @@ struct AuthAPITests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AuthURLProtocol.self]
         AuthURLProtocol.handler = { request in
-            await recorder.record(request)
+            recorder.record(request)
             guard let url = request.url,
                   let httpResponse = HTTPURLResponse(
                       url: url,
@@ -141,11 +141,18 @@ struct AuthAPITests {
     }
 }
 
-private actor AuthRequestRecorder {
-    private(set) var request: URLRequest?
+private final class AuthRequestRecorder: @unchecked Sendable {
+    private let lock: NSLock = .init()
+    private var storedRequest: URLRequest?
+
+    var request: URLRequest? {
+        lock.withLock { storedRequest }
+    }
 
     func record(_ request: URLRequest) {
-        self.request = request
+        lock.withLock {
+            storedRequest = request
+        }
     }
 }
 
@@ -156,19 +163,17 @@ private struct AuthTestTokenProvider: AuthTokenProviding {
 }
 
 private final class AuthURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) async -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
 
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        Task { [request] in
-            guard let handler = Self.handler else { return }
-            let (response, data) = await handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        }
+        guard let handler = Self.handler else { return }
+        let (response, data) = handler(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
     }
 
     override func stopLoading() {}
