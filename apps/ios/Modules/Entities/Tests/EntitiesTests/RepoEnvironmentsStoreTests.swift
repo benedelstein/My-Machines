@@ -64,6 +64,12 @@ final class RepoEnvironmentsStoreTests: XCTestCase {
         }
 
         try await store.load(repoId: 1)
+        let seededStaleRows = try await pollUntil {
+            let rows = try await cache.fetch(RepoEnvironmentEntity.self, ids: ["stale"])
+            return rows.isEmpty ? nil : rows
+        }
+        XCTAssertEqual(seededStaleRows.map(\.id), ["stale"])
+
         try await store.load(repoId: 1, forceRefresh: true)
 
         XCTAssertEqual(store.environments(repoId: 1)?.map(\.id), ["e1"])
