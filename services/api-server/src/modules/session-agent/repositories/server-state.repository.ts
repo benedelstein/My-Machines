@@ -1,42 +1,51 @@
+import { z } from "zod";
 import type { Migration, SqlFn, Repository } from "./repository.types";
-import type { StartupToolchainCheckpoint } from "@/shared/types/startup-toolchain";
+import { StartupToolchainCheckpoint } from "@/shared/types/startup-toolchain";
 
 /**
  * Durable server-only session state — never synced to clients.
  * Tracks provisioning checkpoints so steps can be skipped on DO restart.
+ *
+ * This schema is the single source of truth for the shape; `ServerState` is
+ * derived from it. `get()` deliberately merges onto defaults without parsing,
+ * so a row it cannot validate never bricks DO construction. A future surgical
+ * migration that transforms this row should validate its result against this
+ * schema, where a throw correctly rolls the transaction back.
  */
-export type ServerState = {
+export const ServerStateSchema = z.object({
   /** True after handleInit has been called (sets sessionId, userId, etc.) */
-  initialized: boolean;
+  initialized: z.boolean(),
   /** The DO's sessionId — null until handleInit is called (DO name bug workaround) */
-  sessionId: string | null;
+  sessionId: z.string().nullable(),
   /** The user id who owns the session */
-  userId: string | null;
+  userId: z.string().nullable(),
   /** Sprite VM name — null until sprite is created */
-  spriteName: string | null;
+  spriteName: z.string().nullable(),
   /** True after the repo has been cloned onto the sprite */
-  repoCloned: boolean;
+  repoCloned: z.boolean(),
   /** Claude or Codex session ID for resuming agent state across restarts */
-  agentSessionId: string | null;
+  agentSessionId: z.string().nullable(),
   /** Sprite exec-session / process ID for the currently running vm-agent. */
-  agentProcessId: number | null;
+  agentProcessId: z.number().nullable(),
   /** Locally generated run id for correlating vm-agent lifecycle webhooks. */
-  agentProcessRunId: string | null;
+  agentProcessRunId: z.string().nullable(),
   /** User message id currently being handled by the agent, or null if idle. */
-  activeUserMessageId: string | null;
+  activeUserMessageId: z.string().nullable(),
   /** Provider runtime toolchain checkpoints for this Sprite. */
-  startupToolchain: StartupToolchainCheckpoint | null;
+  startupToolchain: StartupToolchainCheckpoint.nullable(),
   /** True after the selected environment startup script has completed, failed, or no-op'd. */
-  startupScriptCompleted: boolean;
+  startupScriptCompleted: z.boolean(),
   /** True after the selected final network policy has been applied. */
-  finalNetworkPolicyApplied: boolean;
+  finalNetworkPolicyApplied: z.boolean(),
   /** Gateway connection id of the session's internal connector, once minted. */
-  sessionConnectorId: string | null;
+  sessionConnectorId: z.string().nullable(),
   /** True when sprite creation applied the session labels, skipping label repair. */
-  spriteLabelsApplied: boolean;
+  spriteLabelsApplied: z.boolean(),
   /** Authentication mode used by post-clone Git proxy requests. */
-  gitAuthMode: "legacy_secret" | "ephemeral_token";
-};
+  gitAuthMode: z.enum(["legacy_secret", "ephemeral_token"]),
+});
+
+export type ServerState = z.infer<typeof ServerStateSchema>;
 
 function defaultServerState(): ServerState {
   return {
