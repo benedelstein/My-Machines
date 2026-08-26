@@ -55,7 +55,7 @@ Treat `ARCHITECTURE.md` as a short, stable codemap. It should answer where major
 
 Package lint scripts own package-local checks. For example, `@repo/api-server` runs ESLint over `src/`, `tests/`, and `scripts/`, then runs `pnpm lint:module-boundaries`.
 
-The repo-wide ESLint config is located in `packages/shared/eslint.config.ts`.
+The repo-wide ESLint config is located in `eslint.config.js`.
 
 When a lint rule exposes existing drift, prefer the mechanical fix over weakening the rule. If a rule is wrong for a specific case, add a narrow local disable with a reason rather than lowering the repo-wide standard.
 
