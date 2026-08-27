@@ -32,7 +32,6 @@ unknown. Examples include:
 - replace the current Git credential-helper flow with a direct connector URL;
 - install a local Sprite service and later change or remove it;
 - change connector endpoints or rotate its stored credential;
-- change the vm-agent bundle or process environment;
 - perform a one-time filesystem or base-image transition;
 
 The design uses one runtime engine with two revision strategies rather than two
@@ -51,9 +50,6 @@ parallel orchestration systems.
 - Use one runtime migration repository, coordinator, mutex, retry model, and observability path for
 both runtime migration forms.
 - Fold startup-toolchain reconciliation into that coordinator.
-- Detect changes to every deployment-owned reusable vm-agent process input that
-is frozen at spawn, including bundle contents and relevant environment values,
-excluding rotating credential material delivered outside the contract.
 - Keep raw secrets out of the migration table and logs.
 - Prevent Sprite/process mutation from racing with `beginTurn()`.
 - Make new-session setup and legacy-session reconciliation use the same
@@ -74,9 +70,9 @@ The persisted session environment snapshot remains authoritative for this
 change.
 - Running external work inside a SQLite transaction.
 - Running process-affecting work during an active turn.
-- Delivering refreshed provider credentials to an already-running reused
-process. Reused dispatches currently run on spawn-time credentials; per-turn
-credential delivery is an explicit follow-up change.
+- Immediately replacing an already-running reusable vm-agent after a deployment.
+  New spawns already hash-compare the embedded bundle against the Sprite file,
+  and existing processes exit after their bounded post-turn idle window.
 - Pinging URLs to verify connector or network state.
 - Supporting downward local-data migrations.
 - Adding a general migration dependency graph or parallel executor.
@@ -100,9 +96,8 @@ flowchart LR
     P3["Phase 3<br/>Migration repository + coordinator<br/>empty registry"]
     P4["Phase 4<br/>Startup toolchain"]
     P5["Phase 5<br/>Sprite labels + connector + Git + network"]
-    P6["Phase 6<br/>Reusable process"]
 
-    P1 --> P2 --> P3 --> P4 --> P5 --> P6
+    P1 --> P2 --> P3 --> P4 --> P5
 ```
 
 | Phase | Newly active behavior | Registry after deployment | Must remain inactive | Exit gate |
@@ -110,9 +105,8 @@ flowchart LR
 | 1. Local foundation | Pre-hydration `migrateAll()` ordering and the migration-only Agents SDK row adapter, with zero registered steps | nonexistent | mutex, runtime migration repository, external reconciliation, any data migration | historical fixtures, atomic rollback, and pre-hydration ordering pass against fixture migrations |
 | 2. Runtime boundary | FIFO mutex, branded lease, `_ensureReady(lease)`, readiness-to-turn claim serialization, pending-claim split | nonexistent | all runtime migration types, tables, definitions, and external migration effects | concurrency/crash tests pass and production shows no dispatch regression |
 | 3. Inert engine | revision API, canonical hashing, `RuntimeMigrationRepository`, coordinator, logs/metrics, readiness call into engine | exactly `[]` | every adopter and every setup `ensureMigration` call | empty-registry tests prove zero migration records and zero Sprite/connector/process calls |
-| 4. Toolchain adopter | immutable setup integration, targeted ensure, legacy checkpoint adoption, startup-toolchain contract | `[sprite.startup-toolchain]` | connector, Git, network, process definitions | new and legacy canaries adopt/reconcile without setup-history mutation |
-| 5. Session networking adopters | Sprite labels, connector resource, Git cutover, network-policy reconciliation | toolchain, labels, connector, Git, network | reusable-process definition and destructive legacy cleanup | label/connector/Git/network canaries and legacy end-to-end cohort pass |
-| 6. Reusable-process adopter | process launch contract and fail-closed idle termination on desired revision change | toolchain, labels, connector, Git, network, process | later cleanup migrations | process restart/reuse metrics and rollback exercise pass |
+| 4. Toolchain adopter | immutable setup integration, targeted ensure, legacy checkpoint adoption, startup-toolchain contract | `[sprite.startup-toolchain]` | connector, Git, and network definitions | new and legacy canaries adopt/reconcile without setup-history mutation |
+| 5. Session networking adopters | Sprite labels, connector resource, Git cutover, network-policy reconciliation | toolchain, labels, connector, Git, network | reusable-process reconciliation and destructive legacy cleanup | focused tests, live canary coverage, and final registry validation pass |
 
 ### Phase 1: local migration foundation
 
@@ -170,8 +164,7 @@ The Phase 2 `_ensureReady(lease)` performs only the behavior that exists before
 runtime migrations: initialization, provisioning/setup, and the final pending
 claim decision. It has no runtime registry parameter, creates no
 `session_runtime_migrations` table or rows, and cannot call a migration
-coordinator. Any final-state pseudocode that accepts prepared process inputs or
-invokes `ensureMigrations` is added only in later phases.
+coordinator. The `ensureMigrations` call is added only in later phases.
 
 Phase 2 exit assertions are load-bearing:
 
@@ -242,19 +235,6 @@ postcondition points. Legacy destructive cleanup remains disabled so rollback
 can continue using the old Git/webhook material. A failed cohort stops before
 turn admission and retries through the runtime migration repository.
 
-### Phase 6: append reusable-process reconciliation last
-
-Only after Phase 5 is stable does the registry append
-`agent.reusable-process`. This phase introduces prepared launch inputs and may
-terminate an idle persistent process when the desired process contract revision
-changes. Readiness terminates only; the ordinary dispatch path creates the
-replacement and preserves `agentSessionId`.
-
-Canaries must cover idle reusable processes, no-process sessions, active-turn
-deferral, termination failure, already-gone processes, and rollback to the
-previous process contract. Cleanup migrations remain a later deployment after
-the rollback window.
-
 ### Cross-phase rules
 
 - Never activate the first definition from phase N and phase N+1 in the same
@@ -316,7 +296,7 @@ engine for hashes and another for numbered migrations.
 | Plane                      | Trigger                     | Atomicity                                        | Revision source                    | Examples                                              |
 | -------------------------- | --------------------------- | ------------------------------------------------ | ---------------------------------- | ----------------------------------------------------- |
 | Local repository migration | Durable Object construction | SQLite transaction includes effect and record    | append-only repository array index | table change, JSON rename, SDK client-state transform |
-| Runtime migration          | readiness/runtime boundary  | at-least-once external effect plus local migration record | explicit version or contract hash  | connector, toolchain, process restart, Git cutover    |
+| Runtime migration          | readiness/runtime boundary  | at-least-once external effect plus local migration record | explicit version or contract hash  | connector, toolchain, network policy, Git cutover     |
 | D1 migration               | deployment workflow         | D1-defined                                       | D1 migration file                  | D1 schema/data                                        |
 
 
@@ -436,13 +416,6 @@ const migrations = [
     description: "Keep the Sprite network policy at its snapshotted value",
     buildContract: buildSpriteNetworkPolicyContract,
     apply: reconcileSpriteNetworkPolicy,
-  }),
-
-  defineContractRuntimeMigration({
-    id: "agent.reusable-process",
-    description: "Invalidate a process whose spawn-frozen inputs changed",
-    buildContract: buildReusableAgentProcessContract,
-    apply: reconcileReusableAgentProcess,
   }),
 ] as const satisfies readonly RuntimeMigrationDefinition<unknown>[];
 ```
@@ -779,9 +752,8 @@ sha256(
 
 This detects rotation without storing the secret. Hashing is not encryption. A
 low-entropy secret would require a keyed fingerprint or a durable secret version
-rather than plain SHA-256. No initial contract fingerprints a secret: the
-process contract excludes provider credentials and webhook credentials entirely.
-The mechanism is retained for future contract inputs that must reflect rotation,
+rather than plain SHA-256. No initial contract fingerprints a secret. The
+mechanism is retained for future contract inputs that must reflect rotation,
 such as a later connector-credential fingerprint.
 
 Security invariants:
@@ -853,7 +825,6 @@ Examples:
 - Codex/Claude minimum version and repair script: contract.
 - Connector access policy: contract.
 - Network policy derived from the persisted session snapshot: contract.
-- vm-agent reusable process launch specification: contract.
 - Adopt the current ephemeral Git helper: versioned.
 - Later remove the helper and use a direct connector URL: a new versioned
 migration.
@@ -1236,7 +1207,6 @@ lives in migration records and observability events.
 ```ts
 private async _ensureReady(
   lease: RuntimeBoundaryLease,
-  preparedProcessInputs?: PreparedReusableAgentProcess,
 ): Promise<EnsureReadyResult> {
   const initialized = await waitForInitialization();
   if (!initialized.ok) {
@@ -1255,7 +1225,7 @@ private async _ensureReady(
   }
 
   const migrations = await runtimeMigrationCoordinator.ensureMigrations(
-    buildRuntimeMigrationContext({ preparedProcessInputs }),
+    buildRuntimeMigrationContext(),
     lease,
   );
   if (!migrations.ok) {
@@ -1341,9 +1311,8 @@ side-effect-free, but it does not run at all during an active turn.
 `activeUserMessageId` remains the authoritative active-turn state:
 
 - non-null: no pending runtime migration may begin;
-- null with `agentProcessId`: the process is persistent between turns and may be
-terminated by a pending process-contract migration;
-- both null: no process exists.
+- null: runtime migrations may proceed, regardless of whether a reusable agent
+  process remains alive inside its bounded idle window.
 
 
 
@@ -1408,188 +1377,18 @@ An older stored setup run is never reopened or reordered. If its cloud task was
 already terminal before this deployment, post-setup readiness applies the
 current toolchain contract.
 
-### 12. Hash the reusable process launch specification
+### 12. Keep reusable-process turnover outside this change
 
-The process contract plays the deployment-change role of a pod-template hash:
-changing any reusable, spawn-frozen input changes the desired migration revision.
-Unlike Kubernetes, the initial implementation does not continuously inspect a
-second hash on the running process; it relies on the invariant that process
-creation follows mutex-held readiness.
+The vm-agent spawn path already computes the embedded bundle hash, compares it
+with the bundle file on the Sprite, and uploads the current bundle when they
+differ. An existing process has already loaded its bundle and cannot be updated
+by overwriting that file, but it exits after the bounded post-turn idle window;
+the next spawn performs the hash comparison and runs the current bundle.
 
-Build one shared semantic specification:
-
-```ts
-interface ReusableAgentProcessContract {
-  contractSchema: 1;
-  vmAgentBundleHash: string;
-  providerId: ProviderId;
-  command: {
-    executable: "bash";
-    wrapperScriptHash: string;
-    workingDirectory: string;
-    tty: true;
-    detachable: true;
-    idleTimeoutMs: number;
-    maxRunAfterDisconnect: string | null;
-  };
-  environment: {
-    plainEnvironment: Record<string, string>;
-    codexMinimumVersion: string | null;
-    sessionId: string;
-    webhook: {
-      url: string;
-      authentication: "bearer" | "gateway";
-    };
-  };
-}
-```
-
-Include:
-
-- vm-agent bundle/script content hash;
-- the semantic shell wrapper, command, working directory, and launch options;
-- provider identity and any process-frozen provider configuration;
-- persisted `SessionEnvironmentSnapshot.plainEnvVars`;
-- `CODEX_MIN_VERSION` or equivalent process-frozen deployment values;
-- `SESSION_ID`;
-- `DO_WEBHOOK_URL` and effective authentication mode.
-
-Exclude:
-
-- `AGENT_PROCESS_RUN_ID`;
-- initial message path;
-- user message ID;
-- `agentSessionId`, which is resume identity for a future replacement rather
-than a compatibility input for reusing the process that established it;
-- per-turn model/effort/mode values delivered through NDJSON;
-- timestamps generated only for one launch;
-- `DO_WEBHOOK_TOKEN` and the connector-held webhook credential;
-- provider credential contents (`CLAUDE_CREDENTIALS_JSON`, `CODEX_AUTH_JSON`,
-and their credential files);
-- any value deliberately expected to differ for every process.
-
-Provider credentials are deliberately not a contract input. They are managed
-and refreshed server-side (D1 is authoritative); dispatch refreshes them and
-passes the concrete snapshot to spawn. Credential rotation therefore never
-invalidates a reusable process, plain readiness never refreshes credentials to
-build or compare a contract, and the `syncToken`/`last_refresh` volatility in
-provider credential serialization is irrelevant to the applied migration revision.
-
-Known gap carried forward by this design: a reused process keeps its spawn-time
-credentials, because the reuse dispatch path writes only the turn NDJSON to
-stdin. A follow-up change (TODO, out of scope here) will deliver refreshed
-credentials on every dispatch to an existing process — for example as a
-credential payload in the per-turn NDJSON that the vm-agent applies before
-running the turn.
-
-An early synchronous active-turn check may reject a second direct chat before
-attachment preparation. The authoritative check still occurs inside the runtime
-boundary because the early check alone cannot close races.
-
-The actual launch environment may contain raw credential values, but the
-contract contains no credential material and no webhook credential. The outer
-stored revision is the SHA-256 of that sanitized contract.
-
-#### One builder prevents comparison/spawn drift
-
-Readiness preparation produces:
-
-```ts
-interface PreparedReusableAgentProcess {
-  contract: ReusableAgentProcessContract;
-  contractHash: string;
-  launch: {
-    credentialSnapshot: AuthCredentialSnapshot;
-    environment: Record<string, string>;
-    // Remaining concrete spawn inputs.
-  };
-}
-```
-
-The process migration receives `contract`; the subsequent spawn receives the
-paired `launch`. Code must not independently rebuild one object for migration
-comparison and another for spawn.
-
-`RuntimeMigrationRepository` is the only process-contract checkpoint. The
-system does not add `agentProcessContractHash` to `ServerState` and does not
-compare a second stored hash before reuse. When the migration record's applied contract
-hash equals `prepared.contractHash`, readiness trusts that any persisted process
-was created only after that revision became current.
-
-When the desired hash differs from the applied migration record, the coordinator invokes the
-process contract migration. Its apply body:
-
-- succeeds immediately when no process exists;
-- fail-closed terminates any idle persistent process because the migration record has
-  already proved the desired revision changed or was never applied;
-- clears process ID and run ID together;
-- preserves `agentSessionId`;
-- never spawns a replacement.
-
-After the coordinator records the new desired revision, dispatch uses the
-paired concrete launch inputs to attach to an existing process or create its
-replacement. A new spawn persists process ID and process run ID through the
-existing path; it does not write a migration record because readiness already
-applied the exact prepared revision before admitting the turn.
-
-This relies on the runtime-boundary invariant: every process creation path must
-follow a successful mutex-held `_ensureReady(lease)` using the same prepared process
-inputs. The initial design does not attempt to repair an impossible
-`migrationRecord=H1/process=H0` split by keeping another hash. Violating the spawn-path
-invariant is an implementation bug, not a normal reconciliation state.
-
-#### Termination result
-
-```ts
-type ProcessTerminationResult =
-  | { status: "confirmed_killed" }
-  | { status: "already_gone" }
-  | {
-      status: "failed";
-      error: AgentProcessTerminationError;
-    };
-```
-
-Current `terminateActiveProcess()` swallows non-404 failures. The migration path
-must abort before recording migration success or other Sprite mutation when termination
-returns `failed`. A 404 clears process metadata and proceeds as
-`already_gone`.
-
-#### Bundle-only and environment-only examples
-
-```mermaid
-sequenceDiagram
-    participant D as New deployment
-    participant R as Readiness
-    participant M as Process contract migration
-    participant P as Old vm-agent process
-    participant S as Next dispatch
-
-    D->>R: vm-agent bundle hash changed
-    R->>M: desired process contract differs
-    M->>P: SIGTERM while idle
-    P-->>M: confirmed killed
-    M-->>R: record new contract revision
-    R->>S: dispatch pending/new turn
-    S->>S: write current bundle and spawn
-```
-
-
-
-The same flow applies when:
-
-- webhook URL changes;
-- connector adoption changes bearer delivery to gateway delivery;
-- a plain session environment value changes through an intentional future
-snapshot update;
-- a process wrapper or working directory changes.
-
-There is no separate "webhook delivery migration." The reusable process contract
-captures the webhook URL and authentication mode. Webhook-secret rotation and
-provider-credential rotation do not invalidate a reusable process in this
-initial design; adding either behavior later requires an explicit
-contract-input change and rollout plan.
-
+This change therefore does not register `agent.reusable-process`, persist a
+process-contract revision, or terminate an idle process from readiness. A future
+change may add an explicit process generation or replacement policy if immediate
+turnover becomes a product requirement.
 ### 13. Preserve the environment snapshot boundary
 
 The network-policy contract uses the session's persisted environment snapshot:
@@ -1868,8 +1667,7 @@ Phase 5 registry order for the connector rollout:
 4. `sprite.git-ephemeral-token-cutover` version 1;
 5. `sprite.network-policy` contract.
 
-Phase 6 preserves that exact prefix and appends
-`agent.reusable-process` contract as entry 6.
+That five-entry sequence is the final production registry for this change.
 
 For an existing completed session:
 
@@ -1882,13 +1680,7 @@ flowchart TD
     E --> F["Ensure versioned Git cutover"]
     F --> H1["Rewrite existing clone config/helper"]
     H1 --> H2["Ensure network-policy contract"]
-    H2 --> P5["Phase 5 complete; observe cohort"]
-    P5 --> G["Phase 6: ensure reusable-process contract"]
-    G --> H{"Existing process and no applied process revision?"}
-    H -- "Yes" --> I["Treat contract as unknown; terminate idle process"]
-    H -- "No process" --> J["Record desired process revision"]
-    I --> J
-    J --> K["Next dispatch spawns with gateway env"]
+    H2 --> P5["Phase 5 complete"]
 ```
 
 
@@ -1927,9 +1719,9 @@ transition, append a versioned migration before the contract. If removing it
 later, transition the contract to desired absence or add a versioned uninstall
 migration and retire the contract.
 
-The reusable agent-process contract changes at the same deployment if the
-process must communicate through the new service. Registry order ensures the
-service is current before an old process is terminated and a new one starts.
+Any future service that changes how the agent process communicates must define
+its own process turnover and compatibility behavior. This change does not add a
+generic reusable-process contract.
 
 ### 21. Rollout and rollback are forward-compatible but not magical
 
@@ -1999,10 +1791,9 @@ unambiguous.
 | Desired contract changes while attempt is stale   | retry new desired revision                                                                       |
 | Old code sees higher stored version               | skip; never downgrade; emit a distinct warning-level lifecycle event                             |
 | Old code sees newer contract hash                 | may reconcile old desired; staged compatibility is required                                      |
-| Bundle hash only changes                          | idle process terminates; next spawn writes current bundle                                        |
-| Webhook URL/auth mode changes                     | process contract changes                                                                         |
-| Webhook secret alone changes                      | initial process contract remains current                                                         |
-| Provider credential rotates                       | process contract remains current; fresh credentials reach the next spawn (reuse delivery is a follow-up) |
+| Bundle hash changes                               | an existing process keeps its loaded bundle until exit; the next spawn hash-compares and writes the current bundle |
+| Webhook URL/auth mode changes                     | an existing process keeps spawn-time values until exit; the next spawn uses current values       |
+| Provider credential rotates                       | fresh credentials reach the next spawn; reuse delivery remains a separate follow-up              |
 | Connector endpoint list changes                   | contract changes; policy PATCH/readback                                                          |
 | Connector credential rotation is introduced later | add a fingerprint field to the connector contract then; hash changes once and sessions reconcile |
 | Environment source row changes                    | no effect; session snapshot remains authoritative                                                |
@@ -2026,11 +1817,9 @@ inspect external drift. This avoids a Sprite/API request on every turn.
 to audit and can be replaced later without changing the migration API.
 - Contract migrations can reconcile backward on application rollback.
 Destructive changes still need staged rollout.
-- Exact process-input hashing can cause restart churn if inputs contain volatile
-serialization fields. Stable semantic inputs are required.
-- Reused processes run on spawn-time provider credentials until the follow-up
-per-turn credential delivery change lands. Long-lived idle processes may hold
-aging tokens; every new spawn uses freshly refreshed credentials.
+- A process already running at deployment can use its loaded bundle and
+  spawn-time environment until it exits after the bounded idle window. The next
+  spawn hash-compares the bundle and refreshes credentials.
 - Keeping historical/tombstone migration definitions has code weight, but is
 safer for sessions that may wake months after a deployment.
 

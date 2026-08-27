@@ -406,67 +406,6 @@ toolchain comparison after compatibility adoption.
 - **WHEN** an immutable historical run already completed that task
 - **THEN** the system SHALL NOT reopen it and SHALL reconcile the toolchain through post-setup readiness
 
-### Requirement: Reusable agent process is governed by one launch contract
-The system SHALL build one reusable process contract and paired concrete launch
-input from all semantic values frozen at spawn and SHALL use the same prepared
-values for readiness comparison and process creation.
-
-#### Scenario: Bundle contents change
-- **WHEN** the vm-agent bundle hash changes while an idle process exists
-- **THEN** the process contract SHALL change, the old process SHALL be terminated, and the next dispatch SHALL write and run the new bundle
-
-#### Scenario: Webhook environment changes
-- **WHEN** webhook URL or authentication mode changes
-- **THEN** the process contract SHALL change
-
-#### Scenario: Webhook secret changes
-- **WHEN** a legacy bearer webhook token or connector-held webhook credential changes
-- **THEN** that change alone SHALL NOT alter the initial reusable-process contract
-
-#### Scenario: Stable environment changes
-- **WHEN** a process-frozen plain environment value, provider identity, command wrapper, working directory, or relevant deployment value changes
-- **THEN** the process contract SHALL change
-
-#### Scenario: Per-turn input changes
-- **WHEN** process run ID, initial message path, user message ID, provider resume `agentSessionId`, or per-turn model/effort/mode changes
-- **THEN** those values SHALL NOT change the reusable process contract
-
-#### Scenario: Provider credentials rotate
-- **WHEN** provider credentials are refreshed or rotated server-side
-- **THEN** the reusable process contract SHALL NOT change and readiness SHALL NOT refresh provider credentials to build or compare it
-
-#### Scenario: Dispatch spawns a new process
-- **WHEN** dispatch cannot reuse an existing process
-- **THEN** it SHALL refresh provider credentials server-side and pass the concrete snapshot to spawn outside the contract
-
-#### Scenario: Existing process is reused after credential rotation
-- **WHEN** a dispatch reuses an existing process after provider credentials rotated
-- **THEN** the process MAY continue on its spawn-time credentials; delivering refreshed credentials to reused processes is a documented follow-up change outside this capability
-
-#### Scenario: Applied process contract is current
-- **WHEN** the migration record's applied process-contract hash equals the prepared desired hash
-- **THEN** readiness SHALL trust that record and dispatch MAY reuse the persisted process without comparing a second process-contract hash
-
-#### Scenario: Desired process contract differs from the migration record
-- **WHEN** no turn is active and the migration record's applied process-contract hash differs from the prepared desired hash
-- **THEN** the migration SHALL terminate any existing process, clear process ID and run ID together, preserve `agentSessionId`, record the desired revision only after verified termination, and SHALL NOT spawn from readiness
-
-#### Scenario: Process migration has no migration record
-- **WHEN** a legacy session has an existing process but no applied process-contract revision
-- **THEN** first apply SHALL treat the process contract as unknown and terminate the process before recording the desired revision
-
-#### Scenario: Process termination fails
-- **WHEN** SIGTERM fails for a reason other than the process already being gone
-- **THEN** termination SHALL return a typed failure and readiness SHALL abort without recording the desired process revision as applied
-
-#### Scenario: Process is already gone
-- **WHEN** termination reports a 404-equivalent absence
-- **THEN** the system SHALL clear process metadata and continue as `already_gone`
-
-#### Scenario: New process starts
-- **WHEN** dispatch spawns from prepared launch inputs
-- **THEN** it SHALL use the exact inputs paired with the already-applied desired revision and SHALL persist process ID and process run ID through the existing process lifecycle path without writing a second contract hash
-
 ### Requirement: Session environment snapshots remain authoritative
 The system SHALL build environment-derived contracts from the persisted session
 environment snapshot and SHALL NOT automatically read mutable source environment
@@ -616,15 +555,11 @@ their first production activation in the same deployment.
 
 #### Scenario: Phase 4 activates the first adopter
 - **WHEN** runtime migration behavior first activates in production
-- **THEN** the registry SHALL contain exactly `sprite.startup-toolchain`, setup history SHALL remain immutable, and connector, Git, network, and reusable-process definitions SHALL remain unreachable
+- **THEN** the registry SHALL contain exactly `sprite.startup-toolchain`, setup history SHALL remain immutable, and connector, Git, and network definitions SHALL remain unreachable
 
 #### Scenario: Phase 5 activates session networking adopters
 - **WHEN** Sprite-label, connector, Git cutover, and network-policy reconciliation activate
-- **THEN** the registry SHALL be ordered as startup toolchain, Sprite labels, connector resource, Git cutover, and network policy, and `agent.reusable-process` SHALL remain unregistered
-
-#### Scenario: Phase 6 activates reusable-process reconciliation
-- **WHEN** the earlier adopter cohorts have passed their observation gates
-- **THEN** `agent.reusable-process` SHALL be appended after the unchanged Phase 5 registry prefix and SHALL be the first phase allowed to terminate an idle process solely because its desired launch contract changed
+- **THEN** the registry SHALL be ordered as startup toolchain, Sprite labels, connector resource, Git cutover, and network policy; this SHALL be the final registry for this change and readiness SHALL NOT terminate an idle agent process solely because deployment inputs changed
 
 #### Scenario: An adopter first activates
 - **WHEN** a phase registers production migration definitions for the first time

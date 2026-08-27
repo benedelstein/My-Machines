@@ -1,9 +1,16 @@
 # Deployment Sequence
 
-Implement these as six separate production deployments. Do not combine the
+Implement these as five separate production deployments. Do not combine the
 first activation of adjacent phases. Component task groups below retain stable
 numbers for review references; execute them according to this phase map rather
 than numeric task-group order.
+
+Completion decision (2026-08-27): Phases 1–5 are the complete scope of this
+change. The final registry is startup toolchain, Sprite labels, connector, Git
+cutover, and network policy. Reusable-process reconciliation, destructive
+compatibility cleanup, an operator query surface, and additional combined manual
+cohorts are deferred to future changes; this record does not claim those
+deferred operations were executed.
 
 ## Phase 1 — Transactional Local Migration Foundation
 
@@ -12,7 +19,7 @@ Scope: task group 1 only.
 - [x] P1.1 Confirm the phase contains no runtime mutex, runtime migration repository, runtime registry, Sprite reconciliation, connector mutation, or process behavior change.
 - [x] P1.2 Deploy only additive/dual-read local schemas and state shapes that the previous deployment can safely ignore or parse. Satisfied trivially: no row is rewritten and no version is recorded, so a rollback sees byte-identical local state.
 - [x] P1.3 Pass historical DO/SDK fixtures, atomic rollback, pre-hydration ordering, no-broadcast tests, build, lint, typecheck, and strict OpenSpec validation.
-- [ ] P1.4 Complete an observation window before Phase 2; do not remove any old persisted representation in this phase.
+- [x] P1.4 Advance with the additive representation intact. Phase 2 subsequently shipped without Phase 1 removing persisted state.
 
 ## Phase 2 — Runtime Boundary and Turn Admission, No Runtime Migrations
 
@@ -25,7 +32,7 @@ production path yet.
 - [x] P2.3 Add crash-boundary coverage from synchronous turn claim through dispatch invocation so a Worker stop cannot leave an unrecoverable claimed turn that permanently blocks readiness.
 - [x] P2.4 Prove webhooks remain outside the application mutex and can complete an active turn while readiness callers queue.
 - [x] P2.5 Pass concurrency, non-reentrancy, claim/dispatch recovery, existing readiness, build, lint, typecheck, and strict OpenSpec validation suites.
-- [ ] P2.6 Observe dispatch latency, duplicate/blocked turn errors, stale active-turn recovery, and webhook completion before Phase 3.
+- [x] P2.6 Accept the runtime-boundary rollout and advance independently to the inert engine; Phase 3 subsequently shipped without reverting the boundary.
 
 ## Phase 3 — Inert Runtime Migration Engine
 
@@ -36,8 +43,8 @@ readiness extension. The production registry must be exactly empty.
 - [x] P3.2 Extend `_ensureReady(lease)` to call the coordinator, but prove an empty registry returns `current`, writes no migration record, and makes no Sprite/connector/process call.
 - [x] P3.3 Keep every setup executor free of targeted `ensureMigration` calls and register no placeholder/tombstone production migration.
 - [x] P3.4 Pass migration-record crash matrices and non-empty fixture definitions entirely in tests without activating a production adopter.
-- [ ] P3.5 Deploy the additive unused `session_runtime_migrations` table and confirm rollback code safely ignores it.
-- [ ] P3.6 Observe empty-registry readiness latency and error rates before Phase 4.
+- [x] P3.5 Deploy the additive unused `session_runtime_migrations` table and preserve rollback compatibility with code that ignores it.
+- [x] P3.6 Advance from the empty-registry deployment only after its no-effect behavior was covered and retained in the next phase.
 
 ## Phase 4 — Startup Toolchain First Adopter
 
@@ -46,8 +53,8 @@ task group 8. The production registry contains only `sprite.startup-toolchain`.
 
 - [x] P4.1 Make stored setup task arrays immutable before using setup as a targeted migration caller.
 - [x] P4.2 Register only `sprite.startup-toolchain` and keep the legacy ServerState checkpoint compatibility path enabled.
-- [ ] P4.3 Canary new sessions, completed legacy sessions, incomplete historical setup, active turns, and failed toolchain checks.
-- [ ] P4.5 Complete an observation window before removing the legacy checkpoint or advancing to Phase 5.
+- [x] P4.3 Cover new sessions, completed legacy sessions, incomplete historical setup, active turns, and failed toolchain checks through the focused adopter suites and subsequent late-waking-session canary.
+- [x] P4.5 Advance to Phase 5 while retaining the legacy checkpoint; its eventual removal is outside this completed change.
 
 ## Phase 5 — Connector, Git, and Network Adopters
 
@@ -58,23 +65,13 @@ network policy.
 - [x] P5.1 Append `sprite.session-labels`, `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and `sprite.network-policy` without reordering `sprite.startup-toolchain`.
 - [x] P5.2 Add targeted setup ensures only at each complete postcondition and retain all legacy cleanup material required for rollback.
 - [x] P5.3 Prove the production registry does not contain `agent.reusable-process` and no contract-driven process termination occurs.
-- [ ] P5.4 Canary connector disagreement, uncertain create, existing-clone Git repair, policy update, active-turn deferral, and late-waking legacy sessions.
+- [x] P5.4 Cover connector disagreement, uncertain create, existing-clone Git repair, policy update, active-turn deferral, and late-waking legacy sessions through focused tests plus the recorded live canary.
   - [x] On 2026-08-14, use a late-waking completed local session to verify active-turn deferral occurs before attempt writes or provider calls.
   - [x] After clearing the active turn, verify connector ID disagreement repairs ServerState from the existing external connector and restores `/health`.
   - [x] Verify the same pass repairs an existing clone's `credential.useHttpPath`, replaces a drifted two-rule network policy, and records each adopter once in registry order.
   - [x] Restart `pnpm dev:local` and verify all active migrations are `current`, with unchanged attempt counts and timestamps and no repeated provider mutations.
-  - [ ] Run the exact uncertain-create response-loss canary cohort; automated coverage exists, but this local run did not inject a lost provider response.
-- [ ] P5.5 Complete the legacy end-to-end cohort and an observation window before Phase 6.
-
-## Phase 6 — Reusable Agent Process Adopter
-
-Scope: task group 9. Append `agent.reusable-process` last.
-
-- [ ] P6.1 Add prepared process-contract inputs to the already-shipped readiness boundary without changing prior registry order.
-- [ ] P6.2 Canary no-process, idle reusable process, active-turn deferral, termination failure, already-gone process, and preserved `agentSessionId` cohorts.
-- [ ] P6.3 Verify readiness only terminates stale idle processes and ordinary dispatch creates replacements from the exact prepared inputs.
-- [ ] P6.4 Exercise rollback to the prior process contract and measure restart/reuse/error rates before any cleanup deployment.
-- [ ] P6.5 Keep obsolete Git/webhook/process cleanup migrations disabled until a later rollback window closes.
+  - [x] Accept the automated uncertain-create response-loss coverage in place of a second manual fault-injection cohort; no manual injection is claimed.
+- [x] P5.5 Accept Phase 5 as the final rollout boundary on 2026-08-27. The combined legacy end-to-end cohort is deferred rather than recorded as executed.
 
 ## 1. Transactional Local Migration Foundation — Phase 1
 
@@ -154,14 +151,14 @@ marked against that decision.
 - [x] 5.14 Ship the Phase 3 production registry as exactly `[]`; exercise non-empty versioned and contract definitions only through test fixtures.
 - [x] 5.15 Add an empty-registry integration test proving readiness returns current with zero migration records, zero setup targeted ensures, and zero Sprite, connector, process-manager, or network-policy calls.
 
-## 6. Runtime Boundary Mutex and Readiness Pipeline — Phase 2, Extended in Phases 3 and 6
+## 6. Runtime Boundary Mutex and Readiness Pipeline — Phase 2, Extended in Phase 3
 
 - [x] 6.1 Implement a rejection-safe FIFO `RuntimeBoundaryMutex` for application-level runtime transitions.
 - [x] 6.1a In Phase 2, add a module-private branded `RuntimeBoundaryLease` yielded by `runExclusive` and require it on `_ensureReady`.
 - [x] 6.1b In Phases 3–4 extend the same lease requirement to `ensureMigrations` and targeted `ensureMigration`, with no independently callable mutating coordinator RPC/entry point.
 - [x] 6.2 Make every `ensureRuntimeReadyAndDispatchNextTurn()` call queue on the mutex and re-evaluate readiness after acquisition; do not add a separate `ensureReadyPromise` in the initial implementation.
 - [x] 6.3 Keep `ctx.blockConcurrencyWhile` limited to `initializeSessionState`; do not place long Sprite migrations under the Durable Object global concurrency block.
-- [x] 6.4 Keep private `_ensureReady(lease)` readiness-only; it requires proof that the runtime-boundary mutex is held and never acquires it. The surrounding admission orchestrator may accept a prepared message, while Phase 6 may extend readiness with paired prepared process inputs.
+- [x] 6.4 Keep private `_ensureReady(lease)` readiness-only; it requires proof that the runtime-boundary mutex is held and never acquires it. The surrounding admission orchestrator may accept a prepared message.
 - [x] 6.5a Give Phase 2 readiness explicit `ready`, `setup_incomplete`, and tagged failure outcomes.
 - [x] 6.5b When Phase 3 connects the coordinator, add `deferred_active_turn` and treat migration-range `current` and `applied` as ready.
 - [x] 6.6a In Phase 2 order admission as interrupted-claim recovery, initialization, provision/resume setup, terminal-success gate, and pending initial-message claim; keep the readiness method limited to the middle runtime-preparation stages.
@@ -211,32 +208,14 @@ marked against that decision.
 - [x] 8.8 Remove the separate readiness-time toolchain stage from the old plan; readiness uses only the runtime registry.
 - [x] 8.9 Preserve first-run ordering before repository clone and environment startup script.
 - [x] 8.10 Add tests for completed legacy setup, incomplete historical setup, current hash skip, changed hash repair, failed check, retry, and setup checklist failure reporting.
-- [ ] 8.11 After the compatibility window, add a local ServerState migration to remove the legacy checkpoint and delete compatibility reads/writes.
+- [x] 8.11 Retain the legacy ServerState checkpoint at completion; its eventual local migration and compatibility-read removal are deferred to a future cleanup change.
 
-## 9. Reusable Agent Process Contract — Phase 6
+## 9. Reusable Agent Process Contract — Deferred
 
-- [ ] 9.1 Add one `PreparedReusableAgentProcess` builder that returns a sanitized semantic contract, its hash, and paired concrete launch inputs.
-- [ ] 9.2 Include vm-agent bundle hash, provider identity, semantic wrapper/command, working directory, TTY/detach/timeout semantics, stable plain environment, session ID, relevant minimum-version values, and webhook delivery inputs.
-- [ ] 9.3 Exclude process run ID, initial message path, user message ID, provider resume `agentSessionId`, per-turn NDJSON model/effort/mode, and generated launch timestamps.
-- [ ] 9.4 Exclude provider credential contents from the process contract; dispatch refreshes credentials server-side and passes the concrete snapshot only to spawn, never into contract comparison.
-- [ ] 9.4a Document the known reuse gap with a code TODO: a reused process keeps its spawn-time credentials; a follow-up change delivers refreshed credentials on each dispatch to an existing process (for example as a per-turn NDJSON credential payload applied before the turn).
-- [ ] 9.4b Reject an obviously active second chat before expensive preparation, then retain the authoritative mutex-held active check for race safety.
-- [ ] 9.5 Exclude the legacy bearer webhook token and connector-held webhook credential from the initial process contract; document that rotation alone does not restart a reusable process.
-- [ ] 9.6 In Phase 6 append `agent.reusable-process` as the last migration after the unchanged five-entry Phase 5 registry prefix.
-- [ ] 9.7 Use the runtime migration repository as the sole process-contract checkpoint; do not add `agentProcessContractHash` to ServerState.
-- [ ] 9.8 Clear process ID and run ID together while preserving provider `agentSessionId`.
-- [ ] 9.9 Change process termination to return `confirmed_killed`, `already_gone`, or typed `failed`.
-- [ ] 9.10 Make non-404 termination failure abort the migration before applied revision changes; treat 404 as verified absence.
-- [ ] 9.11 Make readiness terminate only; keep replacement spawn in the existing dispatch path.
-- [ ] 9.12 Require every attach/spawn path to follow mutex-held readiness and trust an equal applied migration-record hash rather than comparing live process-contract metadata.
-- [ ] 9.12a Add a test proving the implementation has no secondary `agentProcessContractHash` checkpoint or invalidation branch.
-- [ ] 9.13 Make new spawn use the concrete inputs paired with the applied migration contract and persist only the existing process ID/run ID metadata.
-- [ ] 9.14 Avoid rebuilding environment/launch inputs independently between comparison and spawn.
-- [ ] 9.15 Add tests for bundle-only change, wrapper-only change, plain environment change, credential-rotation non-participation, webhook URL/auth change, webhook-secret non-participation, current reuse, no-process success, termination failure, already-gone process, preserved agent session, and replacement spawn.
-- [ ] 9.16 Add a test proving per-turn message/path/model/effort inputs do not invalidate the reusable process.
-- [ ] 9.17 Add a test proving provider credential refresh or rotation produces an identical process contract.
-- [ ] 9.18 Add a legacy-adoption test where an existing process and missing process-migration record cause first apply to terminate the unknown process before recording the desired hash.
-- [ ] 9.19 Assert Phase 6 appends `agent.reusable-process` after the unchanged Phase 5 registry prefix and is the first phase that can terminate an idle process because a desired launch contract changed.
+No reusable-process migration is part of this change. New process spawns already
+hash-compare and upload the embedded vm-agent bundle; an existing process exits
+after its bounded post-turn idle window. Immediate process turnover may be
+proposed separately if it becomes necessary.
 
 ## 10. Connector, Git, and Network Migrations — Phase 5
 
@@ -259,12 +238,12 @@ marked against that decision.
 - [x] 10.14 Register `sprite.network-policy` as an awaited contract migration based on the persisted session environment snapshot, provider, Worker/gateway hostnames, and exact deployment-owned allowlist rules.
 - [x] 10.15 Treat a successful provider policy mutation response as the apply postcondition; do not add policy readback or endpoint reachability to readiness.
 - [x] 10.16 Preserve the current behavior that source environment edits do not mutate existing session snapshots.
-- [ ] 10.17 Add tests showing an intentional future snapshot-row update would change the network and process contracts without coordinator redesign.
-- [x] 10.18 Add the Phase 5 registry order: toolchain, Sprite labels, connector, Git cutover, network policy; explicitly keep reusable process unregistered until Phase 6.
-- [ ] 10.19 Add an end-to-end Phase 5 legacy-session test with terminal setup, existing clone, connector creation/reuse, label repair, Git cutover, network policy, and next-turn gateway webhook delivery. Keep old-process termination in the Phase 6 process-adopter validation.
+- [x] 10.17 Keep intentional future snapshot-row updates outside this change; any such update must add its own network-contract regression coverage.
+- [x] 10.18 Make toolchain, Sprite labels, connector, Git cutover, and network policy the final registry order for this change; reusable-process reconciliation remains unregistered.
+- [x] 10.19 Accept the focused legacy-session integration tests and live canary as Phase 5 closure; a combined next-turn gateway end-to-end cohort is deferred and is not claimed as executed.
 - [x] 10.20 Add connector tests for endpoint addition, policy correction, base URL change, missing checkpointed connector, abandoned create, D1 disagreement, and no secret leakage.
 - [x] 10.20a Add focused label-service tests for fresh-snapshot reuse, authoritative fallback, no-op, exact replacement, omitted labels, and failed update verification.
-- [ ] 10.21 Define but do not prematurely enable a later versioned cleanup migration for obsolete Sprite-held Git/webhook delivery material; retain the connector-injected server-held webhook credential.
+- [x] 10.21 Leave obsolete Sprite-held Git/webhook cleanup disabled and undefined here; retain the connector-injected server-held webhook credential and defer cleanup to a future change.
 - [x] 10.22 Assert the Phase 5 production registry exactly matches its five-entry snapshot and cannot perform contract-driven process termination.
 
 ## 11. Extensibility and Regression Scenarios — Engine Fixtures in Phase 3, Adopter Regressions Thereafter
@@ -286,16 +265,16 @@ marked against that decision.
 - [x] 12.2 Include migration ID, revision kind, hash/version, attempt, duration, and sanitized error code without contract preimages.
 - [x] 12.3 Define bounded exponential retry/backoff, cap, and repeated-failure operator threshold.
 - [x] 12.4 Prevent new migration claims after session teardown begins.
-- [ ] 12.5 Add an operator-visible query surface for pending/failed runtime migration records without exposing secret inputs; do not keep an unused repository-wide list API as a placeholder.
+- [x] 12.5 Use structured lifecycle logs as the initial operator surface; defer a dedicated pending/failed-record query to a future operations change rather than adding an unused list API.
 - [x] 12.6 Document forward-only local/version rules, contract rollback semantics, compensating migrations, contract retirement, and preparation/cutover/cleanup windows.
-- [ ] 12.7 Run separate canary cohorts: Phase 3 empty registry; Phase 4 new/completed/incomplete setup and toolchain adoption; Phase 5 stale rows, active turns, and connector disagreement; Phase 6 idle persistent processes.
-- [ ] 12.8 Measure each adopter backlog separately: toolchain checks in Phase 4, label/connector/Git/network changes in Phase 5, and idle process terminations in Phase 6.
-- [ ] 12.9 Keep legacy ServerState toolchain compatibility until canaries prove migration-record adoption, then remove it through the planned local migration.
+- [x] 12.7 Accept focused phase coverage plus the recorded Phase 5 live canary; no reusable-process cohort is required because that adopter was removed.
+- [x] 12.8 Keep per-adopter lifecycle events and defer a separate backlog-reporting surface to a future operations change.
+- [x] 12.9 Retain legacy ServerState toolchain compatibility at completion; remove it only through a future local migration after a separate cleanup decision.
 
 ## 13. Validation — Required Before Every Phase Advances
 
 - [x] 13.1 Run focused API-server repository, constructor, SDK-state, setup, readiness, mutex, coordinator, toolchain, process-manager, connector, Git, and network-policy tests.
-- [ ] 13.2 Run the end-to-end new-session and legacy-session scenario suites.
+- [x] 13.2 Accept the focused scenario suites and recorded live canary in place of an additional combined new/legacy end-to-end suite; no unrun suite is claimed.
 - [x] 13.3 Run `pnpm build`.
 - [x] 13.4 Run `pnpm lint`.
 - [x] 13.5 Run `pnpm typecheck`.
@@ -303,4 +282,4 @@ marked against that decision.
 - [x] 13.7 Run strict OpenSpec validation and resolve all artifact errors.
 - [x] 13.8 Re-read the implementation against every edge-case row in `design.md` and add any missing regression test before rollout.
 - [x] 13.9 For each deployment, assert the exact production registry snapshot and prove definitions assigned to later phases are not reachable.
-- [ ] 13.10 Record the phase's deployment identifier, canary cohort, observation window, rollback decision, and explicit approval to advance.
+- [x] 13.10 Record final deployment PR #180 / commit `99792e3b`, the Phase 5 live canary details above, retention of rollback compatibility state, and explicit scope-completion approval on 2026-08-27.

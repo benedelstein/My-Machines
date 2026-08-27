@@ -3,8 +3,8 @@
 Session setup is intentionally terminal. Once a session's stored setup run
 completes, later deployments do not revisit it, so existing Sprites do not
 automatically receive new runtime requirements such as updated binaries,
-connector policy, network policy, process launch configuration, helper scripts,
-or a newly installed local service.
+connector policy, network policy, helper scripts, or a newly installed local
+service.
 
 The existing startup-toolchain hash demonstrates the desired-state technique but
 is attached to the wrong lifecycle. Its production caller is inside a terminal
@@ -56,16 +56,6 @@ before application code hydrates or reads them.
 - Fold the existing startup-toolchain contract into the runtime migration
   registry. Remove the separate readiness-time toolchain system after a
   compatibility handoff from the existing ServerState checkpoint.
-- Represent the reusable vm-agent process launch specification as a contract:
-  bundle contents, process-frozen command/configuration, stable environment
-  values, and webhook URL/authentication mode. The contract deliberately
-  excludes the webhook secret and all provider credential material: credentials
-  are refreshed server-side at dispatch and delivered outside the contract, so
-  rotation never invalidates a process. Delivering refreshed credentials to a
-  reused process is a documented follow-up change. A desired hash that differs
-  from the migration record's applied hash fail-closed terminates an idle persistent
-  process; the existing dispatch path creates its replacement. Do not persist
-  or compare a second process-contract hash.
 - Represent deterministic connector and network policy as contract migrations.
   Use arbitrary versioned migrations for historical Git transport cutovers and
   other changes whose future shape is not worth encoding into a permanent
@@ -92,8 +82,11 @@ before application code hydrates or reads them.
   the lease already held by readiness. Setup never pre-stamps a migration,
   reacquires the non-reentrant mutex, or writes migration records directly.
 - Reconcile legacy sessions through the same registry, including connector
-  adoption, existing-clone Git repair, connector-aware network policy, and
-  process restart when spawn-frozen values change.
+  adoption, existing-clone Git repair, and connector-aware network policy.
+- Keep reusable vm-agent replacement outside this change. New process spawns
+  already hash-compare and upload the embedded bundle, while an existing process
+  naturally exits after its bounded post-turn idle window. Immediate turnover
+  of a running process after deployment is not required here.
 - Keep D1 migrations deployment-managed and separate from per-session local and
   runtime migrations.
 
@@ -120,11 +113,8 @@ phase activates additional behavior:
    immutable setup/targeted-ensure integration.
 5. **Session networking adopters:** append `sprite.session-labels`,
    `session.connector-resource`, `sprite.git-ephemeral-token-cutover`, and
-   `sprite.network-policy` in that order. Keep reusable-process reconciliation
-   disabled during this phase.
-6. **Reusable-process adopter:** append `agent.reusable-process` last, after the
-   earlier migration cohorts are stable. This is the first phase allowed to
-   terminate an idle process solely because its desired launch contract changed.
+   `sprite.network-policy` in that order. This is the final production registry
+   for this change; it does not add process-contract reconciliation.
 
 No phase may combine its first production activation with a later phase's first
 activation. Every phase has explicit entry/exit checks and a rollback boundary
@@ -153,12 +143,9 @@ None.
   completion handoff.
 - Startup-toolchain ownership moves from a ServerState-only checkpoint to a
   contract runtime migration.
-- Reusable vm-agent process creation and reuse gain one shared launch-spec
-  builder; the runtime migration repository is the sole applied contract
-  checkpoint.
 - Connector, Git transport, and network-policy reconcilers become explicitly
   idempotent and reusable by setup and legacy migration paths.
 - Existing sessions will perform a one-time migration-record adoption and may
-  reconcile an idle Sprite or terminate an idle persistent agent process on
-  their first readiness pass after rollout.
+  reconcile Sprite or connector state on their first readiness pass after
+  rollout.
 - No intended client-facing API change and no new external dependency.
