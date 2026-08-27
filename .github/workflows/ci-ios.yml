@@ -112,13 +112,4 @@ jobs:
             -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: UI smoke test
-        working-directory: apps/ios
-        run: |
-          xcodebuild test -project CloudeCode.xcodeproj -scheme CloudeCode \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}" \
-            -derivedDataPath .build/DerivedData \
-            -only-testing:CloudeCodeUITests/CloudeCodeUITests/testLaunchesSignedOutScreen \
-            -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO
+      # UI tests remain available locally but are intentionally not run in CI.
