@@ -28,16 +28,16 @@ Every outbound flow is classified and routed exactly one way
 
 | Class | Meaning | Examples | Path | Status |
 |---|---|---|---|---|
-| A | Credential → our control plane | webhooks, Git token mint, Claude/Codex inference | Sprite → per-session connector → Worker; Worker injects/delegates the upstream credential | Webhooks + Git mint **implemented**; inference **planned** (S4) |
+| A | Credential → our control plane | webhooks, Git/inference capability mints, Claude/Codex inference | Sprite → per-session connector for identity-bound control calls; short-lived capabilities authorize direct Worker/Node data planes | Webhooks + Git mint **implemented**; inference **planned next** (S4) |
 | B | Credential → external upstream | environment header secrets (e.g. an API key for `api.stripe.com`) | Sprite → transparent egress proxy → environment connector → upstream | **Planned** (S3/S5) |
 | C | Direct egress allowed by environment | npm, pypi, user-allowlisted hosts | Direct, no connector credential, per `open`/`default`/`custom`/`locked` | **Implemented** |
 | D | Direct egress denied by environment | hosts outside a restricted mode's rules | Denied by network policy (empty under `open`) | **Implemented** |
 
-Class A never enters the transparent proxy: every class-A client (webhook base
-URL, Git credential helper, provider CLI base URLs) is written by our
-provisioning code, so it points straight at the connector gateway. The proxy
-exists only for class B, where arbitrary unmodified tools address the real
-hostname and can't be reconfigured.
+Class A never enters the transparent proxy. Webhooks and Git/inference capability
+mints point at the connector gateway; Git data points directly at the Worker; and
+provider CLIs point at a localhost sidecar that streams directly through the Cloude
+Node provider proxy. The proxy exists only for class B, where arbitrary unmodified
+tools address the real hostname and can't be reconfigured.
 
 ## Implemented today
 
@@ -56,8 +56,8 @@ hostname and can't be reconfigured.
   tokens through the connector gateway and Git presents them (HTTP Basic)
   directly to the Worker Git proxy, which validates the token, repository, and
   branch policy in the DO, then forwards to GitHub with an installation token.
-  Direct-to-Worker is an interim shape forced by the gateway's `Accept`
-  allowlist; the exit plan (S2.4) returns Git data to the connector. See
+  Git data stays direct-to-Worker because the gateway does not support Git's
+  smart-HTTP media types. See
   `docs/github-app-auth.md` and `docs/sprite-connectors.md`.
 - **Network policy (classes C/D).** L3/L4 allow/deny built per environment
   network mode; the Worker hostname and connector gateway hostname are always
@@ -70,15 +70,14 @@ hostname and can't be reconfigured.
 
 ## Planned
 
-- **Provider inference through the control plane (S4).** Claude/Codex CLIs get
-  custom base URLs pointing at
-  `/internal/session/:sessionId/inference/{claude|codex}` via the session
-  connector. The Worker validates the gateway-injected session token, decrypts
-  the user's provider OAuth record from D1, replaces the client authorization,
-  and streams from the provider. Codex egress needs a small native shim
-  (workerd's egress headers break ChatGPT), so the Worker delegates only the
-  rebuilt final request to it. Until this lands, provider credentials follow
-  their current delivery path.
+- **Provider inference through the control plane (S4, before class B).** A live
+  managed OpenRouter probe confirmed the Sprites gateway buffers SSE. Claude/Codex
+  therefore use localhost custom bases. A sidecar mints a five-minute
+  session/provider-scoped inference capability through the connector, then calls one
+  shared Node provider proxy directly. Node validates through the Worker/DO, receives
+  only current provider access material, and streams to Anthropic or ChatGPT. The
+  Worker remains the sole D1/OAuth-refresh owner; Node gets no refresh token. Until
+  this lands, provider credentials follow their current delivery path.
 - **Environment header credentials (class B, S3/S5).** A Sprite-local resolver
   maps protected hostnames to a reserved IP; a transparent MITM egress proxy
   (per-Sprite CA, per-host leaf certs) strips whatever placeholder credential
@@ -86,16 +85,14 @@ hostname and can't be reconfigured.
   injects the real Sprites-custodied secret and forwards to the upstream.
   Environment connectors (`env:<environmentId>` label scope) and their D1
   metadata are part of this phase.
-- **Git data back through the connector (S2.4).** Once Fly's gateway forwards
-  Git's `application/x-git-*` Accept types, post-clone fetch/push move to the
-  gateway with the injected session token, and ephemeral Git token issuance
-  stops for new sessions.
-
 ## Known limits (accepted, documented)
 
 - An extracted, still-valid ephemeral Git token is replayable off-Sprite for at
   most its five-minute TTL. Connector identity prevents off-Sprite mint/refresh,
   not replay inside the TTL; teardown revokes immediately.
+- The planned inference capability has the same five-minute replay boundary, but is
+  additionally scoped to one session and provider and contains no provider
+  credential. Teardown revokes it immediately.
 - An older session retains its legacy Sprite-held webhook-token fallback until
   its connector runtime migration succeeds.
 

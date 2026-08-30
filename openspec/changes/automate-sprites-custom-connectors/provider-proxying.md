@@ -2,16 +2,29 @@
 
 ## Decision
 
-Use each provider CLI's supported custom API base and route provider inference
-through the session's existing class-A connector:
+Use each provider CLI's supported custom API base, but do **not** route inference
+bytes through the Sprites connector gateway. The gateway buffers provider responses.
+A managed OpenRouter connector probe on 2026-08-27 made the boundary explicit:
+
+- `stream:false` returned ordinary JSON;
+- `stream:true` with `Accept: text/event-stream` returned `406`;
+- `stream:true` with `Accept: application/json` returned a complete SSE transcript
+  with 19 `data:` records and a fixed `Content-Length`, but time-to-first-byte
+  (1.6137s) equaled total time (1.6143s).
+
+The OpenRouter connector therefore supports inference and can transport an SSE
+*payload*, but it does not provide live token streaming. The provider path uses the
+connector only for a small JSON authorization exchange, then streams directly
+through a shared Cloude Node service:
 
 ```text
 provider CLI
-  -> per-session class-A Sprites connector
-     (Fly authorizes session:<sessionId> and injects the session credential)
-  -> /internal/session/:sessionId/inference/:provider/...
-  -> Worker
-     (validate the session credential, resolve the session user, refresh D1 OAuth)
+  -> Sprite-local inference proxy (inside the vm-agent)
+     -> per-session class-A connector
+        -> POST /internal/session/:sessionId/inference-token
+           (Fly authorizes the Sprite; the DO mints a five-minute admission ticket)
+     -> direct Cloude Node provider proxy
+        (ticket validation + current provider access material via Worker control RPC)
   -> provider API
 ```
 
@@ -20,59 +33,108 @@ Provider authorization is derived from the authenticated session. Connecting,
 disconnecting, or rotating a provider changes only the encrypted provider record; it
 does not create or edit a Sprites connector.
 
-Provider requests intentionally bypass the transparent MITM proxy. Claude and Codex
-already support custom bases, so their bases point directly to path prefixes under
-the session connector gateway:
+Provider requests intentionally bypass both the Sprites streaming gateway and the
+transparent class-B MITM proxy. Claude and Codex point at provider-specific paths on
+the Sprite-local inference proxy:
 
 ```text
-<session-connector-base>/internal/session/<sessionId>/inference/claude
-<session-connector-base>/internal/session/<sessionId>/inference/codex
+http://127.0.0.1:<port>/claude
+http://127.0.0.1:<port>/codex
 ```
 
-The CLIs append their normal protocol paths to those prefixes. The same connector
-also carries webhook and ephemeral Git token mint/refresh traffic. Post-clone Git
-smart-HTTP goes directly to the Worker using the ephemeral Git token. The
-connector policy remains immutable and scoped only to `session:<sessionId>`.
-After Fly's gateway passes the Git `Accept` probe, post-clone Git returns to this
-connector and the interim token path is retired after older sessions drain.
+The CLIs append their normal protocol paths to those prefixes and send only fixed
+placeholders. For each actual provider HTTP request, the local inference proxy obtains
+a five-minute opaque inference admission ticket from the connector-authenticated JSON
+mint, removes the placeholder, and calls the Node proxy directly. The ticket is scoped
+to one session and provider, contains no provider credential, and is revoked with the
+session. It is analogous to the ephemeral Git token only in topology: it authorizes
+the Cloude proxy, not Anthropic, OpenAI, or OpenRouter.
 
-Claude's final Anthropic request can leave directly from the Worker. Codex's final
-ChatGPT request is delegated to one shared native egress shim because the spike
-observed ChatGPT's edge reject the corresponding workerd request. That shim is
-stateless and multi-tenant, not per user or per session:
+The Node proxy is the provider inference service, not a Codex-only shim. Ordinary
+Node egress is already proven to reach ChatGPT where workerd is rejected, and using
+the same service for Claude gives both providers one unbuffered transport:
 
 ```text
-Codex -> class-A connector -> Worker -> native HTTP egress shim -> ChatGPT
+Claude/Codex -> Sprite-local inference proxy -> direct Node provider proxy -> provider
+                                                    |
+                                                    +-> authenticated Worker control RPC
 ```
 
-The Worker remains the sole owner of D1 lookup and OAuth refresh. It sends the native
-shim only the current access token, ChatGPT account ID, allowlisted request data, and
-an internal service authorization over TLS. The shim never receives a refresh token,
-never selects a user, and never stores credentials.
+The Worker remains the sole owner of D1 lookup and OAuth refresh. On each new
+provider request, Node presents the inference admission ticket and request metadata
+over an authenticated control RPC. The Worker validates the ticket through the session
+DO, resolves the session user, refreshes D1 OAuth when needed, and returns only the
+current access material required for that provider request. Node never receives a
+refresh token, never selects a user, and never stores credentials.
+
+## Phase boundary and runtime placement
+
+This document is the implementation plan for S4. Provider inference is deliberately
+scheduled before the generic class-B connector work in S3/S5.
+
+The **Sprite-local inference proxy** is a new localhost HTTP boundary, not a deployed
+service or an already-existing component. For the first implementation it SHALL be
+hosted by the existing Bun vm-agent process:
+
+- listen only on `127.0.0.1` and start before Claude or Codex is launched;
+- share the vm-agent lifecycle and stop when the vm-agent exits;
+- fail provider startup closed if the listener or connector mint is unavailable; and
+- keep request bodies streaming and avoid writing admission tickets or provider
+  material to disk, process arguments, or logs.
+
+This boundary is necessary because AI SDK middleware runs before a provider
+`doStream()` call, while the Claude and Codex CLI processes can make multiple internal
+HTTP requests that AI SDK cannot observe. The localhost proxy sees every real provider
+request and can obtain admission immediately before forwarding it.
+
+The admission ticket is not another harness credential lifecycle. The local proxy
+SHALL mint one ticket for each incoming provider HTTP request and SHALL NOT cache it,
+refresh it in the background, or synchronize it with Claude/Codex authentication.
+Node checks that the ticket is valid when admitting the request; ticket expiry after
+admission does not terminate an already-authorized stream. The only refresh cycle is
+provider OAuth refresh in the Worker/D1 control plane.
+
+## Implementation sequence
+
+1. **S4.0:** make provider OAuth refresh safe across concurrent sessions.
+2. **S4.1c:** deploy the shared Node provider proxy and prove ordinary Node egress to
+   both Anthropic and ChatGPT.
+3. **S4.2:** add the connector-authenticated `/inference-token` JSON mint and DO-held
+   admission-ticket verification state.
+4. **S4.3:** add the localhost listener to the Bun vm-agent, then configure Claude and
+   Codex to use its provider-specific bases and fixed placeholders.
+5. **S4.4:** implement the metadata-only Node/Worker control RPC and exact upstream
+   header/path reconstruction.
+6. **S4.5-S4.6:** prove isolation, revocation, unbuffered streaming, CLI/app-server
+   behavior, cancellation, refresh, errors, and capacity before rollout.
 
 ## Session authentication contract
 
-The class-A connector injects the session credential after the Sprite boundary. The
-provider route SHALL:
+The class-A connector injects the session credential only on the JSON admission-ticket
+mint. The route remains named `/inference-token`, but the returned value is a Cloude
+proxy admission ticket, not a provider credential. The flow SHALL:
 
-1. Resolve the session from `:sessionId`.
-2. Validate the connector-injected credential using the same Durable Object authority
-   as webhook and git.
-3. Resolve the provider credential from the authenticated session's user.
-4. Reject a missing, disconnected, revoked, or wrong-user provider record.
-5. Restrict the forwarded path to the protocol surface required by the selected
-   provider CLI.
+1. Resolve the session from `:sessionId` and validate the connector-injected
+   credential using the same Durable Object authority as webhook and Git minting.
+2. Mint a five-minute opaque admission ticket scoped to the session and requested
+   provider. Store only its server-side verification state in the session DO.
+3. Have the local inference proxy remove the CLI's fixed placeholder and present the
+   ticket directly to the Node provider proxy.
+4. Have Node validate the ticket through an authenticated Worker control RPC;
+   the Worker resolves the provider credential from the authenticated session's
+   user and rejects missing, disconnected, revoked, expired, or wrong-provider use.
+5. Restrict the forwarded method and path to the protocol surface required by the
+   selected provider CLI and stream the body entirely outside the connector and DO.
 
-The CLI must carry a non-secret placeholder to satisfy its own startup checks. The
-Worker never accepts that placeholder as authority. Prefer having the connector
-overwrite `Authorization`; if the connector preserves the placeholder, inject a
-separate header such as `X-Cloude-Session-Token` and authenticate only that header.
-This header-replacement behavior is the remaining final connector spike.
+The CLI must carry a non-secret placeholder to satisfy its startup checks. Neither
+the local inference proxy, Worker, nor Node accepts that placeholder as authority.
+The short-lived ticket is replayable only during its TTL, so it is narrowly scoped,
+held in local-proxy memory for the request, and revoked at teardown.
 
 The implementation may initially reuse the current Durable Object `webhook_token`
 storage field, but the credential's documented authority becomes the session's
-allowlisted webhook, git, and inference routes. It should be named a session
-control-plane token in new interfaces.
+allowlisted webhook, Git-token-mint, and inference-capability-mint routes. It should
+be named a session control-plane token in new interfaces.
 
 ## Claude Code
 
@@ -81,19 +143,18 @@ control-plane token in new interfaces.
 Claude Code has a documented LLM-gateway interface:
 
 ```sh
-export ANTHROPIC_BASE_URL="<session-connector-base>/internal/session/<sessionId>/inference/claude"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:<port>/claude"
 export ANTHROPIC_AUTH_TOKEN="cloude-placeholder"
 ```
 
-- `ANTHROPIC_BASE_URL` points to the Claude path under the session connector.
+- `ANTHROPIC_BASE_URL` points to the Claude path on the local inference proxy.
 - `ANTHROPIC_AUTH_TOKEN` is a literal, non-secret placeholder. Claude requires a
   credential source to skip first-run login and sends the value as
   `Authorization: Bearer cloude-placeholder`.
-- Fly authorizes the calling Sprite from the connector's session-label policy and
-  injects the real session credential after the Sprite boundary.
-- The Worker validates that credential, resolves the session user, reads/refreshes
-  the encrypted `ClaudeOAuthService` record, and overwrites downstream authorization
-  with the current Anthropic OAuth access token.
+- The local inference proxy ignores the placeholder, mints an admission ticket through
+  the session connector, and sends the request directly to the Node provider proxy.
+- Node validates the ticket through the Worker control RPC, receives only the
+  current Anthropic access material, and overwrites downstream authorization.
 
 This uses Claude's documented [`ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`](https://code.claude.com/docs/en/env-vars) behavior.
@@ -103,14 +164,22 @@ specifically recommends `ANTHROPIC_AUTH_TOKEN` for a bearer-authenticated gatewa
 proxy. The [LLM gateway documentation](https://code.claude.com/docs/en/llm-gateway)
 describes the same configuration shape.
 
-### Worker contract
+The required authorization/header transformation is exact:
 
-The Claude inference route SHALL:
+| Hop | Required authority and headers |
+| --- | --- |
+| Claude Code -> local inference proxy | `ANTHROPIC_AUTH_TOKEN` produces `Authorization: Bearer cloude-placeholder`; the placeholder has no authority. Preserve Claude protocol headers. |
+| Local inference proxy -> Node | Remove the placeholder authorization and present the newly minted inference admission ticket as Cloude proxy authority. |
+| Node -> Anthropic | Remove `x-api-key` and competing authorization; set `Authorization: Bearer <current OAuth access token>`; ensure `anthropic-beta` includes `oauth-2025-04-20`; preserve the remaining allowlisted Claude protocol headers. |
 
-1. Accept only the connector-injected session credential; never treat
+### Node/Worker contract
+
+The Claude inference path SHALL:
+
+1. Accept only the short-lived inference admission ticket; never treat
    `cloude-placeholder` as authority.
 2. Resolve exactly one authenticated session user and that user's `claude`
-   credential.
+   credential through the Node-to-Worker control RPC.
 3. Restrict forwarding to the Claude API paths required by the supported CLI version.
 4. Remove `x-api-key`, replace `Authorization` with the refreshed D1-custodied OAuth
    access token, and ensure `anthropic-beta` includes `oauth-2025-04-20`.
@@ -146,10 +215,9 @@ Sprite against a local Worker exposed through `webhooks.bze.llc`:
   completed successfully.
 
 This proves Claude CLI/control-plane compatibility and that provider OAuth can remain
-server-side. It does not yet prove the final Sprites connector hop: the spike put a
-short-lived internal Worker JWT in the Sprite because no connector was present. The
-final connector test must use the class-A session connector and prove the Worker
-receives an unambiguous connector-injected authority while ignoring the placeholder.
+server-side. It does not yet prove the production local-proxy/ticket/Node path: the
+spike put a short-lived internal Worker JWT in the Sprite and streamed through the
+Worker before the Sprites buffering limitation was confirmed.
 
 ### Claude acceptance tests
 
@@ -157,10 +225,12 @@ Before enabling Claude provider proxying:
 
 - Run bare interactive `claude` and `claude -p` without a login prompt.
 - Prove `echo "$ANTHROPIC_AUTH_TOKEN"` reveals only the fixed placeholder.
-- Prove another Sprite and an off-Sprite caller cannot use the session connector.
+- Prove another Sprite and an off-Sprite caller cannot mint an inference admission ticket.
+- Prove an extracted ticket is provider/session scoped, expires within five
+  minutes, and is rejected after teardown.
 - Exercise streamed text, tool calls, long responses, interruption/resume, errors,
   and context compaction without buffering or protocol corruption.
-- Capture the required request-path set and deny every other Worker proxy path.
+- Capture the required request-path set and deny every other Node proxy path.
 - Verify refresh during an active session and a clean failure for revoked OAuth.
 - Verify access/refresh tokens and the session connector credential are absent from
   Sprite files, environment, process arguments, and logs.
@@ -183,17 +253,26 @@ model_provider = "cloude_proxy"
 
 [model_providers.cloude_proxy]
 name = "OpenAI"
-base_url = "<session-connector-base>/internal/session/<sessionId>/inference/codex"
+base_url = "http://127.0.0.1:<port>/codex"
 wire_api = "responses"
 env_key = "CLOUDE_CODEX_AUTH_TOKEN"
 http_headers = { version = "<installed-codex-version>" }
 ```
 
+In production, `base_url` is the Codex path on the local inference proxy.
 `CLOUDE_CODEX_AUTH_TOKEN` contains only a fixed placeholder. Codex 0.144.3 accepted
-this custom-provider shape without `auth.json` and sent the value as
+the custom-provider shape without `auth.json` and sent the value as
 `Authorization: Bearer ...` to `POST <base_url>/responses`. This follows Codex's
 documented [custom model-provider
 configuration](https://developers.openai.com/codex/config-advanced#custom-model-providers).
+
+The Codex authorization/header transformation follows the same boundary:
+
+| Hop | Required authority and headers |
+| --- | --- |
+| Codex -> local inference proxy | `CLOUDE_CODEX_AUTH_TOKEN` produces placeholder bearer authorization; preserve the configured Codex `version` header. |
+| Local inference proxy -> Node | Remove placeholder authorization and present the newly minted inference admission ticket as Cloude proxy authority. |
+| Node -> ChatGPT | Remove competing authorization, cookies, forwarding, tunnel, and proxy-loop headers; set `Authorization: Bearer <current OAuth access token>` and the credential record's `ChatGPT-Account-ID`; preserve only the allowlisted Responses protocol headers. |
 
 ### Live spike evidence — 2026-07-23
 
@@ -290,33 +369,35 @@ model](https://developers.cloudflare.com/workers/reference/security-model/),
 and [TCP socket restrictions](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)
 describe the platform-mediated transport differences.
 
-### Shared native egress shim contract
+### Shared Node provider-proxy contract
 
-The production Codex flow SHALL keep the Worker as the authenticated control plane
-and use a single shared native service only for the final ChatGPT hop:
+The production flow SHALL keep the Worker as the authenticated credential control
+plane and use one shared Node service as the streaming data plane for both providers:
 
-1. The Worker validates the class-A session credential and resolves the session user.
-2. The Worker reads/refreshes the encrypted Codex OAuth record.
-3. The Worker sends the allowlisted method, path, headers, streamed body, current
-   access token, and `ChatGPT-Account-ID` to the native shim over an authenticated
-   internal request.
-4. The shim verifies Worker service authorization; it never accepts a Sprite
-   credential directly.
-5. The shim rebuilds the upstream request, removes inbound `cf-*`, forwarding,
+1. The local inference proxy obtains a provider/session-scoped admission ticket
+   through the class-A connector and sends the provider request directly to Node.
+2. Node presents the ticket and allowlisted request metadata to the Worker over
+   an authenticated control request; no inference body crosses this RPC.
+3. The Worker validates the ticket through the DO, resolves the session user,
+   reads/refreshes the encrypted provider record, and returns only the current access
+   token plus required provider metadata. It never returns a refresh token.
+4. Node rebuilds the upstream request, removes inbound `cf-*`, forwarding,
    proxy-loop, cookie, `x-api-key`, and competing authorization headers, then adds
-   only the current OAuth authorization and account ID.
-6. The shim streams status, headers, and body without buffering or logging secrets.
+   only the current OAuth authorization and provider-required headers.
+5. Node streams status, headers, and body without buffering or logging secrets.
 
 The service is horizontally scalable and stateless. It does not access D1, refresh
-OAuth, map users, or participate in connector provisioning. It can be a small Node
-service using the now-proven ordinary `fetch`; Rust/reqwest is not required.
+OAuth, map users, or participate in connector provisioning. Ordinary Node `fetch`
+is already proven compatible with ChatGPT; Rust/reqwest is not required.
 
-### Remaining Codex acceptance work
+### Remaining provider acceptance work
 
-- Deploy the native shim on ordinary VM/container egress and prove the complete
-  `Sprite -> class-A connector -> Worker -> native shim -> ChatGPT` flow.
-- Prove the Worker-to-shim service credential cannot be replayed by a Sprite and
+- Deploy the Node proxy on ordinary VM/container egress and prove both complete
+  `Sprite CLI -> local inference proxy -> Node -> Anthropic/ChatGPT` flows.
+- Prove the Node-to-Worker service credential cannot be replayed by a Sprite and
   rotate it independently of provider credentials.
+- Prove the connector-authenticated admission-ticket mint, five-minute expiry, provider
+  scope, session revocation, and direct unbuffered stream.
 - Exercise `/responses`, `/models` if requested by the installed client, streamed
   text, tools, long responses, interruption/retry, compaction, and upstream errors.
 - Verify OAuth refresh and revocation during an active session.

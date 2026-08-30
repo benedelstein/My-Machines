@@ -15,8 +15,8 @@ data/control planes) are chosen so every prong composes.
    laptop, another org's Sprite, or after the session ends.
 2. **Protected upstream secrets out of the sandbox.** Webhook, GitHub installation,
    provider, and environment credentials never exist inside the Sprite. Fly injects
-   connector credentials downstream of the Sprite. Until Fly accepts Git
-   smart-HTTP content types, the connector exchanges its identity-bound session
+   connector credentials downstream of the Sprite. The connector exchanges its
+   identity-bound session
    credential for a five-minute opaque ephemeral Git-proxy token. That narrow,
    expiring token is present in the Sprite process but is not an upstream
    credential. Refreshable provider OAuth remains in our
@@ -57,8 +57,8 @@ controls:
   valid. That token cannot push, and the Sprite receives the same repository
   contents through the clone. The initial clone is not proxied because the extra hop would add
   material latency to the largest git transfer.
-- **Interim ephemeral Git token exception:** until Fly accepts Git smart-HTTP content
-  types, root can extract and replay a ephemeral Git-proxy token for at most five
+- **Ephemeral Git token exception:** root can extract and replay an ephemeral
+  Git-proxy token for at most five
   minutes. It cannot reveal the GitHub token, cannot mint another token
   off-Sprite, and is revoked from DO SQLite at teardown.
 
@@ -86,18 +86,18 @@ Classify every outbound flow, and route each class exactly one way:
 
 | Class                             | Examples                             | Path                                                                                                            |
 | --------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| A. Credential → our control plane | webhook, Git mint, Claude/Codex inference | Sprite → **internal per-session connector** → Worker; Worker injects or delegates the final upstream credential |
+| A. Credential → our control plane | webhook, Git/inference admission mints, Claude/Codex inference | Sprite → **internal per-session connector** for identity-bound control calls; short-lived credentials authorize direct Git/provider data planes |
 | B. Credential → external upstream | environment header secret            | Sprite → transparent proxy → **environment connector** → upstream (injects the real secret, Sprites-custodied)  |
 | C. Direct egress allowed by environment | npm, pypi, github raw, user allowlist | **direct** according to `open`/`default`/`custom`/`locked` (no connector credential)                         |
 | D. Direct egress denied by environment  | hosts outside a restricted mode's rules | **denied** by that mode's external network policy; this class is empty under `open`                          |
 
-A connector is the single primitive for A and B: **Fly verifies Sprite identity →
-injects a connector credential → forwards.** Provider inference is class A because
-it enters our control plane under the same session identity as webhook and Git minting.
-Every class-A client is explicitly configurable — the vm-agent's webhook base, the
-ephemeral Git token mint, and the provider CLIs' custom base URLs are all written by
-our provisioning code — so **class A points directly at the connector gateway and
-never enters the transparent proxy**. The proxy solves exactly one problem:
+A connector is the identity primitive for A and the credential-injection primitive
+for B: **Fly verifies Sprite identity → injects a connector credential → forwards.**
+Provider inference is class A because its short-lived admission ticket is minted under the
+same session identity as webhook and Git minting. Every class-A client is explicitly
+configurable: webhook calls the connector, Git and the local inference proxy mint credentials
+through it, Git data calls the Worker directly, and provider data calls the Node proxy
+directly. **Class A never enters the transparent proxy.** The proxy solves exactly one problem:
 class-B upstreams are called by _unmodified, arbitrary_ tools that address the
 real hostname and cannot be reconfigured (prong 3). The network policy
 independently enforces the environment's chosen C/D boundary; it is not part of
@@ -116,7 +116,8 @@ flowchart LR
   subgraph sprite["Sprite VM — untrusted, root-capable"]
     agent["VM agent and Git<br/>webhook + Git mint = gateway<br/>Git data = Worker"]
     tools["Arbitrary unmodified tools"]
-    providerCli["Claude or Codex CLI<br/>custom base URL + non-secret placeholder"]
+    providerCli["Claude or Codex CLI<br/>localhost base + non-secret placeholder"]
+    inferenceProxy["Local inference proxy in vm-agent<br/>mint ticket; stream direct"]
     resolver["Local resolver<br/>class B host → reserved IP"]
     proxy["Transparent egress proxy<br/>route request; strip client auth"]
 
@@ -131,10 +132,10 @@ flowchart LR
   end
 
   subgraph control["Cloude control plane"]
-    worker["Cloudflare Worker<br/>webhook, Git, provider inference"]
+    worker["Cloudflare Worker<br/>webhook, credential mints,<br/>provider credential control"]
     sessionDo["SessionAgentDO<br/>SQLite messages + webhook token"]
     providerStore["Encrypted provider OAuth in D1<br/>provider auth + refresh logic"]
-    codexService["Shared native Codex egress shim<br/>ordinary Node/reqwest transport"]
+    providerProxy["Shared Node provider proxy<br/>ordinary native transport"]
   end
 
   subgraph upstreams["External upstreams"]
@@ -148,7 +149,9 @@ flowchart LR
   agent -.->|"all direct egress constrained by"| networkPolicy
   agent -->|"webhook + ephemeral Git token mint/refresh<br/>no protected upstream credential"| sessionConnector
   agent -->|"Git smart-HTTP + ephemeral Git token"| worker
-  providerCli -->|"class-A gateway + session/provider path<br/>placeholder only"| sessionConnector
+  providerCli -->|"provider request + placeholder"| inferenceProxy
+  inferenceProxy -->|"JSON inference-ticket mint"| sessionConnector
+  inferenceProxy -->|"direct provider request + ticket"| providerProxy
   proxy -->|"environment request<br/>no protected credential"| environmentConnector
 
   sessionConnector -->|"label match; inject session credential"| worker
@@ -158,9 +161,10 @@ flowchart LR
   worker -->|"resolve session by URL"| sessionDo
   worker -->|"server-held installation token"| github
   worker <-->|"load or refresh encrypted OAuth"| providerStore
-  worker -->|"replace downstream auth; stream"| anthropic
-  worker -->|"authenticated request with access token;<br/>no refresh token"| codexService
-  codexService -->|"replace downstream auth; stream"| chatgpt
+  providerProxy -->|"ticket metadata; authenticated control RPC"| worker
+  worker -->|"current access material;<br/>no refresh token"| providerProxy
+  providerProxy -->|"replace downstream auth; stream"| anthropic
+  providerProxy -->|"replace downstream auth; stream"| chatgpt
 ```
 
 There are three distinct credential hops:
@@ -170,8 +174,8 @@ There are three distinct credential hops:
    injects a narrowly scoped credential on the connector-to-control-plane or
    connector-to-upstream hop.
 3. For provider inference and Git, the control plane exchanges that internal
-   identity for the real upstream credential. The real OAuth or GitHub installation
-   token exists only on the final control-plane-to-provider hop.
+   identity for a short-lived Cloude credential. The real OAuth or GitHub
+   installation token exists only on the final control-plane-to-upstream hop.
 
 ## Connector taxonomy
 
@@ -184,21 +188,21 @@ the secret:
 - **Base URL:** our Worker (`WORKER_URL`), path-routed so one connector serves
   existing `/internal/session/:sessionId/{chunks|events}` and
   `/internal/session/:sessionId/git-token`, plus
-  `/internal/session/:sessionId/inference/{claude|codex}/...` (the gateway forwards
-  `base + <path after conn id>`). Every class-A client is configured **directly**:
-  provider CLIs point their supported custom base URL at the inference prefix, the
-  vm-agent's webhook base is the gateway URL, and the Git helper calls the
-  token-mint path. The Git data remote points directly at the Worker.
+  `/internal/session/:sessionId/inference-token`. Every class-A control client is
+  configured explicitly: the vm-agent's webhook base is the gateway URL, and the Git
+  helper and local inference proxy call their exact token-mint paths. Git data points
+  directly at the Worker; provider data points directly at the Node proxy.
   Class A never enters the transparent proxy — direct config means real TLS to the
-  gateway, no dependency on the local CA, resolver, or proxy process for our own
-  hottest paths (webhook output streaming and ephemeral Git token minting).
+  gateway/Worker/Node host, with no dependency on the local CA, resolver, or class-B
+  proxy process.
 - **Injected secret:** the existing **per-session control-plane token**, generated and
   stored by the session Durable Object in its SQLite. The Worker route resolves the
   Durable Object from the existing `:sessionId` path, and that Durable Object
   validates the gateway-injected token. There is no generic `/webhook` route or D1
   secret-to-session lookup. The implementation may retain the current
   `webhook_token` storage name initially, but its authority is explicitly broadened
-  to the session's allowlisted webhook, ephemeral-Git-token-mint, and inference routes.
+  to the session's allowlisted webhook, Git-token-mint, and inference-capability-mint
+  routes.
 - **Scope:** a **per-session label** (e.g. `session:<sessionId>`) set on the Sprite
   before the connector is minted; the connector policy is
   `sprite_labels: [session:<sessionId>]`. The API
@@ -207,7 +211,7 @@ the secret:
   binds this connector to this one Sprite.
 - **Paths:** endpoint allowlisting is mandatory for class A. Its base URL is the
   shared Cloude Worker, and the injected session token is valid only on the exact
-  webhook, ephemeral-Git-token-mint, provider-inference, and health paths for that session. An
+  webhook, Git-token-mint, inference-capability-mint, and health paths for that session. An
   off-allowlist Worker path MUST be rejected by the gateway before token injection.
 
 ### Environment connectors (class B) — per environment and hostname
@@ -327,9 +331,10 @@ session membership.
 
 ## Data plane: the transparent proxy (with every complication)
 
-**Class B only.** Webhook, ephemeral Git token mint/refresh, and provider traffic are
-explicitly configured to the gateway; Git smart-HTTP data is configured directly
-to the Worker. None touches this data plane, so the proxy, CA, resolver, and redirect rules are
+**Class B only.** Webhook and Git/inference capability mints are explicitly
+configured to the gateway; Git smart-HTTP is configured directly to the Worker and
+provider streams directly to the Node proxy. None touches this data plane, so the
+proxy, CA, resolver, and redirect rules are
 provisioned only when the session's environment defines at least one header
 credential. Sessions without class-B credentials get no MITM data plane at all.
 All components non-secret. Generalizes the proven `sprite-egress-proxy.mjs` from a
@@ -470,19 +475,21 @@ Ordered:
    **mint the internal connector** (base = Worker, token = session token, policy =
    `session:<sessionId>`); verify the policy and store connector metadata in D1.
    The token remains in Durable Object SQLite and is never handed to the Sprite.
-4. Configure every class-A client **directly** against the session connector
-   gateway: the vm-agent's webhook base, the ephemeral Git token mint, and compatible
-   provider CLIs (inference path + non-secret local placeholder). Then, **only if
-   the environment defines header credentials**, install the class-B data plane:
+4. Configure the vm-agent webhook and the Git/inference admission mints against the
+   session connector gateway. Start the localhost inference proxy inside the Bun
+   vm-agent, configure provider CLIs with its localhost bases and non-secret
+   placeholders, and allow its direct Node proxy destination.
+   Then, **only if the environment defines header credentials**, install the class-B data plane:
    toolchain, local CA + trust, local resolver, transparent proxy + **routing
    table** (each environment credential host → its immutable class-B connector;
    else block), dummy-destination redirect rules, and HTTP/1.1 protocol handling.
 5. Apply the environment's **final selected** network policy with connector-gateway
    reachability (`open`, `default`, `custom`, or `locked`).
-6. Hand the Sprite only non-secret config (its connector gateway base + routing);
-   start the agent.
-7. Teardown: delete the internal connector and Durable Object session token; tear
-   down the data plane and Sprite. Do not edit any class-B connector policy.
+6. Hand the Sprite only non-secret config (connector gateway base, provider proxy
+   base, and routing); start the agent.
+7. Teardown: revoke Git and inference capabilities, delete the internal connector
+   and Durable Object session token, then tear down the data plane and Sprite. Do not
+   edit any class-B connector policy.
 
 ## Cutovers
 
@@ -567,7 +574,7 @@ the webhook token; the connector custodies the forwarding copy; the Sprite has
 neither. Connector creation is the only control-plane operation that transfers the
 token from the session provisioning path to Sprites.
 
-### Git fetch and push after initial clone (interim class-A control plane)
+### Git fetch and push after initial clone (class-A control plane)
 
 Webhook and ephemeral Git token minting share the per-session connector because they
 share the same Worker base and session trust boundary. The GitHub installation
@@ -607,20 +614,9 @@ a literal token allowlist rather than content negotiation. Git hardcodes
 headers, so Git data cannot traverse the connector. New sessions authenticate
 the small JSON token mint through it, while legacy sessions retain their
 existing bearer path. Webhooks are unaffected because the vm-agent sends no
-`Accept`. This constrains S4: verify the provider CLIs' `Accept` headers before
-routing inference through the gateway.
-
-**Exit plan — return Git data to the connector.** The token path is an
-interim compatibility mechanism, not the target architecture. After Fly ships a
-fix, rerun `test:live:gateway-accept` and require Git's
-`application/x-git-*` requests to reach the Worker through the gateway. A support
-confirmation alone is not sufficient. Once verified, new session connectors add
-`/git-proxy/:sessionId/*` to their endpoint allowlist, both post-clone remotes
-point to the gateway URL, and the Worker authenticates those sessions only with
-the connector-injected session token. New sessions stop installing the credential
-helper and stop minting tokens. Existing ephemeral-token-mode sessions remain
-supported until migrated or drained, after which the mint endpoint, helper, and
-token state can be removed.
+`Accept`. The 2026-08-27 managed OpenRouter probe confirmed the same gateway also
+buffers provider SSE, so S4 uses it only for a JSON capability mint and streams
+provider bytes directly through Node.
 
 **Future optimization — move the git data plane out of the Durable Object
 (recorded 2026-07-27).** As implemented, the git-proxy route hands the raw
@@ -651,25 +647,42 @@ be removed immediately after clone and remote replacement.
 
 ### Provider inference (class A)
 
-Like every class-A flow, provider requests do not use the transparent proxy. Both
-CLIs already support a custom base URL, so they call the session's class-A
-connector directly using a provider-specific path prefix. The placeholder satisfies client-side
-credential validation but is never trusted by the connector or Worker.
+Provider requests do not use the transparent class-B proxy. They also cannot use the
+Sprites connector as their streaming data plane: the 2026-08-27 managed OpenRouter
+probe returned `406` for `Accept: text/event-stream`, and returned a 19-event SSE
+body with fixed `Content-Length` only after buffering when the request used
+`Accept: application/json` (time-to-first-byte 1.6137s; total 1.6143s).
+
+The connector remains the Sprite-identity boundary for a small JSON admission-ticket
+mint. Both CLIs point at a localhost inference proxy hosted inside the existing Bun
+vm-agent and send a fixed placeholder. For each actual provider HTTP request, the
+local proxy mints a five-minute opaque Cloude admission ticket, then calls a shared
+Node provider proxy directly and streams the response. The ticket is scoped to the
+session and provider and contains no provider credential. It is minted on demand,
+never cached or background-refreshed, and is independent of the CLI harness's own
+authentication lifecycle. It only needs to be valid when Node admits the request.
+
+The local proxy listens only on `127.0.0.1`, starts before either CLI, shares the
+vm-agent lifecycle, and fails provider startup closed if unavailable. It is a logical
+request boundary inside the vm-agent, not another deployed service. AI SDK middleware
+cannot replace it because the provider CLI may issue multiple HTTP requests inside one
+AI SDK `doStream()` call.
 
 ```mermaid
 flowchart LR
   subgraph sprite["Sprite VM"]
-    claude["Claude Code<br/>ANTHROPIC_BASE_URL = Claude connector<br/>ANTHROPIC_AUTH_TOKEN = placeholder"]
-    codex["Codex<br/>custom Responses provider base<br/>non-secret placeholder"]
+    claude["Claude Code<br/>ANTHROPIC_BASE_URL = localhost proxy<br/>placeholder auth"]
+    codex["Codex<br/>localhost custom Responses base<br/>placeholder auth"]
+    localInferenceProxy["Inference proxy in Bun vm-agent<br/>mint ticket per HTTP request<br/>stream direct to Node"]
   end
 
   subgraph managed["Fly / Sprites-managed boundary"]
-    sessionConnector["Per-session class-A connector<br/>immutable session:{sessionId} policy"]
+    sessionConnector["Per-session class-A connector<br/>JSON inference-token mint only<br/>immutable session:{sessionId} policy"]
   end
 
   subgraph cloude["Cloude control plane"]
-    worker["Worker session inference routes<br/>validate injected session credential"]
-    codexRoute["Shared native Codex egress shim<br/>validate Worker service credential"]
+    worker["Worker credential control RPC<br/>validate ticket via DO<br/>refresh D1 OAuth"]
+    node["Shared Node provider proxy<br/>validate via Worker<br/>stream provider bytes"]
     credentials["Encrypted provider records in D1<br/>access token + refresh token"]
   end
 
@@ -678,51 +691,47 @@ flowchart LR
     openai["ChatGPT / OpenAI Responses transport"]
   end
 
-  claude -->|"Messages request + placeholder<br/>session/claude path"| sessionConnector
-  codex -->|"Responses request + placeholder<br/>session/codex path"| sessionConnector
+  claude --> localInferenceProxy
+  codex --> localInferenceProxy
+  localInferenceProxy -->|"JSON mint request"| sessionConnector
   sessionConnector -->|"label match; inject session credential"| worker
+  worker -->|"five-minute provider/session ticket"| localInferenceProxy
+  localInferenceProxy -->|"direct streamed request + ticket"| node
+  node -->|"authenticated metadata-only RPC"| worker
   worker <-->|"resolve session user; refresh when needed"| credentials
-  worker -->|"real Claude OAuth + required beta header<br/>stream request and response"| anthropic
-  worker -->|"access token + account id over<br/>authenticated private request"| codexRoute
-  codexRoute -->|"real ChatGPT OAuth<br/>stream request and response"| openai
+  worker -->|"current access material only<br/>never refresh token"| node
+  node -->|"OAuth Authorization; no x-api-key<br/>anthropic-beta includes oauth-2025-04-20"| anthropic
+  node -->|"OAuth Authorization + ChatGPT-Account-ID<br/>stream request and response"| openai
 ```
 
-The one class-A connector establishes session identity before either provider path.
-The Worker resolves the session's user and remains the sole owner of D1 access and
-OAuth refresh. Claude's final upstream request works directly from the Worker.
-Codex's final ChatGPT request is delegated to one shared, stateless native service
-because the spike observed ChatGPT's edge reject otherwise-equivalent workerd
-requests. The native shim is not a connector, is not per user, and receives no
-refresh token. It accepts only authenticated Worker calls, rebuilds an allowlisted
-request, strips inbound proxy metadata, and streams the response. See
-`provider-proxying.md` for the transport evidence and remaining uncertainty.
+The one class-A connector establishes session identity only for admission-ticket minting.
+The Node service is the provider inference proxy, not a Codex-only shim: ordinary
+Node egress is already proven to reach ChatGPT where workerd is rejected, and using
+it for Claude too provides one unbuffered provider data plane. Node is shared,
+stateless, and multi-tenant. It receives only a current provider access token and
+required request metadata after authenticating to the Worker; it never receives a
+refresh token, selects a user, or accesses D1.
 
-**Constraint — validate-then-stream; the DO never carries inference bytes.**
-Inference streams are long-lived, per-turn, and latency-sensitive; routing them
-through the session DO would put minutes-long provider streams on the same
-single-threaded event loop as the session's webhook and WebSocket hot path. The
-inference routes MUST make exactly one small internal RPC to the DO per request
-— validate the gateway-injected session token against DO SQLite and return the
-authenticated session's user id — and then handle everything else Worker-side:
-the D1 OAuth read/refresh, provider egress, and response streaming. The DO hop
-is authentication only; no request or response body ever passes through the DO.
-This keeps the token's single source of truth (and instant revocation) in DO
-SQLite without putting the DO on the data path. If a measured need ever arises
-to remove the RPC entirely, the recorded escape hatch is storing a hash of the
-session token in `session_connectors` for stateless Worker-side validation — a
-hash is not the credential, so D1 custody intent is preserved — but prefer the
-RPC until then.
+**Constraint — authorize, then stream; the connector, DO, and Worker never carry
+inference bytes.** Inference streams are long-lived, per-turn, and latency-sensitive.
+The connector/DO hop mints the ticket. When Node receives the direct request, it
+makes one small authenticated metadata-only control RPC to the Worker. The Worker
+validates the ticket through the DO, resolves the user, refreshes D1 OAuth if
+needed, and returns current access material. Node then streams directly to the
+provider. Expiry after authorization does not terminate an already admitted stream;
+teardown revokes new use immediately.
 
 The existing refresh implementations already have a cross-session race: two Worker
 instances can read the same expiring user record, refresh outside a lock/version
 check, and then unconditionally upsert or mark the shared row as requiring
 reauthentication. Today this can happen when multiple sessions start fresh agent
 processes; process reuse does not refresh on every turn. Moving inference through
-the Worker does not create the race, but it invokes the refresh check per provider
-request and therefore increases exposure. The concurrency fix is tracked as a
-separate AI-auth change, but it is a production prerequisite for enabling S4:
-serialize refresh per user/provider or use optimistic versioning, and cover
-concurrent sessions plus refresh-token rotation.
+the proxy does not create the race, but its per-request control RPC invokes the
+refresh check more often and therefore increases exposure. This is a server-side
+provider OAuth race, not admission-ticket refresh in the Sprite. Tickets are minted
+once per actual provider request and never refreshed. Fix the OAuth race in the AI-auth
+area before production by serializing refresh per user/provider or using optimistic
+versioning, with concurrent-session and refresh-token-rotation coverage.
 
 ### Environment header credential (class B)
 
@@ -757,38 +766,35 @@ way, a direct request does not receive the connector credential.
 
 ## Staging (build order; each stage is a real subset, none undone later)
 
-The whole concept ships across stages that share one data model, one connector
-abstraction, and one proxy — so no stage requires redesigning another.
+The whole concept ships across stages with one connector abstraction and explicit
+provider/class-B data planes, so no stage requires redesigning another.
 
 - **S1 — connector spine + webhook.** REST-backed `mintConnector` + internal
   per-session connector + `session_connectors` D1 + webhook cutover. Proves
   identity-bound class-A end to end.
-- **S2 — post-clone git cutover.** Until Fly fixes Git content negotiation,
-  authenticate a ephemeral Git token mint through the connector and send Git
+- **S2 — post-clone git cutover.** Authenticate an ephemeral Git token mint through
+  the connector and send Git
   data directly to the Worker. New sessions reject and delete the legacy bearer.
   Initial clone remains direct with its contents-read-only installation token.
-  When the live gateway probe confirms the fix, switch new-session post-clone Git
-  data back to the connector, retire token issuance for new sessions, and
-  remove compatibility support after older sessions migrate or drain.
-- **S3 — transparent proxy data plane.** Toolchain, CA/trust, resolver, routing
-  table, dummy-destination redirect, class-C/gateway bypass. Exists solely to
-  enable class B (S5); webhook, Git minting, and provider CLIs stay on direct
-  gateway configuration and never migrate onto the proxy.
 - **S4 — provider inference through the control plane.** Claude is verified at the
   CLI/control-plane boundary: Claude Code 2.1.207 completed interactive and
   non-interactive inference using `ANTHROPIC_BASE_URL` and
   `ANTHROPIC_AUTH_TOKEN` while a Worker refreshed/read OAuth from D1 and injected it
-  upstream (`test:live:claude-oauth-control-plane-proxy`, 2026-07-23). Extend the
-  per-session connector with allowlisted provider paths and point Claude directly at
-  the session/Claude gateway prefix; verify connector header replacement with a
-  literal placeholder. Codex 0.144.3
-  also completed `gpt-5.4` inference from a fresh Sprite through an authenticated
-  native HTTP proxy using a short-lived non-provider bearer
+  upstream (`test:live:claude-oauth-control-plane-proxy`, 2026-07-23). Codex 0.144.3
+  completed `gpt-5.4` inference from a fresh Sprite through an authenticated native
+  HTTP proxy using a short-lived non-provider bearer
   (`test:live:codex-oauth-control-plane-proxy`, 2026-07-23). A manual follow-up also
   launched the normal interactive Codex TUI in the prepared Sprite with no
-  `auth.json`; it used only the temporary gateway bearer. Codex therefore needs a
-  shared native egress shim behind the Worker, strict tunnel-header stripping, OAuth
-  refresh, and the final class-A connector test. See `provider-proxying.md`.
+  `auth.json`. The 2026-08-27 managed OpenRouter probe proved Sprites buffers SSE,
+  so build provider inference next: connector-authenticated JSON admission-ticket
+  mint, a localhost proxy inside the Bun vm-agent, and one shared direct Node
+  streaming proxy for Claude and Codex.
+  See `provider-proxying.md`.
+- **S3 — transparent proxy data plane (after S4).** Toolchain, CA/trust, resolver,
+  routing table, dummy-destination redirect, and class-C/gateway bypass. It exists
+  solely to enable class B (S5); webhook and capability mints use the connector,
+  Git data uses the Worker, and provider streams use the direct Node proxy. None
+  migrates onto the class-B proxy.
 - **S5 — environment header credentials.** `environment_connectors` D1,
   definition UI/API, one connector per environment/hostname, routing-table +
   immutable environment-label wiring. General class B for the v1 auth shape.
@@ -799,17 +805,16 @@ abstraction, and one proxy — so no stage requires redesigning another.
   path; minimize, overlap with VM boot, and measure.
 - **Trust-store gaps** — enumerate the runtimes the agent uses that bypass the system
   CA; document handling; rely on the network policy as backstop.
-- **Codex native egress lifecycle** — base inference is confirmed through native
-  reqwest, and the same OAuth/account request also succeeds through Node's ordinary
-  `fetch`. Workerd requests received an edge HTML `403`; the exact WAF signal remains
-  unobservable, though Worker-origin metadata and the different TLS fingerprint are
-  concrete transport differences. Add a deployed Worker → authenticated native shim
-  → ChatGPT test, live D1 refresh/revocation in the Worker, `/models` if required,
-  tools, compaction, capacity, and deployment tests before rollout.
-- **Provider refresh concurrency (pre-existing)** — current Claude and Codex
-  refreshes are read/refresh/upsert without serialization or optimistic versioning.
-  Fix and test this in the AI-auth area before enabling the higher-frequency S4
-  inference proxy; it is not part of connector provisioning.
+- **Provider proxy lifecycle** — base inference is confirmed through native reqwest;
+  Node's ordinary `fetch` also reaches ChatGPT, while workerd receives an edge HTML
+  `403`. Deploy the shared Node proxy, prove direct unbuffered Claude and Codex
+  streams, lock down its Worker control RPC, and test `/models` if required, tools,
+  compaction, capacity, cancellation, backpressure, and deployment before rollout.
+- **Server-side provider OAuth refresh race (pre-existing)** — current Claude and
+  Codex refreshes can concurrently read the same record and overwrite a rotated
+  refresh token. This is not admission-ticket refresh in the Sprite; tickets are
+  minted once per actual request and never refreshed. Fix the OAuth race in
+  the AI-auth area with serialization or optimistic versioning before production.
 - **Custom-header REST shape** — the verified REST request uses ordinary header mode
   and therefore only `Authorization`. Before S5, obtain and live-test the API field
   for a custom header name and generalize the request schema. Until that passes, the
@@ -855,13 +860,17 @@ abstraction, and one proxy — so no stage requires redesigning another.
 - Initial clone through connector? **No** — retain the current short-lived,
   contents-read-only installation token in the Sprite for clone latency. Protect
   post-clone fetch and push with connector-minted ephemeral tokens sent directly to
-  the Worker only while Fly rejects Git content types. Once the live gateway probe
-  confirms Git's media types pass, route post-clone fetch and push through the
-  per-session connector again and retire the interim token path.
+  the Worker because Git smart-HTTP media types cannot traverse the connector.
+- Provider streaming through a connector? **No (live tested 2026-08-27)** — a
+  managed OpenRouter connector returned `406` for a bare SSE `Accept` and buffered a
+  19-event SSE response behind a fixed `Content-Length` when sent with JSON `Accept`.
+  Use the connector only to mint a short-lived inference admission ticket; send provider
+  bytes directly through the Node proxy.
 - Transparent redirect loop? **Avoided structurally** — only the dummy destination
-  returned for class-B hosts is redirected; webhook, Git mint/refresh, and provider
-  CLIs use the gateway while Git smart-HTTP uses the direct Worker URL.
-  Class-C/gateway destinations are never intercepted.
+  returned for class-B hosts is redirected; webhook and Git/inference capability
+  mints use the gateway, Git smart-HTTP uses the direct Worker URL, and provider
+  streams use the direct Node proxy. Class-C/gateway destinations are never
+  intercepted.
 - Does connector provisioning require a browser? **No** — the REST endpoint covers
   the required Custom API connector shape.
 - Async provisioning? **No** — synchronous, fail-closed.
@@ -875,5 +884,5 @@ abstraction, and one proxy — so no stage requires redesigning another.
   `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` gateway mode. Gateway mode omitted
   `oauth-2025-04-20`, so the Worker added it while loading/refreshing the real OAuth
   credential from D1 and injecting it only on the Anthropic hop. This proves
-  provider compatibility, not the final Sprites connector identity/scoping or
-  placeholder-overwrite layer; see `provider-proxying.md`.
+  provider compatibility, not the final local-proxy/ticket/Node path; see
+  `provider-proxying.md`.

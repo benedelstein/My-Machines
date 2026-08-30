@@ -1,19 +1,21 @@
 ## ADDED Requirements
 
-### Requirement: Protected credentials stay outside the Sprite with narrow Git exceptions
+### Requirement: Protected credentials stay outside the Sprite with narrow delegated exceptions
 
 The system SHALL keep webhook, upstream GitHub, provider, and environment credentials
 out of the Sprite runtime. Fly SHALL authorize the specific Sprite and inject a
 connector credential downstream. For refreshable provider OAuth, the connector
-credential SHALL authenticate a control-plane inference proxy, and that proxy SHALL
-refresh/read the encrypted provider credential and inject it only on the provider
-hop. The initial repository clone MAY retain the existing short-lived,
+credential SHALL authenticate a five-minute inference-admission-ticket mint. A direct
+Cloude Node proxy SHALL validate that ticket through the control plane, and the
+control plane SHALL refresh/read the encrypted provider credential and make only the
+current access material available to Node for the provider hop. The initial repository clone MAY retain the existing short-lived,
 contents-read-only GitHub installation token inside the Sprite to avoid proxying the
-bulk clone transfer. While Fly rejects Git smart-HTTP content types, the
-connector MAY exchange its identity-bound session credential for a five-minute
-opaque ephemeral Git-proxy token. This interim token SHALL be scoped to the
-session Git proxy, stored and validated in the session DO, and SHALL NOT contain
-or expose a GitHub credential.
+bulk clone transfer. The connector SHALL exchange its identity-bound session
+credential for a five-minute opaque ephemeral Git-proxy token. This token SHALL be
+scoped to the session Git proxy, stored and validated in the session DO, and SHALL
+NOT contain or expose a GitHub credential. The inference admission ticket SHALL likewise
+be opaque, session/provider scoped, revocable, and SHALL NOT contain or expose a
+provider credential.
 
 #### Scenario: Secret is required for an outbound call
 
@@ -23,51 +25,61 @@ or expose a GitHub credential.
 - **THEN** the upstream credential is injected downstream of the Sprite and is
   never present in the Sprite's env, files, process args, or
   trust-store-readable material
-- **AND** the interim ephemeral Git-proxy token is held only by the credential-helper
+- **AND** the ephemeral Git-proxy token is held only by the credential-helper
   process and expires within five minutes
+- **AND** the inference admission ticket is held only by the local inference proxy for the request
+  and expires within five minutes
 
 #### Scenario: Sprite is compromised
 
 - **WHEN** a process inside the Sprite reads all available Sprite state
 - **THEN** it obtains no webhook, GitHub, provider, or environment credential
-- **AND** any extracted interim ephemeral Git-proxy token expires within five minutes
-  and can be revoked immediately from DO SQLite
+- **AND** any extracted ephemeral Git-proxy token or inference admission ticket expires
+  within five minutes and can be revoked immediately from DO SQLite
 
 ### Requirement: Provider OAuth is injected through the session-scoped control plane
 
-For a compatible provider CLI, the system SHALL route inference through the
-session's existing class-A connector and a provider-specific path under
-`/internal/session/:sessionId/inference`. The Worker SHALL validate the
-connector-injected session credential, resolve the provider credential from the
-authenticated session's user, refresh the encrypted OAuth record, replace client
-authorization, preserve provider protocol headers and streaming, and forward the
-response without exposing provider access or refresh tokens to the Sprite. Provider
-connection changes MUST NOT create or mutate a separate Sprites connector. Claude
-MAY egress directly from the Worker. For Codex, the Worker SHALL delegate only the
-final ChatGPT hop to a shared stateless native HTTP service.
+For a compatible provider CLI, the system SHALL use the session's existing class-A
+connector only for an exact JSON inference-admission-ticket mint. The provider CLI
+SHALL call a localhost inference proxy hosted by the existing Bun vm-agent with a
+non-secret placeholder; the local proxy SHALL obtain a five-minute
+session/provider-scoped admission ticket for each actual provider HTTP request and
+call a shared Cloude Node provider proxy directly. It SHALL NOT cache, background
+refresh, or synchronize tickets with the provider CLI. Node SHALL validate the ticket
+through an authenticated Worker control RPC. The Worker SHALL resolve the
+authenticated session user, refresh the
+encrypted OAuth record, and return only the current access material required for the
+request. Node SHALL replace client authorization, preserve provider protocol headers
+and streaming, and forward without exposing provider access or refresh tokens to the
+Sprite. The connector gateway, DO, and Worker MUST NOT carry inference bodies.
+Provider connection changes MUST NOT create or mutate a separate Sprites connector.
 
 #### Scenario: Claude runs with non-provider local credentials
 
 - **WHEN** an entitled Sprite runs Claude Code with `ANTHROPIC_BASE_URL` set to the
-  Claude path under its session connector gateway and `ANTHROPIC_AUTH_TOKEN` set to
+  Claude path on its localhost inference proxy and `ANTHROPIC_AUTH_TOKEN` set to
   a literal non-secret placeholder
-- **THEN** Claude skips interactive login and sends inference to the connector
-- **AND** Fly authorizes the Sprite and injects its session control-plane credential
-  that the Worker can unambiguously distinguish from the untrusted placeholder
-- **AND** the Worker injects the current D1-custodied Claude OAuth access token
-- **AND** the Worker adds the OAuth beta capability and the streamed inference
+- **THEN** Claude skips interactive login and sends inference to the local proxy as
+  `Authorization: Bearer cloude-placeholder`
+- **AND** the local proxy uses the connector only to mint a five-minute Claude
+  admission ticket, removes the placeholder authorization, and calls Node directly
+- **AND** Node validates through the Worker/DO control RPC and injects the current
+  D1-custodied Claude OAuth access token as bearer authorization
+- **AND** Node removes `x-api-key` and competing authorization, ensures
+  `anthropic-beta` includes `oauth-2025-04-20`, and the streamed inference
   completes
 
 #### Scenario: Codex runs through native control-plane egress
 
 - **WHEN** an entitled Sprite runs Codex with a custom Responses provider whose base
-  URL is the Codex path under its session connector gateway and whose bearer is a
+  URL is the Codex path on its localhost inference proxy and whose bearer is a
   non-provider placeholder
-- **THEN** Fly authorizes the Sprite and injects its session control-plane credential
-- **AND** the Worker validates the session, refreshes the current D1-custodied OAuth
-  record, and delegates only the final ChatGPT request to the native egress shim
-- **AND** the native shim injects the access token and `ChatGPT-Account-ID`
-- **AND** it removes inbound `cf-*`, forwarding, proxy-loop, cookie, and competing
+- **THEN** the local proxy mints a Codex inference admission ticket through the
+  connector and calls Node directly
+- **AND** Node validates through the Worker/DO control RPC, while the Worker refreshes
+  the current D1-custodied OAuth record and returns only current access material
+- **AND** Node injects the access token and `ChatGPT-Account-ID`
+- **AND** Node removes inbound `cf-*`, forwarding, proxy-loop, cookie, and competing
   credential headers before ChatGPT egress
 - **AND** the streamed inference completes without any provider OAuth credential
   entering the Sprite
@@ -75,8 +87,8 @@ final ChatGPT hop to a shared stateless native HTTP service.
 #### Scenario: Placeholder is extracted
 
 - **WHEN** a process in the Sprite reads `ANTHROPIC_AUTH_TOKEN`
-- **THEN** it obtains only a fixed placeholder that neither the connector nor Worker
-  accepts as authority
+- **THEN** it obtains only a fixed placeholder that neither the local inference proxy,
+  Worker, nor Node accepts as authority
 
 #### Scenario: Another session uses the same provider account
 
@@ -89,8 +101,20 @@ final ChatGPT hop to a shared stateless native HTTP service.
 #### Scenario: Provider authorization is replayed
 
 - **WHEN** an off-Sprite caller or a Sprite without the session label attempts to use
-  the session connector's inference path
-- **THEN** Fly rejects it before the session credential or provider OAuth can be used
+  the session connector's inference-admission-ticket mint
+- **THEN** Fly rejects it before a ticket or provider OAuth can be used
+- **AND** a previously extracted ticket is rejected outside its provider/session
+  scope, after its five-minute expiry, or after teardown revocation
+
+#### Scenario: One harness call produces multiple provider requests
+
+- **WHEN** one AI SDK `doStream()` call causes Claude, Codex, or the persistent Codex
+  app-server to issue multiple provider HTTP requests
+- **THEN** the local inference proxy observes each actual HTTP request and mints a
+  separate admission ticket immediately before forwarding it
+- **AND** it does not keep a ticket cache or run a ticket refresh cycle
+- **AND** ticket expiry after Node admits a request does not terminate that request's
+  active stream
 
 #### Scenario: Initial private repository clone
 
@@ -261,10 +285,10 @@ through destination-targeted iptables/nft redirection, MITM-terminates it with a
 Sprite-trusted local CA, strips the configured client credential header, and
 rewrites requests to the single connector gateway URL assigned to that hostname,
 failing closed for unrouted destinations. Class-A traffic SHALL NOT enter the
-proxy: webhook, ephemeral Git token mint/refresh, and provider CLI traffic are
-explicitly configured to the connector gateway. Git smart-HTTP data is
-explicitly configured directly to the Worker. Class-C and gateway traffic SHALL
-not enter the proxy. The proxy, CA, resolver, and redirect
+proxy: webhook and Git/inference capability mints are explicitly configured to the
+connector gateway. Git smart-HTTP data is configured directly to the Worker, and
+provider streams are configured directly to the Cloude Node proxy. Class-C and
+gateway traffic SHALL not enter the proxy. The proxy, CA, resolver, and redirect
 rules SHALL be installed only for sessions whose environment defines at least one
 class-B credential.
 
@@ -345,8 +369,8 @@ redirection cannot be established.
 The system SHALL authorize each protected upstream credential by the caller's verified Sprite
 identity (the connector gateway's access policy), not by possession of a bearer
 secret, so that an extracted credential cannot be replayed from anywhere other than
-the authorized Sprite. The interim ephemeral Git-proxy token is a delegated, short-lived
-exception governed by its separate requirement below.
+the authorized Sprite. The ephemeral Git-proxy token and inference capability are
+delegated, short-lived exceptions governed by their separate requirements.
 
 #### Scenario: Extracted credential replayed from off-Sprite
 
@@ -367,10 +391,10 @@ one Custom API connector scoped to that label. The connector SHALL inject the
 existing Durable Object session token (currently stored as `webhook_token`). The
 Worker SHALL resolve the Durable Object from each allowlisted route's `:sessionId`,
 and the Durable Object SHALL validate the injected token from its SQLite. The same
-connector and token SHALL authorize webhook, ephemeral Git token minting, and provider
-inference paths; no provider-specific connector SHALL be created. The class-A
+connector and token SHALL authorize webhook, ephemeral Git token minting, and the
+inference-capability mint; no provider-specific connector SHALL be created. The class-A
 connector SHALL set `allowed_endpoints` to the exact session webhook,
-ephemeral-Git-token-mint, provider-inference, and
+ephemeral-Git-token-mint, inference-capability-mint, and
 health paths. It MUST NOT authorize unrelated Worker paths.
 
 #### Scenario: Injected secret identifies the session
@@ -379,7 +403,7 @@ health paths. It MUST NOT authorize unrelated Worker paths.
   `/internal/session/:sessionId/chunks` or
   `/internal/session/:sessionId/events`,
   `/internal/session/:sessionId/git-token`, or
-  `/internal/session/:sessionId/inference/:provider/...` with the gateway-injected
+  `/internal/session/:sessionId/inference-token` with the gateway-injected
   token
 - **THEN** the Worker resolves the Durable Object from `:sessionId`
 - **AND** the Durable Object validates the token from its SQLite
@@ -405,12 +429,11 @@ that session.
 
 ### Requirement: ephemeral Git token minting is caller-identity-bound
 
-Until the connector accepts Git smart-HTTP content types, the system SHALL
-authenticate a short-lived ephemeral Git token mint through the per-session connector
-and route post-clone fetch and push directly to the Worker Git proxy. New sessions
-MUST stop accepting the legacy Sprite-held bearer and webhook token on the Git
-proxy endpoint, and SHALL retain expiry checks, branch validation, repo
-allowlisting, and Worker-custodied GitHub tokens. The initial clone MAY use the
+The system SHALL authenticate a short-lived ephemeral Git token mint through the
+per-session connector and route post-clone fetch and push directly to the Worker Git
+proxy. New sessions MUST stop accepting the legacy Sprite-held bearer and webhook
+token on the Git proxy endpoint, and SHALL retain expiry checks, branch validation,
+repo allowlisting, and Worker-custodied GitHub tokens. The initial clone MAY use the
 explicit contents-read-only token exception defined above.
 
 #### Scenario: Agent pulls and pushes
@@ -427,36 +450,6 @@ explicit contents-read-only token exception defined above.
   revocation
 - **AND** the off-Sprite caller cannot use it to mint or refresh another token
   because minting requires the connector-injected webhook token
-
-### Requirement: Git smart-HTTP returns to the connector after the gateway fix
-
-The direct-Worker token path SHALL be temporary. The system MUST NOT switch
-Git data back based only on a platform announcement: the live gateway `Accept`
-probe SHALL first demonstrate that Git's `application/x-git-*` requests reach the
-Worker without `406`. After that verification, newly provisioned sessions SHALL
-allowlist their session Git-proxy path on the per-session connector, configure
-both post-clone fetch and push remotes to the connector gateway, and accept only
-the gateway-injected session credential for those Git requests. New sessions
-SHALL stop installing the Git credential helper and minting ephemeral Git tokens.
-Ephemeral-token mode MAY remain available only for already-provisioned sessions until
-they are migrated or drained.
-
-#### Scenario: Fly's fix is verified
-
-- **WHEN** the live gateway probe confirms Git smart-HTTP `Accept` types reach the
-  Worker through the connector
-- **THEN** new post-clone Git fetch and push traffic traverses the per-session
-  connector
-- **AND** the gateway verifies Sprite identity and injects the session credential
-- **AND** the Sprite receives neither a ephemeral Git token nor an upstream GitHub
-  credential
-
-#### Scenario: Fly reports a fix but the probe still fails
-
-- **WHEN** Fly reports the limitation fixed but any Git smart-HTTP probe still
-  returns `406` or fails to reach the Worker
-- **THEN** the token path remains active and production Git remotes are not
-  switched
 
 ### Requirement: REST-backed Custom API connector creation
 
@@ -513,8 +506,10 @@ logs, or D1.
 
 ### Requirement: Synchronous fail-closed provisioning
 
-The system SHALL mint and scope the connector, configure class-A clients directly
-against the gateway, and — when the environment defines class-B credentials —
+The system SHALL mint and scope the connector, configure class-A control clients
+against the gateway, start the localhost inference proxy inside the Bun vm-agent,
+configure provider CLIs against that proxy
+and direct Node proxy, and — when the environment defines class-B credentials —
 install the egress proxy, CA, redirect rules, and routing table, all synchronously
 as part of session provisioning, and MUST fail session creation closed if any step
 does not complete.

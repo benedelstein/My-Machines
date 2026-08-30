@@ -57,8 +57,9 @@ coordinator runs the label migration first because it is earlier in the registry
   (same origin, unauthenticated), and its injected credential is the Durable
   Object's existing `webhook_token`. The token is never handed to the Sprite.
 - `allowedEndpoints` pins the session's own paths only: the two webhook routes,
-  the ephemeral Git token mint route, and `/health`. Git packfile traffic does not
-  traverse the connector while the gateway rejects Git smart-HTTP `Accept` types.
+  the ephemeral Git token mint route, and `/health`. S4 will add only the exact JSON
+  inference-capability mint route. Git packfiles and provider streams do not traverse
+  the connector.
 - `ServerState.sessionConnectorId` and the active D1 `session_connectors` row
   are locators only. Reconciliation reads each known id directly from Sprites,
   verifies provider, base URL, test URL, and the full order-insensitive access
@@ -103,18 +104,15 @@ What this means per flow:
   sessions retain their legacy `git_proxy_secret`. An extracted token is
   replayable off-Sprite while it remains valid; connector identity prevents an
   off-Sprite caller from minting or refreshing one, not replay during the TTL.
-- **The ephemeral Git token path is temporary.** When Fly fixes the gateway, rerun
-  `test:live:gateway-accept` and require Git's `application/x-git-*` requests to
-  reach the Worker before changing production routing. Then add the session's
-  Git-proxy path back to the connector allowlist, point post-clone fetch and push
-  remotes at the connector gateway, and authenticate them with the
-  gateway-injected session token. Stop installing the credential helper and
-  issuing ephemeral tokens for new sessions; retain ephemeral-token-mode compatibility
-  only until existing sessions have migrated or drained.
-- **Provider inference (S4): verify before building.** A client that sends a
-  bare `Accept: text/event-stream` for streaming would 406; one that sends
-  `application/json` (alone or alongside SSE) works. Check what the Claude and
-  Codex CLIs actually send before routing inference through the gateway.
+- **Provider inference cannot stream through the connector.** A managed OpenRouter
+  connector probe on 2026-08-27 proved both failure modes: `stream:true` with bare
+  `Accept: text/event-stream` returned `406`; with `Accept: application/json`, the
+  connector returned 19 SSE `data:` records behind a fixed `Content-Length`, with
+  time-to-first-byte (1.6137s) equal to total time (1.6143s). The OpenRouter
+  connector is useful for non-streaming/managed inference, but its presence does not
+  imply live SSE support. S4 therefore uses the session connector only for a small
+  JSON inference-capability mint. A localhost sidecar sends inference directly to
+  the Cloude Node provider proxy, which streams without the Sprites gateway.
 
 ## Existing sessions
 
