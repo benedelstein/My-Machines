@@ -11,15 +11,21 @@ history live in `openspec/changes/automate-sprites-custom-connectors/`.
 
 - **In-VM root is untrusted.** The agent process runs arbitrary code, so
   anything readable on the Sprite — files, env vars, process memory — is
-  extractable. Long-lived credentials therefore never rest on the VM.
+  extractable. Connector-backed session credentials therefore avoid resting on
+  the VM; provider OAuth is still on the current legacy delivery path until S4
+  provider proxying lands.
 - **Identity comes from the platform, not the VM.** Sprites carry
   `session:<sessionId>` labels that in-VM root cannot change. Fly's connector
   gateway verifies the calling Sprite's labels before injecting any credential,
   so possession of a URL is never authority by itself.
-- **Credentials are injected at boundaries the Sprite can't cross.** The
-  connector gateway injects session credentials after the identity check; the
-  Worker injects upstream credentials (GitHub installation tokens, provider
-  OAuth) after validating the session credential. The Sprite sees neither.
+- **Credentials are injected at boundaries the Sprite can't cross.** Implemented
+  connector flows inject the session credential after the identity check, and
+  the Worker injects GitHub installation tokens after validating that session
+  credential. The planned provider proxy applies the same boundary to provider
+  OAuth. Today `SpriteAgentProcessManager` loads provider credential snapshots
+  through `getProviderCredentialAdapter(...)`, passes provider env vars to the
+  vm-agent, and the vm-agent writes Claude/Codex files under
+  `/home/sprite/.claude/.credentials.json` or `/home/sprite/.codex/auth.json`.
 
 ## Credential classes
 
@@ -34,10 +40,11 @@ Every outbound flow is classified and routed exactly one way
 | D | Direct egress denied by environment | hosts outside a restricted mode's rules | Denied by network policy (empty under `open`) | **Implemented** |
 
 Class A never enters the transparent proxy. Webhooks and Git/inference capability
-mints point at the connector gateway; Git data points directly at the Worker; and
-provider CLIs point at a localhost sidecar that streams directly through the Cloude
-Node provider proxy. The proxy exists only for class B, where arbitrary unmodified
-tools address the real hostname and can't be reconfigured.
+mints point at the connector gateway, and Git data points directly at the Worker.
+In the S4 target design, provider CLIs point at a localhost sidecar that streams
+directly through the Cloude Node provider proxy. The transparent proxy exists
+only for class B, where arbitrary unmodified tools address the real hostname and
+can't be reconfigured.
 
 ## Implemented today
 

@@ -1,8 +1,8 @@
 /**
  * Drives the agent harness with webhook-based delivery. Stream chunks go
- * through the ChunkBatcher and land on POST /chunks; every other output
- * (sessionId, ready, heartbeat, error, debug, process_exit) goes on POST
- * /events, one event per request.
+ * through the ChunkBatcher and land on POST /chunks. Lifecycle outputs
+ * (ready, error, sessionId, process_exit) go on POST /events; ack, heartbeat,
+ * and debug outputs stay on stdout or local logs.
  */
 import {
   type AgentInputMessage,
