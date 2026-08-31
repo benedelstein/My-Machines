@@ -56,6 +56,7 @@ Active turn fields live in `server_state`:
   activeUserMessageId: string | null;
   activeTurnDispatchStatus: "claimed" | "dispatched" | null;
   agentProcessId: number | null;
+  agentProcessRunId: string | null;
   agentSessionId: string | null;
 }
 ```
@@ -92,12 +93,14 @@ If provisioning runs a startup script, `SessionProvisionService` sends stdout/st
 
 ## Webhooks
 
-Internal routes in `services/api-server/src/modules/session-agent/routes/internal.routes.ts` authenticate with a per-session bearer token stored as `webhook_token` in `SecretRepository`.
+Internal routes in `services/api-server/src/modules/session-agent/routes/internal.routes.ts` parse a bearer token from `Authorization` and pass it to the owning DO. For connector sessions, the Sprites gateway injects that bearer from the connector credential after verifying the Sprite label; for legacy sessions, the vm-agent sends the Sprite-held `DO_WEBHOOK_TOKEN`. The DO then compares the received token with `webhook_token` in `SecretRepository`.
 
 - `POST /internal/session/:sessionId/chunks` accepts `{ userMessageId, chunks: [{ sequence, chunk }] }`.
 - `POST /internal/session/:sessionId/events` accepts `{ event }` for non-stream agent events such as `ready`, `error`, `sessionId`, and `process_exit`.
 
 The vm-agent writes `ready`, `stdin_ack`, `cancel_ack`, and heartbeat messages to stdout for Sprite attach callers. It posts `ready`, provider `sessionId`, setup/runtime `error`, and final `process_exit` events to the webhook event route. `debug` and heartbeat outputs are local process/logging signals, not webhook events.
+
+`process_exit` carries `processRunId`. `AgentTurnCoordinator.handleProcessExit(...)` ignores the event unless it matches `server_state.agentProcessRunId`, which prevents stale exits from an older vm-agent process from clearing the currently tracked process.
 
 The vm-agent's `WebhookClient` retries network errors, `429`, and `5xx` responses with bounded exponential backoff. Non-retryable failures are logged and dropped; DO reconciliation handles missed tail state where possible.
 

@@ -203,14 +203,15 @@ never an authentication gate.
 - **Encrypted GitHub tokens**: GitHub access/refresh tokens are stored in
   `user_github_credentials`, encrypted with `TOKEN_ENCRYPTION_KEY`, and are
   persisted at OAuth time — before and independently of any client session.
-- **The code never reaches a client**: `/auth/callback` exchanges the
-  authorization code itself and forwards only an attempt id.
+- **The GitHub authorization code never reaches a client**: `/auth/callback`
+  exchanges it server-side and forwards only the attempt id plus the one-time
+  completion code needed to claim that attempt.
 - **Single-purpose one-time state**: OAuth state is consumed when the
   authorization response is validated. It is never reused as a completion or
   installation credential.
 - **Preview-origin allowlist**: `PREVIEW_ORIGIN_ALLOWLIST_REGEX` pins the Vercel
   project name *and* team slug as literals (e.g.
-  `^https://cloude-code-[a-z0-9][a-z0-9-]*-benedelsteins-projects\.vercel\.app$`).
+  `^https://my-machines-[a-z0-9][a-z0-9-]*-benedelsteins-projects\.vercel\.app$`).
   Vercel team slugs are globally unique. The prod origin (`WEB_ORIGIN`) is
   exempt. Validated both on write and on read.
 - **Allowlist**: only GitHub logins in `ALLOWED_GITHUB_LOGINS` can authenticate.
@@ -342,7 +343,7 @@ After credentials are missing or revoked, identity-only routes still work: `/aut
 
 ## Preview Branches
 
-Vercel preview branches share one GitHub App with prod, which means one callback URL. The callback lives on the api-server (`api.mymachines.dev/auth/callback`); GitHub redirects every sign-in there regardless of which web origin started it. The api-server reads the attempt's bound origin — recorded and re-validated server-side — and 302s the tab back to that origin's `/api/auth/github/complete?attemptId=<id>`.
+Vercel preview branches share one GitHub App with prod, which means one callback URL. The callback lives on the api-server (`api.mymachines.dev/auth/callback`); GitHub redirects every sign-in there regardless of which web origin started it. The api-server reads the attempt's bound origin — recorded and re-validated server-side — and 302s the tab back to that origin's `/api/auth/github/complete?attemptId=<id>&completionCode=<code>`.
 
 One browser rule forces this hop: cookies are origin-scoped, so the api-server on `api.mymachines.dev` cannot Set-Cookie for `<preview>.vercel.app` (different registrable domain). Both the temporary claim cookie and the session cookie must be written by the origin that started sign-in, which is why the BFF completion route exists.
 
