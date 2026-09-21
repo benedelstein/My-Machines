@@ -32,10 +32,10 @@ export const AgentSettingsClaude = z.object({
 export const OPENAI_CODEX_PROVIDER_ID = "openai-codex" as const;
 
 export const OpenAICodexModel = z.enum([
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
-  "gpt-6-astra",
   "gpt-5.5",
   "gpt-5.4",
   "gpt-5.4-mini",
