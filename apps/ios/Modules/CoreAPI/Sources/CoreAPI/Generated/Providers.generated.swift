@@ -140,6 +140,7 @@ public enum ClaudeEffort: RawRepresentable, Codable, Equatable, Sendable {
 }
 
 public enum ClaudeModel: RawRepresentable, Codable, Equatable, Sendable {
+    case claudeFable51
     case claudeFable5
     case claudeOpus5
     case claudeOpus48
@@ -150,6 +151,7 @@ public enum ClaudeModel: RawRepresentable, Codable, Equatable, Sendable {
 
     public init(rawValue: String) {
         switch rawValue {
+        case "claude-fable-5-1": self = .claudeFable51
         case "claude-fable-5": self = .claudeFable5
         case "claude-opus-5": self = .claudeOpus5
         case "claude-opus-4-8": self = .claudeOpus48
@@ -161,6 +163,7 @@ public enum ClaudeModel: RawRepresentable, Codable, Equatable, Sendable {
 
     public var rawValue: String {
         switch self {
+        case .claudeFable51: "claude-fable-5-1"
         case .claudeFable5: "claude-fable-5"
         case .claudeOpus5: "claude-opus-5"
         case .claudeOpus48: "claude-opus-4-8"
@@ -204,6 +207,7 @@ public enum OpenAICodexModel: RawRepresentable, Codable, Equatable, Sendable {
     case gpt56Sol
     case gpt56Terra
     case gpt56Luna
+    case gptAstra
     case gpt55
     case gpt54
     case gpt54Mini
@@ -218,6 +222,7 @@ public enum OpenAICodexModel: RawRepresentable, Codable, Equatable, Sendable {
         case "gpt-5.6-sol": self = .gpt56Sol
         case "gpt-5.6-terra": self = .gpt56Terra
         case "gpt-5.6-luna": self = .gpt56Luna
+        case "gpt-astra": self = .gptAstra
         case "gpt-5.5": self = .gpt55
         case "gpt-5.4": self = .gpt54
         case "gpt-5.4-mini": self = .gpt54Mini
@@ -233,6 +238,7 @@ public enum OpenAICodexModel: RawRepresentable, Codable, Equatable, Sendable {
         case .gpt56Sol: "gpt-5.6-sol"
         case .gpt56Terra: "gpt-5.6-terra"
         case .gpt56Luna: "gpt-5.6-luna"
+        case .gptAstra: "gpt-astra"
         case .gpt55: "gpt-5.5"
         case .gpt54: "gpt-5.4"
         case .gpt54Mini: "gpt-5.4-mini"
