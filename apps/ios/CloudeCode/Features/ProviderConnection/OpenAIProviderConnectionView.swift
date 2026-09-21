@@ -176,7 +176,7 @@ struct OpenAIProviderConnectionView: View {
             Image(.providerOpenai)
                 .resizable()
                 .renderingMode(.template)
-                .aspectRatio(contentMode: .fit)
+                .scaledToFit()
                 .frame(width: 17, height: 17)
             Text(title)
         }
@@ -203,9 +203,12 @@ struct OpenAIProviderConnectionView: View {
         openingChatGPT: Bool
     ) {
         UIPasteboard.general.string = authorization.userCode
+        let subtitle = openingChatGPT
+            ? "Opening ChatGPT…"
+            : "Paste it in ChatGPT to complete the authorizaton process."
         showToast?(
             title: "Code copied",
-            subtitle: openingChatGPT ? "Opening ChatGPT…" : "Paste it in ChatGPT to complete the authorizaton process.",
+            subtitle: subtitle,
             icon: Image(systemName: "square.on.square")
         )
     }

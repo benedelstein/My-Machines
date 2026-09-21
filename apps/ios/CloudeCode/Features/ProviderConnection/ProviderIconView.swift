@@ -6,7 +6,7 @@ struct ProviderIconView: View {
 
     var body: some View {
         providerImage
-            .aspectRatio(contentMode: .fit)
+            .scaledToFit()
             .accessibilityHidden(true)
     }
 

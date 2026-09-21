@@ -153,7 +153,8 @@ final class OpenAIProviderConnectionViewModel {
                     // Polling spans a trip to ChatGPT, so suspension routinely
                     // kills a request mid-flight. The attempt stays valid
                     // server-side; keep waiting instead of surfacing the error.
-                    Logger.info("OpenAI device authorization poll retrying after transient error: \(error.localizedDescription)")
+                    let reason = error.localizedDescription
+                    Logger.info("OpenAI device authorization poll retrying after transient error: \(reason)")
                 }
             }
         } catch is CancellationError {

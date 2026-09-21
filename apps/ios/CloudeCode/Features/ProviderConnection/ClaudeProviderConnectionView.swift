@@ -179,7 +179,7 @@ struct ClaudeProviderConnectionView: View {
             Image(image)
                 .resizable()
                 .renderingMode(.template)
-                .aspectRatio(contentMode: .fit)
+                .scaledToFit()
                 .frame(width: 17, height: 17)
             Text(title)
         }
