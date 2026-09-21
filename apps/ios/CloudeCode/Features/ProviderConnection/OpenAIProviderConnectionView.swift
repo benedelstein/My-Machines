@@ -203,7 +203,7 @@ struct OpenAIProviderConnectionView: View {
         openingChatGPT: Bool
     ) {
         UIPasteboard.general.string = authorization.userCode
-        let subtitle = openingChatGPT
+        let subtitle: LocalizedStringResource = openingChatGPT
             ? "Opening ChatGPT…"
             : "Paste it in ChatGPT to complete the authorizaton process."
         showToast?(
