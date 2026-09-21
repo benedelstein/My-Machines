@@ -8,6 +8,7 @@ export type AuthMethod = z.infer<typeof AuthMethod>;
 export const CLAUDE_PROVIDER_ID = "claude-code" as const;
 
 export const ClaudeModel = z.enum([
+  "claude-fable-5-1",
   "claude-fable-5",
   "claude-opus-5",
   "claude-opus-4-8",
@@ -34,6 +35,7 @@ export const OpenAICodexModel = z.enum([
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
+  "gpt-astra",
   "gpt-5.5",
   "gpt-5.4",
   "gpt-5.4-mini",

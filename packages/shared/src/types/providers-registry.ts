@@ -47,6 +47,7 @@ export type ProviderDefinition<
 // --- Claude -----------------------------------------------------------------
 
 export const CLAUDE_MODEL_DISPLAY_NAMES: Record<ClaudeModel, string> = {
+  "claude-fable-5-1": "Claude Fable 5.1",
   "claude-fable-5": "Claude Fable 5",
   "claude-opus-5": "Claude Opus 5",
   "claude-opus-4-8": "Claude Opus 4.8",
@@ -91,6 +92,7 @@ export const OPENAI_CODEX_MODEL_DISPLAY_NAMES: Record<OpenAICodexModel, string> 
   "gpt-5.6-sol": "5.6 Sol",
   "gpt-5.6-terra": "5.6 Terra",
   "gpt-5.6-luna": "5.6 Luna",
+  "gpt-astra": "GPT Astra",
   "gpt-5.5": "GPT-5.5",
   "gpt-5.4": "GPT-5.4",
   "gpt-5.4-mini": "GPT-5.4 Mini",
@@ -122,6 +124,7 @@ const OPENAI_CODEX_MODELS: ProviderModelDefinition<OpenAICodexModel>[] = [
     displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-5.6-luna"],
     isDefault: false,
   },
+  { id: "gpt-astra", displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-astra"], isDefault: false },
   { id: "gpt-5.5", displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-5.5"], isDefault: false },
   { id: "gpt-5.4", displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-5.4"], isDefault: false },
   {
