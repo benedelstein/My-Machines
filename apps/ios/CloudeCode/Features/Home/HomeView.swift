@@ -265,7 +265,7 @@ private struct RepoSectionHeader: View {
                 Image(.folderGit2)
                     .resizable()
                     .renderingMode(.template)
-                    .aspectRatio(contentMode: .fit)
+                    .scaledToFit()
                     .frame(width: 16, height: 16)
 
                 Text(group.repoFullName)
@@ -360,7 +360,7 @@ private struct SessionArtifactIcon: View {
             if let icon = artifactIcon {
                 Image(icon.0)
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .scaledToFit()
                     .foregroundStyle(icon.1)
             } else {
                 Color.clear
