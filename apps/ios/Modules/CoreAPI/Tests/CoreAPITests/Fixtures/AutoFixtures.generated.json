@@ -7,19 +7,19 @@
   },
   "AgentSettings.autoClaudeCode": {
     "provider": "claude-code",
-    "model": "claude-fable-5",
+    "model": "claude-fable-5-1",
     "effort": "low",
     "maxTokens": 1
   },
   "AgentSettingsClaude.autoFull": {
     "provider": "claude-code",
-    "model": "claude-fable-5",
+    "model": "claude-fable-5-1",
     "effort": "low",
     "maxTokens": 1
   },
   "AgentSettingsClaude.autoMinimal": {
     "provider": "claude-code",
-    "model": "claude-fable-5",
+    "model": "claude-fable-5-1",
     "effort": "low",
     "maxTokens": 1
   },
