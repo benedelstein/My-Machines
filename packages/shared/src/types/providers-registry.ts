@@ -89,10 +89,10 @@ export const CLAUDE_PROVIDER: ProviderDefinition<typeof CLAUDE_PROVIDER_ID, Clau
 // --- OpenAI Codex -------------------------------------------------------------
 
 export const OPENAI_CODEX_MODEL_DISPLAY_NAMES: Record<OpenAICodexModel, string> = {
+  "gpt-6-astra": "GPT-6 Astra",
   "gpt-5.6-sol": "5.6 Sol",
   "gpt-5.6-terra": "5.6 Terra",
   "gpt-5.6-luna": "5.6 Luna",
-  "gpt-astra": "GPT Astra",
   "gpt-5.5": "GPT-5.5",
   "gpt-5.4": "GPT-5.4",
   "gpt-5.4-mini": "GPT-5.4 Mini",
@@ -109,6 +109,7 @@ export const OPENAI_CODEX_EFFORT_DISPLAY_NAMES: Record<OpenAICodexEffort, string
 };
 
 const OPENAI_CODEX_MODELS: ProviderModelDefinition<OpenAICodexModel>[] = [
+  { id: "gpt-6-astra", displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-6-astra"], isDefault: false },
   {
     id: "gpt-5.6-sol",
     displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-5.6-sol"],
@@ -124,7 +125,6 @@ const OPENAI_CODEX_MODELS: ProviderModelDefinition<OpenAICodexModel>[] = [
     displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-5.6-luna"],
     isDefault: false,
   },
-  { id: "gpt-astra", displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-astra"], isDefault: false },
   { id: "gpt-5.5", displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-5.5"], isDefault: false },
   { id: "gpt-5.4", displayName: OPENAI_CODEX_MODEL_DISPLAY_NAMES["gpt-5.4"], isDefault: false },
   {
